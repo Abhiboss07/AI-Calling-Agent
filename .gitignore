@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables (NEVER commit secrets)
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Runtime
+logs/
+*.log
+tmp/
+temp/
+
+# Testing
+coverage/
+.nyc_output/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Git
+.git/
+.gitkeep
+
+# MongoDB
+data/
+*.db
+*.sqlite
+
+# AWS credentials (never commit)
+.aws/
+aws_keys.txt
+
+# Temporary
+*.tmp
+*.bak
+.vscode-test/

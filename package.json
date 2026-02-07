@@ -1,0 +1,34 @@
+{
+  "name": "ai-outbound-agent",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "jest --runInBand",
+    "healthcheck": "curl -f http://localhost:3000/health || exit 1",
+    "load-test": "node scripts/load-test.js",
+    "ingest-campaign": "node scripts/ingestCampaign.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.4.0",
+    "dotenv": "^16.0.0",
+    "express": "^4.18.2",
+    "express-ws": "^5.0.2",
+    "mongoose": "^7.0.0",
+    "twilio": "^4.6.0",
+    "uuid": "^9.0.0",
+    "form-data": "^4.0.0",
+    "mime-types": "^2.1.35",
+    "@aws-sdk/client-s3": "^3.350.0"
+  },
+  "devDependencies": {
+    "jest": "^29.6.0",
+    "nodemon": "^2.0.22",
+    "supertest": "^6.4.0"
+  }
+}

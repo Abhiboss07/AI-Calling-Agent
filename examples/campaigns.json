@@ -1,0 +1,42 @@
+[
+  {
+    "ownerId": "507f1f77bcf86cd799439011",
+    "name": "Invoice Reminder Campaign",
+    "script": {
+      "greeting": "Hello, this is {{company_name}} calling about an overdue invoice. Are you {{customer_name}}?",
+      "handle_yes": "Great! I'm calling to remind you about invoice {{invoice_number}} due on {{due_date}}. Can you help us process this today?",
+      "handle_no": "May I ask who I'm speaking with, and would you be able to help me reach {{customer_name}}?",
+      "handle_busy": "I understand you're busy. Would you like me to call back at a better time?",
+      "handle_angry": "I sincerely apologize for any inconvenience. I'll have someone from our team reach out to you shortly.",
+      "fallback": "Thank you for your time. Have a great day!",
+      "defaultReply": "Thank you. Goodbye."
+    },
+    "dialSettings": {
+      "concurrency": 5,
+      "retryPolicy": "exponential",
+      "maxRetries": 2,
+      "hours": "09:00-18:00"
+    },
+    "costBudgetPerMin": 2.5,
+    "createdAt": "2026-02-07T10:00:00Z"
+  },
+  {
+    "ownerId": "507f1f77bcf86cd799439011",
+    "name": "Appointment Confirmation",
+    "script": {
+      "greeting": "Hello {{customer_name}}, this is {{company_name}} confirming your appointment tomorrow at {{appointment_time}}.",
+      "handle_confirmed": "Perfect! We'll see you then. Thank you!",
+      "handle_reschedule": "I understand. Let me note that you need to reschedule. Someone will call you back to finalize new details.",
+      "fallback": "Thank you. We look forward to seeing you soon.",
+      "defaultReply": "Goodbye!"
+    },
+    "dialSettings": {
+      "concurrency": 5,
+      "retryPolicy": "exponential",
+      "maxRetries": 1,
+      "hours": "09:00-21:00"
+    },
+    "costBudgetPerMin": 2.5,
+    "createdAt": "2026-02-07T10:05:00Z"
+  }
+]
