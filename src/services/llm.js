@@ -2,8 +2,10 @@ const openai = require('./openaiClient');
 const logger = require('../utils/logger');
 const costControl = require('./costControl');
 const metrics = require('./metrics');
+const fs = require('fs');
+const path = require('path');
 
-// Strict voice agent system prompt enforcing professional, human-like conversational behavior
+// Default strict voice agent system prompt enforcing professional, human-like conversational behavior
 const VOICE_AGENT_SYSTEM_PROMPT = `You are a professional, human-sounding AI phone call agent for a business. You are calling users to complete ONE specific task from the campaign.
 
 CRITICAL RULES (NON-NEGOTIABLE):
@@ -29,11 +31,26 @@ ENDING CONDITIONS: Objective completed, user asks to stop, 2 failed attempts, ca
 
 FAILURE HANDLING: user busy=offer callback once then end; user angry=apologize once then end; wrong number=apologize then end; unclear audio=ask repeat once.`;
 
+// Allow overriding the system prompt via an environment-pointed file. If
+// `SYSTEM_PROMPT_FILE` is set in the environment, attempt to load it and
+// fall back to the built-in prompt on any error.
+let SYSTEM_PROMPT = VOICE_AGENT_SYSTEM_PROMPT;
+try{
+  const sp = process.env.SYSTEM_PROMPT_FILE;
+  if(sp){
+    const abs = path.isAbsolute(sp) ? sp : path.join(process.cwd(), sp);
+    const data = fs.readFileSync(abs, 'utf8');
+    if(data && data.trim().length) SYSTEM_PROMPT = data;
+  }
+}catch(e){
+  logger && logger.warn && logger.warn('Could not load SYSTEM_PROMPT_FILE, using default prompt', e.message||e);
+}
+
 async function generateReply({ callState, script, lastTranscript, customerName, callSid }){
   try{
     const user = `CUSTOMER: ${customerName||'unknown'}\nTRANSCRIPT: ${lastTranscript||'(silence)'}\nSTATE: ${JSON.stringify(callState)}\nSCRIPT: ${JSON.stringify(script)}\n\nGenerate NEXT agent response.`;
     const messages = [
-      { role: 'system', content: VOICE_AGENT_SYSTEM_PROMPT },
+      { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: user }
     ];
     metrics.incrementLlmRequest(true);
