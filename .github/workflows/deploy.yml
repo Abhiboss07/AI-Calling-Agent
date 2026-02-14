@@ -92,11 +92,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Lowercase image name
+        id: lower
+        run: echo "image_name=${IMAGE_NAME,,}" >> $GITHUB_OUTPUT
+        env:
+          IMAGE_NAME: ${{ github.repository }}
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ steps.lower.outputs.image_name }}
           tags: |
             type=sha,prefix=
             type=raw,value=latest
@@ -126,8 +132,8 @@ jobs:
       - name: Verify image
         run: |
           echo "Image digest: ${{ steps.build.outputs.digest }}"
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest node -e "console.log('Image OK')"
+          docker pull ${{ env.REGISTRY }}/${{ steps.lower.outputs.image_name }}:latest
+          docker run --rm ${{ env.REGISTRY }}/${{ steps.lower.outputs.image_name }}:latest node -e "console.log('Image OK')"
 
   # ════════════════════════════════════════════════════════════════════════════
   # STAGE 3: DEPLOY TO STAGING
