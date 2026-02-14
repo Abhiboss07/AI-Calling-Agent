@@ -2,18 +2,181 @@ const openai = require('./openaiClient');
 const storage = require('./storage');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
+const metrics = require('./metrics');
+const costControl = require('./costControl');
 
-async function synthesizeAndUpload(text){
-  try{
-    const audioBuffer = await openai.ttsSynthesize(text, 'alloy');
-    const key = `tts/${Date.now()}-${uuidv4()}.mp3`;
-    const url = await storage.uploadBuffer(Buffer.from(audioBuffer), key, 'audio/mpeg');
-    return url;
-  }catch(err){
-    logger.error('TTS error', err.message||err);
-    // Fallback to a simple Twilio-friendly short phrase hosted placeholder
-    return `https://example.com/tts/fallback.mp3`;
+// ══════════════════════════════════════════════════════════════════════════════
+// TTS SERVICE — OpenAI Speech Synthesis
+// ══════════════════════════════════════════════════════════════════════════════
+
+// In-memory LRU cache for frequently spoken phrases (avoid re-synthesis)
+// FIXED: Cache keyed by SHA-like hash of FULL text, not first 100 chars
+const ttsCache = new Map();    // fullText → { url, mulawBuffer }
+const MAX_CACHE = 50;
+
+function cacheKey(text) {
+  // Simple FNV-1a hash for fast unique key generation
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = (hash * 16777619) >>> 0;
+  }
+  return `${hash}_${text.length}`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// µ-LAW ENCODING (for bidirectional stream playback)
+// ══════════════════════════════════════════════════════════════════════════════
+const MULAW_BIAS = 0x84;
+const MULAW_CLIP = 32635;
+
+function pcm16ToMulaw(sample) {
+  if (sample > MULAW_CLIP) sample = MULAW_CLIP;
+  if (sample < -MULAW_CLIP) sample = -MULAW_CLIP;
+  const sign = (sample < 0) ? 0x80 : 0;
+  if (sign) sample = -sample;
+  sample = sample + MULAW_BIAS;
+  let exponent = 7;
+  const expMask = 0x4000;
+  for (; exponent > 0; exponent--) {
+    if (sample & expMask) break;
+    sample <<= 1;
+  }
+  const mantissa = (sample >> (exponent + 3)) & 0x0F;
+  return ~(sign | (exponent << 4) | mantissa) & 0xFF;
+}
+
+function pcmBufferToMulaw(pcmBuffer) {
+  const numSamples = Math.floor(pcmBuffer.length / 2);
+  const mulaw = Buffer.alloc(numSamples);
+  for (let i = 0; i < numSamples; i++) {
+    mulaw[i] = pcm16ToMulaw(pcmBuffer.readInt16LE(i * 2));
+  }
+  return mulaw;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RESAMPLE: OpenAI TTS outputs 24kHz, Twilio needs 8kHz
+// ══════════════════════════════════════════════════════════════════════════════
+// Simple 3:1 downsampling (24kHz → 8kHz) with averaging filter
+function resample24kTo8k(pcm24kBuffer) {
+  const numSamples24 = Math.floor(pcm24kBuffer.length / 2);
+  const numSamples8 = Math.floor(numSamples24 / 3);
+  const result = Buffer.alloc(numSamples8 * 2);
+
+  for (let i = 0; i < numSamples8; i++) {
+    // Average 3 samples for anti-aliasing
+    const idx = i * 3;
+    let sum = 0;
+    let count = 0;
+    for (let j = 0; j < 3 && (idx + j) < numSamples24; j++) {
+      sum += pcm24kBuffer.readInt16LE((idx + j) * 2);
+      count++;
+    }
+    const sample = Math.round(sum / count);
+    result.writeInt16LE(Math.max(-32768, Math.min(32767, sample)), i * 2);
+  }
+
+  return result;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// synthesizeRaw() — Returns µ-law buffer for DIRECT bidirectional stream playback
+// ══════════════════════════════════════════════════════════════════════════════
+// CRITICAL: This is the PRIMARY synthesis method. It returns µ-law audio
+// that can be sent directly through the WebSocket without any REST API calls.
+// This avoids the fatal bug where client.calls(sid).update({twiml}) kills
+// the <Connect><Stream>.
+async function synthesizeRaw(text, callSid) {
+  if (!text || text.trim().length === 0) {
+    logger.warn('TTS: empty text, skipping');
+    return null;
+  }
+
+  const cleanText = text.trim();
+  const key = cacheKey(cleanText);
+
+  // Check cache
+  if (ttsCache.has(key)) {
+    logger.debug('TTS cache hit:', cleanText.substring(0, 30));
+    return ttsCache.get(key);
+  }
+
+  const startMs = Date.now();
+
+  try {
+    metrics.incrementTtsRequest(true);
+
+    // Request PCM output from OpenAI TTS (wav format, easier to process)
+    const rawBuffer = await openai.ttsSynthesize(cleanText, 'alloy', 'pcm');
+    const synthMs = Date.now() - startMs;
+
+    if (!rawBuffer || rawBuffer.length === 0) {
+      logger.error('TTS returned empty buffer');
+      return null;
+    }
+
+    // OpenAI PCM output is 24kHz 16-bit mono
+    // Resample to 8kHz for Twilio
+    const pcm8k = resample24kTo8k(Buffer.from(rawBuffer));
+
+    // Encode to µ-law for Twilio bidirectional stream
+    const mulawBuffer = pcmBufferToMulaw(pcm8k);
+
+    logger.debug(`TTS raw: ${cleanText.length} chars → ${mulawBuffer.length} bytes µ-law (${synthMs}ms)`);
+
+    if (callSid) costControl.addTtsUsage(callSid, cleanText.length);
+
+    const result = { mulawBuffer, pcmBuffer: pcm8k };
+
+    // Cache
+    if (ttsCache.size >= MAX_CACHE) {
+      const firstKey = ttsCache.keys().next().value;
+      ttsCache.delete(firstKey);
+    }
+    ttsCache.set(key, result);
+
+    return result;
+  } catch (err) {
+    logger.error('TTS raw error:', err.message || err);
+    metrics.incrementTtsRequest(false);
+    return null;
   }
 }
 
-module.exports = { synthesizeAndUpload };
+// ══════════════════════════════════════════════════════════════════════════════
+// synthesizeAndUpload() — Returns a URL (for legacy/fallback use)
+// ══════════════════════════════════════════════════════════════════════════════
+async function synthesizeAndUpload(text, callSid) {
+  if (!text || text.trim().length === 0) {
+    logger.warn('TTS: empty text, skipping');
+    return null;
+  }
+
+  const cleanText = text.trim();
+
+  const startMs = Date.now();
+
+  try {
+    metrics.incrementTtsRequest(true);
+
+    const audioBuffer = await openai.ttsSynthesize(cleanText, 'alloy', 'mp3');
+    const synthMs = Date.now() - startMs;
+
+    const key = `tts/${Date.now()}-${uuidv4().substring(0, 8)}.mp3`;
+    const url = await storage.uploadBuffer(Buffer.from(audioBuffer), key, 'audio/mpeg');
+    const totalMs = Date.now() - startMs;
+
+    logger.debug(`TTS upload: ${cleanText.length} chars → ${(audioBuffer.length / 1024).toFixed(1)}KB (synth:${synthMs}ms total:${totalMs}ms)`);
+
+    if (callSid) costControl.addTtsUsage(callSid, cleanText.length);
+
+    return url;
+  } catch (err) {
+    logger.error('TTS upload error:', err.message || err);
+    metrics.incrementTtsRequest(false);
+    return null;
+  }
+}
+
+module.exports = { synthesizeRaw, synthesizeAndUpload };

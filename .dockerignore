@@ -1,0 +1,47 @@
+# ── Docker Ignore — Keep image lean ──────────────────────────────────────────
+# Without this, Docker copies EVERYTHING (node_modules, .git, frontend, etc.)
+# making the build slow and the image 500MB+
+
+node_modules
+npm-debug.log*
+.git
+.gitignore
+.env
+.env.*
+.vscode
+.idea
+
+# Frontend (has its own deployment)
+frontend
+
+# Documentation and reports
+*.md
+LICENSE
+
+# Tests
+tests
+coverage
+.nyc_output
+jest.config.*
+
+# Dev scripts
+scripts
+examples
+
+# Build artifacts
+dist
+build
+tmp
+temp
+logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Audit reports
+PRODUCTION_AUDIT_REPORT.md
+TELEPHONY_AUDIT_REPORT.md
+DEPLOYMENT.md
+QA_CHECKLIST.md

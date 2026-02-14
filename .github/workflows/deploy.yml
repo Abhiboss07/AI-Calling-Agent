@@ -1,0 +1,220 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# CI/CD PIPELINE — AI Calling Agent
+# ══════════════════════════════════════════════════════════════════════════════
+# Trigger: push to main, or PR to main
+# Stages:
+#   1. Lint + Test (every push)
+#   2. Build Docker image (main only)
+#   3. Deploy to staging (main only)
+#   4. Deploy to production (manual approval via environment)
+# ══════════════════════════════════════════════════════════════════════════════
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  NODE_VERSION: "20"
+
+# Cancel in-progress runs on same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 1: TEST
+  # ════════════════════════════════════════════════════════════════════════════
+  test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test -- --forceExit --runInBand
+        env:
+          NODE_ENV: test
+          TWILIO_ACCOUNT_SID: AC_TEST
+          TWILIO_AUTH_TOKEN: test_token
+          TWILIO_CALLER_ID: "+1234567890"
+          OPENAI_API_KEY: sk-test
+          MONGODB_URI: mongodb://localhost:27017/test
+
+      - name: Check production deps install
+        run: |
+          rm -rf node_modules
+          npm ci --omit=dev
+          node -e "require('./src/config'); console.log('✅ Production deps OK')"
+        env:
+          TWILIO_ACCOUNT_SID: AC_TEST
+          TWILIO_AUTH_TOKEN: test_token
+          TWILIO_CALLER_ID: "+1234567890"
+          OPENAI_API_KEY: sk-test
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 2: BUILD DOCKER IMAGE
+  # ════════════════════════════════════════════════════════════════════════════
+  build:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+      - name: Verify image
+        run: |
+          echo "Image digest: ${{ steps.build.outputs.digest }}"
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest node -e "console.log('Image OK')"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 3: DEPLOY TO STAGING
+  # ════════════════════════════════════════════════════════════════════════════
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build
+    environment: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to staging
+        run: |
+          # Option A: Kubernetes
+          # kubectl set image deployment/ai-calling-agent \
+          #   ai-calling-agent=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+          #   -n ai-calling-staging
+          # kubectl rollout status deployment/ai-calling-agent -n ai-calling-staging --timeout=120s
+
+          # Option B: Railway
+          # railway up --service ai-calling-agent --environment staging
+
+          # Option C: Docker Compose on VM
+          # ssh deploy@staging-server "cd /opt/ai-calling && docker compose pull && docker compose up -d"
+
+          echo "Staging deployment placeholder — configure for your platform"
+
+      - name: Verify staging health
+        run: |
+          # sleep 15  # Wait for container startup
+          # curl -sf https://staging.your-domain.com/health/ready || exit 1
+          echo "Staging health check placeholder"
+
+      - name: Run smoke tests
+        run: |
+          # curl -sf https://staging.your-domain.com/api/v1/metrics || exit 1
+          echo "Smoke tests placeholder"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 4: DEPLOY TO PRODUCTION (manual approval via GitHub environment)
+  # ════════════════════════════════════════════════════════════════════════════
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: deploy-staging
+    environment: production # Requires manual approval in GitHub settings
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to production
+        run: |
+          # kubectl set image deployment/ai-calling-agent \
+          #   ai-calling-agent=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+          #   -n ai-calling
+          # kubectl rollout status deployment/ai-calling-agent -n ai-calling --timeout=180s
+
+          echo "Production deployment placeholder — configure for your platform"
+
+      - name: Verify production health
+        run: |
+          # sleep 20
+          # for i in {1..5}; do
+          #   curl -sf https://api.your-domain.com/health/ready && break
+          #   sleep 5
+          # done
+          echo "Production health check placeholder"
+
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ Production deployment successful"
+          # curl -X POST "${{ secrets.SLACK_WEBHOOK }}" \
+          #   -H 'Content-type: application/json' \
+          #   -d '{"text":"✅ AI Calling Agent deployed to production: ${{ github.sha }}"}'
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed — initiating rollback"
+          # kubectl rollout undo deployment/ai-calling-agent -n ai-calling
+          # curl -X POST "${{ secrets.SLACK_WEBHOOK }}" \
+          #   -H 'Content-type: application/json' \
+          #   -d '{"text":"❌ AI Calling Agent deployment FAILED — auto-rollback triggered: ${{ github.sha }}"}'

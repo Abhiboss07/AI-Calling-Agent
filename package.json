@@ -1,30 +1,37 @@
 {
   "name": "ai-outbound-agent",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "private": true,
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "NODE_ENV=production node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "jest --runInBand",
-    "healthcheck": "curl -f http://localhost:3000/health || exit 1",
-    "load-test": "node scripts/load-test.js",
+    "test": "jest --runInBand --forceExit",
+    "test:ci": "jest --runInBand --forceExit --ci --coverage",
+    "healthcheck": "curl -sf http://localhost:3000/health/ready",
+    "load-test": "node scripts/load-test.js --connections=10 --duration=30",
+    "load-test:100": "node scripts/load-test.js --connections=100 --duration=60",
+    "docker:build": "docker build -t ai-calling-agent:latest .",
+    "docker:run": "docker compose up -d",
+    "docker:stop": "docker compose down",
+    "docker:logs": "docker compose logs -f app",
     "ingest-campaign": "node scripts/ingestCampaign.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.350.0",
+    "@aws-sdk/s3-request-presigner": "^3.990.0",
     "axios": "^1.4.0",
     "dotenv": "^16.0.0",
     "express": "^4.18.2",
     "express-ws": "^5.0.2",
+    "form-data": "^4.0.0",
+    "mime-types": "^2.1.35",
     "mongoose": "^7.0.0",
     "twilio": "^4.6.0",
     "uuid": "^9.0.0",
-    "form-data": "^4.0.0",
-    "mime-types": "^2.1.35",
-    "@aws-sdk/client-s3": "^3.350.0",
     "xmlbuilder2": "^3.0.2"
   },
   "devDependencies": {

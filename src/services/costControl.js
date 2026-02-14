@@ -1,17 +1,24 @@
 const logger = require('../utils/logger');
 
-// Track costs per call and campaign
-const costTracker = new Map(); // callSid -> {tokens: N, minutes: N, sttCount: N, ttsCount: N, ttsChars: N}
+// Track costs per call — bounded Map to prevent memory leaks
+const costTracker = new Map();
+const MAX_TRACKED = 1000; // Safety cap
 
 const COSTS = {
-  twiilio_per_min: 0.5,      // ₹0.5/min
-  whisper_per_min: 0.4,      // ₹0.4/min
-  gpt4o_mini_per_token: 0.00001,  // approx, depends on provider
-  tts_per_char: 0.00002       // approx ₹0.00002/char
+  twilio_per_min: 0.50,    // ₹0.50/min
+  whisper_per_min: 0.40,    // ₹0.40/min
+  gpt4o_mini_per_token: 0.00001, // ~₹0.00001/token
+  tts_per_char: 0.00002  // ~₹0.00002/char
 };
 
 function trackCall(callSid) {
-  costTracker.set(callSid, { tokens: 0, minutes: 0, sttCount: 0, ttsCount: 0, ttsChars: 0 });
+  // Prevent unbounded growth
+  if (costTracker.size >= MAX_TRACKED) {
+    const oldest = costTracker.keys().next().value;
+    costTracker.delete(oldest);
+    logger.warn('Cost tracker at capacity, evicted oldest entry');
+  }
+  costTracker.set(callSid, { tokens: 0, minutes: 0, sttCount: 0, ttsCount: 0, ttsChars: 0, startedAt: Date.now() });
 }
 
 function addTokenUsage(callSid, tokenCount) {
@@ -37,26 +44,39 @@ function addTtsUsage(callSid, charCount) {
 function getEstimatedCost(callSid) {
   const cost = costTracker.get(callSid);
   if (!cost) return 0;
-  const twiilioCost = cost.minutes * COSTS.twiilio_per_min;
-  const sttCost = cost.minutes * COSTS.whisper_per_min;
-  const gptCost = cost.tokens * COSTS.gpt4o_mini_per_token;
-  const ttsCost = cost.ttsChars * COSTS.tts_per_char;
-  const total = twiilioCost + sttCost + gptCost + ttsCost;
-  return total;
+  return (
+    cost.minutes * COSTS.twilio_per_min +
+    cost.minutes * COSTS.whisper_per_min +
+    cost.tokens * COSTS.gpt4o_mini_per_token +
+    cost.ttsChars * COSTS.tts_per_char
+  );
 }
 
 function isWithinBudget(callSid, maxCostRs) {
-  const estimated = getEstimatedCost(callSid);
-  return estimated < maxCostRs;
+  return getEstimatedCost(callSid) < maxCostRs;
 }
 
 function endCallTracking(callSid) {
   const finalCost = getEstimatedCost(callSid);
-  logger.log(`Call ${callSid} final cost: ₹${finalCost.toFixed(2)}`);
+  const entry = costTracker.get(callSid);
+  const durationMin = entry ? ((Date.now() - entry.startedAt) / 60000).toFixed(1) : '?';
+  logger.log(`Call ${callSid} ended — cost: ₹${finalCost.toFixed(2)}, duration: ${durationMin}min`);
   costTracker.delete(callSid);
   return finalCost;
 }
 
+// Periodic cleanup: remove stale entries older than 1 hour (orphan calls)
+setInterval(() => {
+  const now = Date.now();
+  for (const [sid, entry] of costTracker) {
+    if (now - entry.startedAt > 3600000) {
+      logger.warn('Cleaning stale cost entry', sid);
+      costTracker.delete(sid);
+    }
+  }
+}, 300000);
+
 module.exports = {
-  trackCall, addTokenUsage, addSttUsage, addTtsUsage, getEstimatedCost, isWithinBudget, endCallTracking
+  trackCall, addTokenUsage, addSttUsage, addTtsUsage,
+  getEstimatedCost, isWithinBudget, endCallTracking
 };

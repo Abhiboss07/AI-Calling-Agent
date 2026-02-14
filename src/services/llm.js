@@ -4,72 +4,148 @@ const costControl = require('./costControl');
 const metrics = require('./metrics');
 const fs = require('fs');
 const path = require('path');
+const config = require('../config');
 
-// Default strict voice agent system prompt enforcing professional, human-like conversational behavior
-const VOICE_AGENT_SYSTEM_PROMPT = `You are a professional, human-sounding AI phone call agent for a business. You are calling users to complete ONE specific task from the campaign.
-
-CRITICAL RULES (NON-NEGOTIABLE):
-- Speak like a calm, polite human. NEVER sound robotic or salesy.
-- Keep responses SHORT (1–2 sentences max, under 30 words).
-- NEVER interrupt the user. ALWAYS wait for the user to finish speaking.
-- NEVER hallucinate facts. NEVER go off-script.
-- If confused, repeat or rephrase the script only.
-- If the user asks something unrelated, politely redirect to the call purpose.
-- If the user is silent for 5 seconds, gently prompt once.
-- If silence continues, end the call politely.
-- End the call immediately if the user asks to stop.
-
-TONE: Friendly, Respectful, Neutral (not emotional, not robotic)
-
-LANGUAGE: Simple, natural English. Avoid complex words and filler sounds ("umm", "ahh").
-
-CALL FLOW (STRICT): 1. Greeting 2. Identity confirmation 3. Purpose of call 4. Handle response 5. Complete objective 6. Polite closure
-
-RESPONSE SCHEMA: Always return JSON: {"speak":"short human-like phrase (1-2 sentences max)","action":"continue|collect|hangup|escalate","nextStep":"greeting|confirm|purpose|handle|objective|close","reasoning":"brief explanation"}
-
-ENDING CONDITIONS: Objective completed, user asks to stop, 2 failed attempts, call exceeds time limit.
-
-FAILURE HANDLING: user busy=offer callback once then end; user angry=apologize once then end; wrong number=apologize then end; unclear audio=ask repeat once.`;
-
-// Allow overriding the system prompt via an environment-pointed file. If
-// `SYSTEM_PROMPT_FILE` is set in the environment, attempt to load it and
-// fall back to the built-in prompt on any error.
-let SYSTEM_PROMPT = VOICE_AGENT_SYSTEM_PROMPT;
-try{
-  const sp = process.env.SYSTEM_PROMPT_FILE;
-  if(sp){
-    const abs = path.isAbsolute(sp) ? sp : path.join(process.cwd(), sp);
-    const data = fs.readFileSync(abs, 'utf8');
-    if(data && data.trim().length) SYSTEM_PROMPT = data;
+// ── Load system prompt ──────────────────────────────────────────────────────
+let SYSTEM_PROMPT = '';
+try {
+  const promptPath = config.systemPromptFile;
+  const abs = path.isAbsolute(promptPath) ? promptPath : path.join(process.cwd(), promptPath);
+  const data = fs.readFileSync(abs, 'utf8');
+  if (data && data.trim().length) {
+    SYSTEM_PROMPT = data;
+    logger.log('Loaded system prompt from', abs);
   }
-}catch(e){
-  logger && logger.warn && logger.warn('Could not load SYSTEM_PROMPT_FILE, using default prompt', e.message||e);
+} catch (e) {
+  logger.warn('Could not load system prompt file, using inline fallback', e.message || e);
 }
 
-async function generateReply({ callState, script, lastTranscript, customerName, callSid }){
-  try{
-    const user = `CUSTOMER: ${customerName||'unknown'}\nTRANSCRIPT: ${lastTranscript||'(silence)'}\nSTATE: ${JSON.stringify(callState)}\nSCRIPT: ${JSON.stringify(script)}\n\nGenerate NEXT agent response.`;
-    const messages = [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: user }
-    ];
-    metrics.incrementLlmRequest(true);
-    const resp = await openai.chatCompletion(messages, 'gpt-4o-mini', { temperature: 0.3, max_tokens: 120 });
-    const assistant = resp.choices?.[0]?.message?.content || '';
-    if(callSid && resp.usage) costControl.addTokenUsage(callSid, resp.usage.total_tokens);
-    let parsed;
-    try{ parsed = JSON.parse(assistant); }
-    catch(e){
-      logger.error('LLM non-JSON, fallback', assistant);
-      parsed = { speak: script.fallback||'I apologize, could you please repeat that?', action: 'continue', nextStep: 'handle', reasoning: 'fallback' };
+if (!SYSTEM_PROMPT) {
+  SYSTEM_PROMPT = `You are a professional real estate AI phone agent for ${config.companyName}. 
+Your name is ${config.agentName}. Keep responses under 25 words. Be natural and human-like.
+Always respond in JSON: {"speak":"...","action":"continue|collect|hangup|escalate|book_visit","nextStep":"...","data":{},"qualityScore":0,"reasoning":"..."}`;
+}
+
+// ── Inject dynamic variables into prompt ────────────────────────────────────
+function buildSystemPrompt() {
+  return SYSTEM_PROMPT
+    .replace(/\{\{company_name\}\}/g, config.companyName)
+    .replace(/\{\{agent_name\}\}/g, config.agentName);
+}
+
+// ── Conversation history per call (in-memory, bounded) ──────────────────────
+const conversationHistory = new Map(); // callSid → [{role, content}]
+const MAX_HISTORY = 20; // Keep last N messages to avoid token overflow
+const HISTORY_TTL_MS = 30 * 60 * 1000; // Auto-cleanup after 30 min
+
+function getHistory(callSid) {
+  if (!conversationHistory.has(callSid)) {
+    conversationHistory.set(callSid, { messages: [], createdAt: Date.now() });
+  }
+  return conversationHistory.get(callSid);
+}
+
+function addToHistory(callSid, role, content) {
+  const h = getHistory(callSid);
+  h.messages.push({ role, content });
+  // Trim to last MAX_HISTORY messages
+  if (h.messages.length > MAX_HISTORY) {
+    h.messages = h.messages.slice(-MAX_HISTORY);
+  }
+}
+
+function clearHistory(callSid) {
+  conversationHistory.delete(callSid);
+}
+
+// Periodic cleanup of stale conversations
+setInterval(() => {
+  const now = Date.now();
+  for (const [sid, h] of conversationHistory) {
+    if (now - h.createdAt > HISTORY_TTL_MS) {
+      conversationHistory.delete(sid);
     }
-    if(parsed.speak && parsed.speak.length>200) parsed.speak = parsed.speak.substring(0,200);
+  }
+}, 60000);
+
+// ── Default fallback response ───────────────────────────────────────────────
+const FALLBACK_RESPONSE = {
+  speak: 'I apologize, could you please repeat that?',
+  action: 'continue',
+  nextStep: 'handle',
+  data: {},
+  qualityScore: 0,
+  reasoning: 'fallback'
+};
+
+// ── Main generate function ──────────────────────────────────────────────────
+async function generateReply({ callState, script, lastTranscript, customerName, callSid }) {
+  try {
+    // Build user message with context
+    const userMsg = [
+      `CUSTOMER NAME: ${customerName || 'unknown'}`,
+      `LATEST: "${lastTranscript || '(silence)'}"`,
+      `CALL STATE: ${JSON.stringify(callState || {})}`,
+      '',
+      'Generate the next agent response in the required JSON format.'
+    ].join('\n');
+
+    // Build full message array with history
+    const systemMsg = { role: 'system', content: buildSystemPrompt() };
+    const history = callSid ? getHistory(callSid).messages : [];
+    const messages = [
+      systemMsg,
+      ...history,
+      { role: 'user', content: userMsg }
+    ];
+
+    metrics.incrementLlmRequest(true);
+
+    const resp = await openai.chatCompletion(messages, 'gpt-4o-mini', {
+      temperature: 0.3,
+      max_tokens: 200
+    });
+
+    const assistant = resp.choices?.[0]?.message?.content || '';
+
+    // Track cost
+    if (callSid && resp.usage) {
+      costControl.addTokenUsage(callSid, resp.usage.total_tokens);
+    }
+
+    // Store in conversation history
+    if (callSid) {
+      addToHistory(callSid, 'user', userMsg);
+      addToHistory(callSid, 'assistant', assistant);
+    }
+
+    // Parse JSON — handle markdown-wrapped JSON (```json ... ```)
+    let parsed;
+    try {
+      let jsonStr = assistant.trim();
+      // Strip markdown code fences if present
+      if (jsonStr.startsWith('```')) {
+        jsonStr = jsonStr.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
+      }
+      parsed = JSON.parse(jsonStr);
+    } catch (e) {
+      logger.warn('LLM returned non-JSON, using fallback', assistant.substring(0, 100));
+      // Try to extract speak text from non-JSON response
+      const speakText = assistant.replace(/[{}"]/g, '').trim();
+      parsed = { ...FALLBACK_RESPONSE, speak: speakText.length > 5 ? speakText.substring(0, 150) : FALLBACK_RESPONSE.speak };
+    }
+
+    // Enforce max response length for TTS (avoid long audio)
+    if (parsed.speak && parsed.speak.length > 200) {
+      parsed.speak = parsed.speak.substring(0, 200);
+    }
+
     return parsed;
-  }catch(err){
-    logger.error('LLM error', err.message||err);
+  } catch (err) {
+    logger.error('LLM error', err.message || err);
     metrics.incrementLlmRequest(false);
-    return { speak: script.fallback||'Thank you. Goodbye.', action: 'hangup', nextStep: 'close' };
+    return { ...FALLBACK_RESPONSE, speak: 'Thank you for your time. We will call you back. Goodbye.', action: 'hangup', nextStep: 'close' };
   }
 }
 
-module.exports = { generateReply };
+module.exports = { generateReply, clearHistory, getHistory };

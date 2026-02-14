@@ -6,39 +6,61 @@ let client = null;
 if (config.twilio.accountSid && config.twilio.authToken) {
   try {
     client = new Twilio(config.twilio.accountSid, config.twilio.authToken);
+    logger.log('Twilio client initialized');
   } catch (err) {
     logger.error('Twilio client init error', err.message || err);
     client = null;
   }
 } else {
-  logger.log('Twilio credentials missing - Twilio client will not be initialized.');
+  logger.warn('Twilio credentials missing — telephony will not work');
+}
+
+function ensureClient() {
+  if (!client) {
+    throw new Error('Twilio client not configured. Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.');
+  }
+}
+
+// Escape text for XML
+function xmlEscape(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 async function makeOutboundCall(to, from, webhookUrl) {
-  if (!client) {
-    const err = new Error('Twilio client not configured. Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in environment.');
-    logger.error('Twilio: makeOutboundCall failed', err.message);
-    throw err;
-  }
-  logger.log('Twilio: making call', to, 'from', from);
+  ensureClient();
+  logger.log('Twilio: dialing', to, 'from', from || config.twilio.callerId);
   return client.calls.create({
     to,
-    from,
+    from: from || config.twilio.callerId,
     url: webhookUrl,
-    statusCallback: `${webhookUrl.replace('/voice','/status')}`,
-    statusCallbackEvent: ['completed','busy','no-answer','failed']
+    statusCallback: webhookUrl.replace('/voice', '/status'),
+    statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+    machineDetection: 'Enable',  // Detect answering machines
+    timeout: 30                   // Ring for 30 sec max
   });
 }
 
 async function playAudio(callSid, audioUrl) {
-  if (!client) {
-    const err = new Error('Twilio client not configured. Cannot play audio.');
-    logger.error('Twilio: playAudio failed', err.message);
-    throw err;
-  }
-  const twiml = `<Response><Play>${audioUrl}</Play></Response>`;
-  logger.log('Twilio: play audio', callSid, audioUrl);
+  ensureClient();
+  const escapedUrl = xmlEscape(audioUrl);
+  const twiml = `<Response><Play>${escapedUrl}</Play></Response>`;
+  logger.debug('Twilio: play audio', callSid);
   return client.calls(callSid).update({ twiml });
 }
 
-module.exports = { makeOutboundCall, playAudio };
+// Fallback: use Twilio's Say verb when TTS upload fails
+async function sayText(callSid, text) {
+  ensureClient();
+  const escaped = xmlEscape(text);
+  const twiml = `<Response><Say voice="Polly.Aditi" language="en-IN">${escaped}</Say></Response>`;
+  logger.debug('Twilio: say text', callSid);
+  return client.calls(callSid).update({ twiml });
+}
+
+async function endCall(callSid) {
+  ensureClient();
+  logger.log('Twilio: ending call', callSid);
+  return client.calls(callSid).update({ status: 'completed' });
+}
+
+module.exports = { makeOutboundCall, playAudio, sayText, endCall };
