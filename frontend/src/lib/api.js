@@ -34,8 +34,8 @@ export async function fetchTranscript(id) {
     return res.json();
 }
 
-export async function uploadCSV(csvText, campaignId) {
-    const res = await fetch(`${API_BASE}/v1/calls/upload-numbers`, {
+export async function uploadCSV(csvText, campaignId = 'default', mode = 'append') {
+    const res = await fetch(`${API_BASE}/v1/calls/upload-numbers?campaignId=${encodeURIComponent(campaignId)}&mode=${mode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/csv' },
         body: csvText

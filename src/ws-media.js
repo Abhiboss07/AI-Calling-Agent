@@ -197,8 +197,9 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
   if (!session.streamSid || ws.readyState !== 1) return;
 
   session.isPlaying = true;
+  const playbackId = ++session.lastPipelineId; // Track this playback for interruption
 
-  // Clear any existing audio first
+  // Clear any previously queued audio first
   try {
     ws.send(JSON.stringify({
       event: 'clear',
@@ -207,11 +208,17 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
   } catch (e) { /* ignore */ }
 
   // Send in 20ms chunks (160 bytes of µ-law at 8kHz)
+  // Batch 10 chunks at a time (200ms of audio) then yield to event loop
+  // This prevents WebSocket backpressure/overflow
   const totalChunks = Math.ceil(mulawBuffer.length / PLAYBACK_CHUNK_SIZE);
+  const BATCH_SIZE = 10; // 10 × 20ms = 200ms per batch
 
   for (let i = 0; i < totalChunks; i++) {
-    // Check if pipeline was superseded (user interrupted)
-    if (ws.readyState !== 1) break;
+    // Check if playback was interrupted (user started speaking or new pipeline)
+    if (ws.readyState !== 1 || !session.isPlaying || session.lastPipelineId !== playbackId) {
+      logger.debug('Playback interrupted at chunk', i, 'of', totalChunks);
+      break;
+    }
 
     const start = i * PLAYBACK_CHUNK_SIZE;
     const end = Math.min(start + PLAYBACK_CHUNK_SIZE, mulawBuffer.length);
@@ -231,9 +238,15 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
       logger.warn('Stream send error', err.message);
       break;
     }
+
+    // Yield to event loop every BATCH_SIZE chunks to prevent blocking
+    // This allows incoming media events (user speech) to be processed
+    if ((i + 1) % BATCH_SIZE === 0 && i + 1 < totalChunks) {
+      await new Promise(r => setImmediate(r));
+    }
   }
 
-  // Send a mark event so we know when playback finishes
+  // Send a mark event so we know when Twilio finishes playing the audio
   try {
     ws.send(JSON.stringify({
       event: 'mark',

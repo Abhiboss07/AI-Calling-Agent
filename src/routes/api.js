@@ -236,7 +236,35 @@ router.get('/v1/leads', async (req, res) => {
   }
 });
 
-// Get lead by ID
+// IMPORTANT: Lead stats MUST be registered BEFORE /v1/leads/:id
+// Otherwise Express matches 'stats' as a MongoDB ObjectId and returns 404
+router.get('/v1/leads/stats/summary', async (req, res) => {
+  try {
+    const [total, qualified, siteVisits, notInterested, avgScore] = await Promise.all([
+      Lead.countDocuments(),
+      Lead.countDocuments({ status: 'qualified' }),
+      Lead.countDocuments({ status: 'site-visit-booked' }),
+      Lead.countDocuments({ status: 'not-interested' }),
+      Lead.aggregate([{ $group: { _id: null, avg: { $avg: '$qualityScore' } } }])
+    ]);
+
+    res.json({
+      ok: true,
+      data: {
+        total,
+        qualified,
+        siteVisits,
+        notInterested,
+        avgQualityScore: Math.round(avgScore[0]?.avg || 0)
+      }
+    });
+  } catch (err) {
+    logger.error('Lead stats error', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Get lead by ID (MUST be after /stats/summary to avoid route shadowing)
 router.get('/v1/leads/:id', async (req, res) => {
   try {
     const lead = await Lead.findById(req.params.id).lean();
@@ -262,33 +290,6 @@ router.put('/v1/leads/:id', express.json(), async (req, res) => {
     res.json({ ok: true, data: lead });
   } catch (err) {
     logger.error('Update lead error', err.message);
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// Lead stats
-router.get('/v1/leads/stats/summary', async (req, res) => {
-  try {
-    const [total, qualified, siteVisits, notInterested, avgScore] = await Promise.all([
-      Lead.countDocuments(),
-      Lead.countDocuments({ status: 'qualified' }),
-      Lead.countDocuments({ status: 'site-visit-booked' }),
-      Lead.countDocuments({ status: 'not-interested' }),
-      Lead.aggregate([{ $group: { _id: null, avg: { $avg: '$qualityScore' } } }])
-    ]);
-
-    res.json({
-      ok: true,
-      data: {
-        total,
-        qualified,
-        siteVisits,
-        notInterested,
-        avgQualityScore: Math.round(avgScore[0]?.avg || 0)
-      }
-    });
-  } catch (err) {
-    logger.error('Lead stats error', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });

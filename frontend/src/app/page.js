@@ -68,7 +68,7 @@ export default function Dashboard() {
           </div>
           <div className="card">
             <h3>Success Rate</h3>
-            <div className="value">{metrics.successRate || '0.00'}%</div>
+            <div className="value">{metrics.successRate || '0%'}</div>
             <div className="subtext">
               Based on completed calls
             </div>
