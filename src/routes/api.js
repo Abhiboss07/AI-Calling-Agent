@@ -21,9 +21,31 @@ router.post('/v1/calls/start', async (req, res) => {
     const { campaignId, phoneNumber, fromNumber } = req.body;
     if (!campaignId || !phoneNumber) return res.status(400).json({ ok: false, error: 'campaignId and phoneNumber required' });
 
-    // Validate phone number format
+    // FIX H1: Proper E.164 phone number validation
     const cleanPhone = phoneNumber.replace(/[^+\d]/g, '');
-    if (cleanPhone.length < 10) return res.status(400).json({ ok: false, error: 'Invalid phone number' });
+    if (!cleanPhone.startsWith('+')) {
+      return res.status(400).json({ ok: false, error: 'Phone number must include country code (e.g., +1234567890)' });
+    }
+    if (cleanPhone.length < 11 || cleanPhone.length > 16) {
+      return res.status(400).json({ ok: false, error: 'Invalid phone number length' });
+    }
+    if (!/^\+\d{10,15}$/.test(cleanPhone)) {
+      return res.status(400).json({ ok: false, error: 'Phone number must be in E.164 format' });
+    }
+
+    // FIX M6: Prevent duplicate simultaneous calls to the same number
+    const existingCall = await Call.findOne({
+      campaignId,
+      phoneNumber: cleanPhone,
+      status: { $in: ['queued', 'ringing', 'in-progress'] }
+    });
+    if (existingCall) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Call already in progress for this number',
+        existingCallId: existingCall._id
+      });
+    }
 
     const webhookUrl = `${req.protocol}://${req.get('host')}/twilio/voice`;
     const twCall = await twilioClient.makeOutboundCall(cleanPhone, fromNumber || undefined, webhookUrl);
@@ -64,10 +86,19 @@ router.post('/v1/calls/:id/end', async (req, res) => {
 });
 
 // Upload phone numbers (CSV: phone,name,email)
-router.post('/v1/calls/upload-numbers', express.text({ type: ['text/csv', 'text/plain'], limit: '10mb' }), async (req, res) => {
+// FIX M9: Validate content-type before parsing
+router.post('/v1/calls/upload-numbers', (req, res, next) => {
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.includes('text/csv') && !contentType.includes('text/plain')) {
+    return res.status(415).json({ ok: false, error: 'Unsupported media type. Expected text/csv or text/plain' });
+  }
+  next();
+}, express.text({ type: ['text/csv', 'text/plain'], limit: '10mb' }), async (req, res) => {
   try {
     const { campaignId, mode = 'append' } = req.query;
-    if (!campaignId) return res.status(400).json({ ok: false, error: 'campaignId required' });
+    if (!campaignId || typeof campaignId !== 'string') {
+      return res.status(400).json({ ok: false, error: 'campaignId required' });
+    }
     if (!req.body || typeof req.body !== 'string') return res.status(400).json({ ok: false, error: 'CSV data required' });
 
     if (mode === 'replace') {
@@ -81,14 +112,38 @@ router.post('/v1/calls/upload-numbers', express.text({ type: ['text/csv', 'text/
     const docs = [];
     for (const line of lines) {
       try {
-        const [phone, name, email] = line.split(',').map(f => f.trim());
+        // FIX M5: Skip comment lines and sanitize fields
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+
+        const fields = line.split(',').map(f =>
+          f.trim().replace(/[\x00-\x1F\x7F]/g, '') // Remove control chars
+        );
+
+        const [phone, name, email] = fields;
         const cleanPhone = (phone || '').replace(/[^+\d]/g, '');
-        if (!cleanPhone || cleanPhone.length < 10) { results.rejected++; continue; }
-        docs.push({ campaignId, phoneNumber: cleanPhone, status: 'queued', metadata: { name, email } });
+        if (!cleanPhone || cleanPhone.length < 10) {
+          results.rejected++;
+          if (results.errors.length < 10) results.errors.push(`Invalid phone: ${phone}`);
+          continue;
+        }
+
+        // Validate email format if present
+        const cleanEmail = email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email.substring(0, 100) : '';
+
+        docs.push({
+          campaignId,
+          phoneNumber: cleanPhone,
+          status: 'queued',
+          metadata: {
+            name: name?.substring(0, 100) || '',  // Cap length
+            email: cleanEmail
+          }
+        });
         results.accepted++;
       } catch (e) {
         results.rejected++;
-        results.errors.push(e.message);
+        if (results.errors.length < 10) results.errors.push(e.message);
       }
     }
 
@@ -118,9 +173,20 @@ router.get('/v1/calls', async (req, res) => {
   try {
     const { campaignId, status, phoneNumber, page = 1, perPage = 50 } = req.query;
     const query = {};
-    if (campaignId) query.campaignId = campaignId;
-    if (status) query.status = status;
-    if (phoneNumber) query.phoneNumber = phoneNumber;
+
+    // FIX H4: Sanitize query params to prevent NoSQL injection
+    if (campaignId && typeof campaignId === 'string') query.campaignId = campaignId;
+    if (status && typeof status === 'string') {
+      const validStatuses = ['queued', 'ringing', 'in-progress', 'completed', 'failed', 'busy', 'no-answer'];
+      if (validStatuses.includes(status)) {
+        query.status = status;
+      } else {
+        return res.status(400).json({ ok: false, error: 'Invalid status value' });
+      }
+    }
+    if (phoneNumber && typeof phoneNumber === 'string') {
+      query.phoneNumber = phoneNumber.replace(/[^+\d]/g, '');
+    }
 
     const pg = Math.max(1, Number(page));
     const pp = Math.min(100, Math.max(1, Number(perPage)));
@@ -153,8 +219,18 @@ router.get('/v1/calls/:id', async (req, res) => {
 // METRICS
 // ──────────────────────────────────────────────────────────────────────────
 
+// FIX L6: Basic API key auth on metrics endpoint
 router.get('/v1/metrics', async (req, res) => {
   try {
+    // If METRICS_API_KEY is set, require it
+    const metricsKey = process.env.METRICS_API_KEY;
+    if (metricsKey) {
+      const provided = req.headers['x-api-key'] || req.query.apiKey;
+      if (provided !== metricsKey) {
+        return res.status(403).json({ ok: false, error: 'Forbidden' });
+      }
+    }
+
     const data = metrics.getMetrics();
     const [uniqueClients, durResult] = await Promise.all([
       Call.distinct('phoneNumber'),

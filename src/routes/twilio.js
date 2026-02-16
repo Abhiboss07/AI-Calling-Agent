@@ -7,6 +7,32 @@ const Call = require('../models/call.model');
 const metrics = require('../services/metrics');
 const costControl = require('../services/costControl');
 
+// FIX H2: Rate limiting for webhook endpoints
+const webhookLimitMap = new Map();
+function webhookRateLimit(windowMs = 60000, max = 100) {
+  return (req, res, next) => {
+    const key = req.ip;
+    const now = Date.now();
+    let entry = webhookLimitMap.get(key);
+    if (!entry || now - entry.start > windowMs) {
+      entry = { start: now, count: 0 };
+      webhookLimitMap.set(key, entry);
+    }
+    entry.count++;
+    if (entry.count > max) {
+      logger.warn('Webhook rate limit exceeded', { ip: req.ip, path: req.path });
+      return res.status(429).send('Too many requests');
+    }
+    next();
+  };
+}
+// Cleanup stale webhook rate-limit entries every 2 min
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of webhookLimitMap) {
+    if (now - entry.start > 120000) webhookLimitMap.delete(key);
+  }
+}, 120000);
 // ══════════════════════════════════════════════════════════════════════════════
 // TWILIO WEBHOOK SIGNATURE VERIFICATION
 // ══════════════════════════════════════════════════════════════════════════════
@@ -43,7 +69,7 @@ function validateTwilioSignature(req, res, next) {
 // If <Connect><Stream> is not available on your Twilio account, we fall back to
 // <Start><Stream> with REST-based audio playback.
 //
-router.post('/voice', validateTwilioSignature, async (req, res) => {
+router.post('/voice', webhookRateLimit(60000, 100), validateTwilioSignature, async (req, res) => {
   const host = req.get('host');
   const callSid = req.body?.CallSid || 'unknown';
   const from = req.body?.From || 'unknown';
@@ -102,7 +128,7 @@ router.post('/voice', validateTwilioSignature, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // STATUS CALLBACK — Lifecycle tracking + DB updates
 // ══════════════════════════════════════════════════════════════════════════════
-router.post('/status', validateTwilioSignature, async (req, res) => {
+router.post('/status', webhookRateLimit(60000, 200), validateTwilioSignature, async (req, res) => {
   // Respond IMMEDIATELY to prevent Twilio timeout — process async
   res.sendStatus(200);
 
@@ -153,7 +179,7 @@ router.post('/status', validateTwilioSignature, async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // RECORDING CALLBACK
 // ══════════════════════════════════════════════════════════════════════════════
-router.post('/recording', validateTwilioSignature, async (req, res) => {
+router.post('/recording', webhookRateLimit(60000, 100), validateTwilioSignature, async (req, res) => {
   res.sendStatus(200); // Respond immediately
 
   const { CallSid, RecordingUrl, RecordingDuration, RecordingSid } = req.body || {};
