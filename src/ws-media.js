@@ -8,6 +8,7 @@ const Lead = require('./models/lead.model');
 const Transcript = require('./models/transcript.model');
 const config = require('./config');
 const metrics = require('./services/metrics');
+const { retry } = require('./utils/retry');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MULAW ↔ PCM CONVERSION (Twilio sends µ-law 8kHz, Whisper needs PCM/WAV)
@@ -118,7 +119,7 @@ function computeRms(pcmBuffer) {
   return Math.sqrt(sumSq / numSamples);
 }
 
-const VAD_THRESHOLD = 0.008;
+const VAD_THRESHOLD = config.pipeline.vadThreshold;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // PER-CALL SESSION STATE
@@ -169,19 +170,19 @@ class CallSession {
 
 const sessions = new Map();
 
-// ── Tuning Constants ────────────────────────────────────────────────────────
-const SPEECH_START_CHUNKS = 3;
-const SPEECH_END_CHUNKS = 12;
-const MIN_UTTERANCE_BYTES = 4000;
-const MAX_BUFFER_BYTES = 320000;
-const SILENCE_PROMPT_MS = 10000;
+// ── Tuning Constants (M2: pulled from centralized config) ──────────────────
+const SPEECH_START_CHUNKS = config.pipeline.speechStartChunks;
+const SPEECH_END_CHUNKS = config.pipeline.speechEndChunks;
+const MIN_UTTERANCE_BYTES = config.pipeline.minUtteranceBytes;
+const MAX_BUFFER_BYTES = config.pipeline.maxBufferBytes;
+const SILENCE_PROMPT_MS = config.pipeline.silencePromptMs;
 const MAX_CALL_MS = config.callMaxMinutes * 60 * 1000;
-const WS_PING_INTERVAL = 15000;
+const WS_PING_INTERVAL = config.pipeline.wsPingIntervalMs;
 
 // Chunk size for streaming audio back over WebSocket
 // Twilio expects 20ms chunks at 8kHz = 160 bytes of µ-law
-const PLAYBACK_CHUNK_SIZE = 160;
-const PLAYBACK_CHUNK_INTERVAL_MS = 20;
+const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize;
+const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SEND AUDIO THROUGH BIDIRECTIONAL STREAM (NO REST API CALLS)
@@ -269,6 +270,13 @@ module.exports = function setupWs(app) {
     // ── WebSocket Heartbeat (detect stale connections) ─────────────────────
     pingInterval = setInterval(() => {
       if (ws.readyState === ws.OPEN) {
+        // FIX H8: Detect stale connections via pong timeout
+        if (session && Date.now() - session._lastPong > WS_PING_INTERVAL * 3) {
+          logger.warn('WebSocket pong timeout, closing stale connection', session.callSid);
+          ws.close(1001, 'Pong timeout');
+          clearInterval(pingInterval);
+          return;
+        }
         ws.ping();
       } else {
         clearInterval(pingInterval);
@@ -292,9 +300,16 @@ module.exports = function setupWs(app) {
 
         // ── START event — initialize session ────────────────────────────
         if (msg.event === 'start') {
-          const callSid = msg.start?.callSid || null;
+          const callSid = msg.start?.callSid;
           const callerNumber = msg.start?.customParameters?.callerNumber || '';
-          const streamSid = msg.streamSid || null;
+          const streamSid = msg.streamSid;
+
+          // FIX C2: Validate required fields before creating session
+          if (!callSid || !streamSid) {
+            logger.error('WS start event missing required fields', { callSid, streamSid });
+            ws.close(1003, 'Missing required parameters');
+            return;
+          }
 
           session = new CallSession(callSid, callerNumber);
           session.streamSid = streamSid;
@@ -405,13 +420,31 @@ module.exports = function setupWs(app) {
       } catch (err) {
         logger.error('WS message handler error', err.message || err);
         metrics.incrementWsError();
+
+        // FIX H5: Notify client of error and clean up if critical
+        if (ws.readyState === ws.OPEN) {
+          try {
+            ws.send(JSON.stringify({ event: 'error', error: 'Internal processing error' }));
+          } catch (e) { /* ignore send failure */ }
+        }
       }
     });
 
     // ── WebSocket close ─────────────────────────────────────────────────
     ws.on('close', async (code, reason) => {
-      logger.log('WS closed', { callSid: session?.callSid, code, reason: reason?.toString() });
-      metrics.incrementWsDisconnect();
+      const reasonStr = reason?.toString();
+      logger.log('WS closed', { callSid: session?.callSid, code, reason: reasonStr });
+
+      // FIX M7: Categorize close reasons for better metrics
+      if (code === 1000) {
+        metrics.incrementWsDisconnect('normal');
+      } else if (code >= 1001 && code <= 1003) {
+        metrics.incrementWsDisconnect('error');
+        logger.warn('Abnormal WebSocket close', { callSid: session?.callSid, code, reason: reasonStr });
+      } else {
+        metrics.incrementWsDisconnect('unknown');
+      }
+
       await cleanupSession(session, ws, pingInterval);
     });
 
@@ -479,10 +512,9 @@ function triggerProcessing(session, ws) {
   processUtterance(session, pcmChunks, ws, pipelineId)
     .catch(err => logger.error('Pipeline error', session.callSid, err.message))
     .finally(() => {
-      // CRITICAL FIX: Only release the lock if THIS pipeline still owns it.
-      // Without this check, an old pipeline's .finally() would set
-      // isProcessing=false while a newer pipeline is still running.
-      if (session.currentPipelineId === pipelineId) {
+      // FIX C3: Only release the lock if THIS pipeline still owns it
+      // AND it hasn't already been released by someone else.
+      if (session.currentPipelineId === pipelineId && session.isProcessing) {
         session.isProcessing = false;
       }
     });
@@ -622,7 +654,10 @@ function updateLeadData(session, reply) {
   if (d.siteVisitDate) session.leadData.siteVisitDate = d.siteVisitDate;
   if (d.objection) {
     session.leadData.objections = session.leadData.objections || [];
-    session.leadData.objections.push(d.objection);
+    // FIX M10: Cap objections at 10 to prevent unbounded growth
+    if (session.leadData.objections.length < 10) {
+      session.leadData.objections.push(d.objection);
+    }
   }
   if (reply.qualityScore) {
     session.qualityScore = Math.max(session.qualityScore, reply.qualityScore);
@@ -733,15 +768,18 @@ async function finalizeCall(session) {
   });
 
   try {
-    // Use callSid index for fast lookup (indexed in schema)
-    const call = session.callSid ? await Call.findOne({ callSid: session.callSid }) : null;
+    // FIX M8: Use retry for critical DB operations
+    const call = session.callSid ? await retry(
+      () => Call.findOne({ callSid: session.callSid }),
+      { retries: 3, minDelay: 500, factor: 2 }
+    ) : null;
 
     // Update call record with duration
     if (call) {
       call.durationSec = callDuration;
       call.endAt = new Date();
       call.status = 'completed';
-      await call.save();
+      await retry(() => call.save(), { retries: 3, minDelay: 500, factor: 2 });
     }
 
     // Save transcript
@@ -826,3 +864,25 @@ async function generateCallSummary(fullText, leadData) {
 
   return resp.choices?.[0]?.message?.content || fullText.substring(0, 500);
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// M12: PERIODIC MEMORY & MAP SIZE MONITORING
+// ══════════════════════════════════════════════════════════════════════════════
+setInterval(() => {
+  const mem = process.memoryUsage();
+  const info = {
+    heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
+    rssMB: Math.round(mem.rss / 1024 / 1024),
+    sessionsCount: sessions.size
+  };
+
+  // Only log when there are active sessions or high memory
+  if (sessions.size > 0 || info.heapUsedMB > 200) {
+    logger.debug('Resource monitor', info);
+  }
+
+  // Warn if any Map grows excessively
+  if (sessions.size > 100) {
+    logger.warn('Suspicious sessions count — possible leak', sessions.size);
+  }
+}, 60000);
