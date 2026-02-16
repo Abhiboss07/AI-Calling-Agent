@@ -138,8 +138,26 @@ async function start() {
   });
 
   // Readiness probe — can the service accept traffic?
+  let lastOpenAICheck = 0;
+  let openAIHealthy = true;
+
   app.get('/health/ready', async (req, res) => {
     const dbReady = db.isReady();
+
+    // FIX L4: Lightweight OpenAI check (cached for 60s)
+    const now = Date.now();
+    if (now - lastOpenAICheck > 60000) {
+      try {
+        const openai = require('./services/openaiClient');
+        await openai.chatCompletion([{ role: 'user', content: 'ping' }], 'gpt-4o-mini', { max_tokens: 1 });
+        openAIHealthy = true;
+        lastOpenAICheck = now;
+      } catch (err) {
+        openAIHealthy = false;
+        logger.warn('OpenAI health check failed', err.message);
+      }
+    }
+
     const ready = dbReady && !isShuttingDown;
 
     const body = {
@@ -147,6 +165,7 @@ async function start() {
       version: '2.0.0',
       uptime: Math.round(process.uptime()),
       database: dbReady ? 'connected' : 'disconnected',
+      openai: openAIHealthy ? 'healthy' : 'unhealthy',
       memory: {
         heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
         heapTotalMB: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
