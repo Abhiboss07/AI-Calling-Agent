@@ -61,6 +61,25 @@ function endCallTracking(callSid) {
   const entry = costTracker.get(callSid);
   const durationMin = entry ? ((Date.now() - entry.startedAt) / 60000).toFixed(1) : '?';
   logger.log(`Call ${callSid} ended — cost: ₹${finalCost.toFixed(2)}, duration: ${durationMin}min`);
+
+  // FIX M4: Persist cost to database for historical analysis
+  if (callSid && entry) {
+    const Call = require('../models/call.model');
+    Call.findOneAndUpdate(
+      { callSid },
+      {
+        $set: {
+          estimatedCost: finalCost, costBreakdown: {
+            twilio: entry.twilio || 0,
+            whisper: entry.whisper || 0,
+            gpt: entry.gpt || 0,
+            tts: entry.tts || 0
+          }
+        }
+      }
+    ).catch(err => logger.warn('Failed to persist cost data', err.message));
+  }
+
   costTracker.delete(callSid);
   return finalCost;
 }

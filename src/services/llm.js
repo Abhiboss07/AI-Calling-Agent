@@ -35,8 +35,8 @@ function buildSystemPrompt() {
 
 // ── Conversation history per call (in-memory, bounded) ──────────────────────
 const conversationHistory = new Map(); // callSid → [{role, content}]
-const MAX_HISTORY = 20; // Keep last N messages to avoid token overflow
-const HISTORY_TTL_MS = 30 * 60 * 1000; // Auto-cleanup after 30 min
+const MAX_HISTORY = config.llm?.maxHistory || 20; // FIX M2: configurable via env
+const HISTORY_TTL_MS = config.llm?.historyTtlMs || (30 * 60 * 1000);
 
 function getHistory(callSid) {
   if (!conversationHistory.has(callSid)) {

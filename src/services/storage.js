@@ -80,4 +80,9 @@ async function getSignedDownloadUrl(key, expiresIn = 3600) {
   }
 }
 
-module.exports = { uploadBuffer, getSignedDownloadUrl };
+// FIX M3: Helper to check if storage is configured
+function isConfigured() {
+  return !!(config.s3.bucket && config.s3.accessKey && config.s3.secretKey);
+}
+
+module.exports = { uploadBuffer, getSignedDownloadUrl, isConfigured };

@@ -89,7 +89,13 @@ function addWebhookLatency(ms) {
 }
 
 function incrementWsError() { metrics.wsErrors++; }
-function incrementWsDisconnect() { metrics.wsDisconnects++; }
+function incrementWsDisconnect(reason) {
+  metrics.wsDisconnects++;
+  // FIX M7: Track disconnect reasons
+  if (reason === 'error' || reason === 'unknown') {
+    metrics.wsErrors++;
+  }
+}
 function incrementBufferOverflow() { metrics.bufferOverflows++; }
 function incrementInterrupt() { metrics.interruptCount++; }
 

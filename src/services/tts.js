@@ -4,15 +4,18 @@ const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
 const metrics = require('./metrics');
 const costControl = require('./costControl');
+const config = require('../config');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TTS SERVICE — OpenAI Speech Synthesis
 // ══════════════════════════════════════════════════════════════════════════════
 
 // In-memory LRU cache for frequently spoken phrases (avoid re-synthesis)
-// FIXED: Cache keyed by SHA-like hash of FULL text, not first 100 chars
+// FIX H3: Cache keyed by hash, with memory cap to prevent OOM
 const ttsCache = new Map();    // fullText → { url, mulawBuffer }
-const MAX_CACHE = 50;
+const MAX_CACHE = config.tts?.cacheMaxEntries || 50;
+const MAX_CACHE_BYTES = config.tts?.cacheMaxBytes || (3 * 1024 * 1024); // 3MB
+let currentCacheBytes = 0;
 
 function cacheKey(text) {
   // Simple FNV-1a hash for fast unique key generation
@@ -129,11 +132,15 @@ async function synthesizeRaw(text, callSid) {
 
     const result = { mulawBuffer, pcmBuffer: pcm8k };
 
-    // Cache
-    if (ttsCache.size >= MAX_CACHE) {
+    // Cache (FIX H3: evict based on both count AND memory)
+    while (ttsCache.size >= MAX_CACHE || currentCacheBytes + result.mulawBuffer.length >= MAX_CACHE_BYTES) {
+      if (ttsCache.size === 0) break;
       const firstKey = ttsCache.keys().next().value;
+      const evicted = ttsCache.get(firstKey);
+      currentCacheBytes -= (evicted.mulawBuffer?.length || 0);
       ttsCache.delete(firstKey);
     }
+    currentCacheBytes += result.mulawBuffer.length;
     ttsCache.set(key, result);
 
     return result;
