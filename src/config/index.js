@@ -7,7 +7,8 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 const REQUIRED = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_CALLER_ID', 'OPENAI_API_KEY'];
 const missing = REQUIRED.filter(k => !process.env[k]);
 if (missing.length) {
-  console.error(`[CONFIG] FATAL: Missing required env vars: ${missing.join(', ')}`);
+  // L5: use stderr directly here since logger depends on config (circular)
+  process.stderr.write(`[CONFIG] FATAL: Missing required env vars: ${missing.join(', ')}\n`);
   // Don't exit in dev mode — allow dashboard to run
   if (process.env.NODE_ENV === 'production') process.exit(1);
 }
@@ -41,5 +42,28 @@ module.exports = {
   // Real Estate agent config
   companyName: process.env.COMPANY_NAME || 'Premier Realty Group',
   agentName: process.env.AGENT_NAME || 'Priya',
-  systemPromptFile: process.env.SYSTEM_PROMPT_FILE || 'config/ai_calling_agent_system_prompt.txt'
+  systemPromptFile: process.env.SYSTEM_PROMPT_FILE || 'config/ai_calling_agent_system_prompt.txt',
+
+  // ── Pipeline tuning constants (M2: centralized, configurable via env) ─────
+  pipeline: {
+    vadThreshold: Number(process.env.VAD_THRESHOLD) || 0.008,
+    speechStartChunks: Number(process.env.SPEECH_START_CHUNKS) || 3,
+    speechEndChunks: Number(process.env.SPEECH_END_CHUNKS) || 12,
+    minUtteranceBytes: Number(process.env.MIN_UTTERANCE_BYTES) || 4000,
+    maxBufferBytes: Number(process.env.MAX_BUFFER_BYTES) || 320000,
+    silencePromptMs: Number(process.env.SILENCE_PROMPT_MS) || 10000,
+    playbackChunkSize: Number(process.env.PLAYBACK_CHUNK_SIZE) || 160,
+    playbackChunkIntervalMs: Number(process.env.PLAYBACK_CHUNK_INTERVAL_MS) || 20,
+    wsPingIntervalMs: Number(process.env.WS_PING_INTERVAL_MS) || 15000
+  },
+
+  llm: {
+    maxHistory: Number(process.env.LLM_MAX_HISTORY) || 20,
+    historyTtlMs: Number(process.env.LLM_HISTORY_TTL_MS) || 30 * 60 * 1000
+  },
+
+  tts: {
+    cacheMaxEntries: Number(process.env.TTS_CACHE_MAX_ENTRIES) || 50,
+    cacheMaxBytes: Number(process.env.TTS_CACHE_MAX_BYTES) || 3 * 1024 * 1024 // 3MB
+  }
 };
