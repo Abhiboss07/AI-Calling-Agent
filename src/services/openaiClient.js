@@ -3,6 +3,12 @@ const FormData = require('form-data');
 const config = require('../config');
 const logger = require('../utils/logger');
 const { retry } = require('../utils/retry');
+const CircuitBreaker = require('../utils/circuitBreaker');
+
+// Circuit breakers for each OpenAI service (M11)
+const sttBreaker = new CircuitBreaker({ failureThreshold: 5, resetTimeout: 60000 });
+const llmBreaker = new CircuitBreaker({ failureThreshold: 5, resetTimeout: 60000 });
+const ttsBreaker = new CircuitBreaker({ failureThreshold: 5, resetTimeout: 60000 });
 
 const OPENAI_BASE = 'https://api.openai.com';
 
@@ -15,28 +21,36 @@ const apiClient = axios.create({
 });
 
 // ── STT: Whisper Transcription ──────────────────────────────────────────────
+/** @param {Buffer} buffer - WAV audio buffer (8kHz mono 16-bit PCM)
+ *  @param {string} mimeType
+ *  @returns {Promise<{text: string, segments?: Array}>} */
 async function transcribeAudio(buffer, mimeType = 'audio/wav') {
   if (!config.openaiApiKey) throw new Error('OPENAI_API_KEY missing');
 
-  const fn = async () => {
-    // CRITICAL: Create a NEW FormData on every attempt.
-    const form = new FormData();
-    form.append('file', Buffer.from(buffer), { filename: 'audio.wav', contentType: mimeType });
-    form.append('model', 'whisper-1');
-    form.append('response_format', 'verbose_json');
+  return sttBreaker.exec(async () => {
+    const fn = async () => {
+      // CRITICAL: Create a NEW FormData on every attempt.
+      const form = new FormData();
+      form.append('file', Buffer.from(buffer), { filename: 'audio.wav', contentType: mimeType });
+      form.append('model', 'whisper-1');
+      form.append('response_format', 'verbose_json');
 
-    const resp = await apiClient.post('/v1/audio/transcriptions', form, {
-      headers: { ...form.getHeaders() },
-      timeout: 15000,
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
-    });
-    return resp.data;
-  };
-  return retry(fn, { retries: 2, minDelay: 300, factor: 2 });
+      const resp = await apiClient.post('/v1/audio/transcriptions', form, {
+        headers: { ...form.getHeaders() },
+        timeout: 15000,
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      });
+      return resp.data;
+    };
+    return retry(fn, { retries: 2, minDelay: 300, factor: 2 });
+  });
 }
 
 // ── LLM: Chat Completion ────────────────────────────────────────────────────
+/** @param {Array<{role:string,content:string}>} messages
+ *  @param {string} model
+ *  @param {{temperature?:number, max_tokens?:number}} opts */
 async function chatCompletion(messages, model = 'gpt-4o-mini', opts = {}) {
   if (!config.openaiApiKey) throw new Error('OPENAI_API_KEY missing');
 
@@ -47,38 +61,48 @@ async function chatCompletion(messages, model = 'gpt-4o-mini', opts = {}) {
     max_tokens: opts.max_tokens ?? 200
   };
 
-  const fn = async () => {
-    const resp = await apiClient.post('/v1/chat/completions', body, {
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 8000
-    });
-    return resp.data;
-  };
-  return retry(fn, { retries: 1, minDelay: 200, factor: 1 });
+  return llmBreaker.exec(async () => {
+    const fn = async () => {
+      const resp = await apiClient.post('/v1/chat/completions', body, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 8000
+      });
+      return resp.data;
+    };
+    return retry(fn, { retries: 1, minDelay: 200, factor: 1 });
+  });
 }
 
 // ── TTS: Text-to-Speech ─────────────────────────────────────────────────────
 // format: 'mp3' (default, for S3 upload) or 'pcm' (for direct stream playback)
 // PCM output: 24kHz 16-bit mono little-endian (needs resampling to 8kHz for Twilio)
+/** @param {string} text - The text to synthesize
+ *  @param {string} voice - Voice id (alloy, echo, fable, onyx, nova, shimmer)
+ *  @param {string} format - 'mp3' or 'pcm' */
 async function ttsSynthesize(text, voice = 'alloy', format = 'mp3') {
   if (!config.openaiApiKey) throw new Error('OPENAI_API_KEY missing');
 
   const body = {
-    model: 'gpt-4o-mini-tts',
+    model: 'tts-1',  // FIX C1: was 'gpt-4o-mini-tts' (invalid model)
     voice,
     input: text,
     response_format: format === 'pcm' ? 'pcm' : 'mp3'
   };
 
-  const fn = async () => {
-    const resp = await apiClient.post('/v1/audio/speech', body, {
-      headers: { 'Content-Type': 'application/json' },
-      responseType: 'arraybuffer',
-      timeout: 10000
-    });
-    return resp.data;
-  };
-  return retry(fn, { retries: 1, minDelay: 200, factor: 1 });
+  // FIX H6: Dynamic timeout — 100ms per character, minimum 10s
+  const timeout = Math.max(10000, text.length * 100);
+
+  return ttsBreaker.exec(async () => {
+    const fn = async () => {
+      const resp = await apiClient.post('/v1/audio/speech', body, {
+        headers: { 'Content-Type': 'application/json' },
+        responseType: 'arraybuffer',
+        timeout
+      });
+      return resp.data;
+    };
+    return retry(fn, { retries: 2, minDelay: 300, factor: 1.5 });
+  });
 }
 
 module.exports = { transcribeAudio, chatCompletion, ttsSynthesize };
