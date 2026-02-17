@@ -2,7 +2,7 @@ const logger = require('./utils/logger');
 const stt = require('./services/stt');
 const llm = require('./services/llm');
 const tts = require('./services/tts');
-const twilioClient = require('./services/twilioClient');
+const plivoClient = require('./services/plivoClient');
 const Call = require('./models/call.model');
 const Lead = require('./models/lead.model');
 const Transcript = require('./models/transcript.model');
@@ -11,7 +11,7 @@ const metrics = require('./services/metrics');
 const { retry } = require('./utils/retry');
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MULAW ↔ PCM CONVERSION (Twilio sends µ-law 8kHz, Whisper needs PCM/WAV)
+// MULAW ↔ PCM CONVERSION (Plivo sends µ-law 8kHz, Whisper needs PCM/WAV)
 // ══════════════════════════════════════════════════════════════════════════════
 const MULAW_DECODE = new Int16Array(256);
 (function buildTable() {
@@ -60,9 +60,8 @@ function buildWavBuffer(pcmData) {
 // ══════════════════════════════════════════════════════════════════════════════
 // PCM → µ-law ENCODING (for sending audio BACK through bidirectional stream)
 // ══════════════════════════════════════════════════════════════════════════════
-// CRITICAL FIX: Instead of using twilioClient.playAudio() which calls
-// client.calls(sid).update({twiml}) and KILLS the <Connect><Stream>,
-// we send µ-law audio directly through the WebSocket as 'media' events.
+// We send µ-law audio directly through the WebSocket as 'playAudio' events
+// instead of using REST API calls which would interrupt the bidirectional stream.
 
 const MULAW_BIAS = 0x84;
 const MULAW_CLIP = 32635;
@@ -101,7 +100,7 @@ function pcmBufferToMulaw(pcmBuffer) {
 // ══════════════════════════════════════════════════════════════════════════════
 // MP3 → PCM CONVERSION (decode TTS mp3 output for bidirectional stream)
 // ══════════════════════════════════════════════════════════════════════════════
-// We need to convert the MP3 from OpenAI TTS to µ-law 8kHz for Twilio.
+// We need to convert the MP3 from OpenAI TTS to µ-law 8kHz for Plivo.
 // Since we can't easily decode MP3 in pure Node without native deps,
 // we request TTS output in PCM format instead. See updated tts.js.
 
@@ -180,19 +179,19 @@ const MAX_CALL_MS = config.callMaxMinutes * 60 * 1000;
 const WS_PING_INTERVAL = config.pipeline.wsPingIntervalMs;
 
 // Chunk size for streaming audio back over WebSocket
-// Twilio expects 20ms chunks at 8kHz = 160 bytes of µ-law
+// Plivo expects 20ms chunks at 8kHz = 160 bytes of µ-law
 const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize;
 const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SEND AUDIO THROUGH BIDIRECTIONAL STREAM (NO REST API CALLS)
 // ══════════════════════════════════════════════════════════════════════════════
-// CRITICAL FIX: This replaces twilioClient.playAudio() which was calling
-// client.calls(sid).update({twiml}) and DESTROYING the <Connect><Stream>.
+// Audio playback through bidirectional WebSocket stream.
+// We send audio back by writing 'media' events to the WebSocket.
+// This avoids REST API calls which would interrupt the <Connect><Stream>.
 //
-// With <Connect><Stream> (bidirectional), we send audio back by writing
-// 'media' events to the WebSocket. The format is:
-// { event: 'media', streamSid: '...', media: { payload: '<base64 µ-law>' } }
+// The format is:
+// { event: 'playAudio', media: { contentType: 'audio/x-mulaw;rate=8000', payload: '<base64 µ-law>' } }
 //
 async function sendAudioThroughStream(session, ws, mulawBuffer) {
   if (!session.streamSid || ws.readyState !== 1) return;
@@ -226,9 +225,9 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
     const chunk = mulawBuffer.slice(start, end);
 
     const msg = JSON.stringify({
-      event: 'media',
-      streamSid: session.streamSid,
+      event: 'playAudio',
       media: {
+        contentType: 'audio/x-mulaw;rate=8000',
         payload: chunk.toString('base64')
       }
     });
@@ -247,11 +246,10 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
     }
   }
 
-  // Send a mark event so we know when Twilio finishes playing the audio
+  // Send a mark event so we know when Plivo finishes playing the audio
   try {
     ws.send(JSON.stringify({
       event: 'mark',
-      streamSid: session.streamSid,
       mark: { name: `speech_${Date.now()}` }
     }));
   } catch (e) { /* ignore */ }
@@ -266,6 +264,10 @@ module.exports = function setupWs(app) {
   app.ws('/stream', function (ws, req) {
     let session = null;
     let pingInterval = null;
+
+    // Extract Plivo params from query string (set in plivo.js voice webhook)
+    const qsCallUuid = req.query?.callUuid || null;
+    const qsCallerNumber = req.query?.callerNumber || '';
 
     // ── WebSocket Heartbeat (detect stale connections) ─────────────────────
     pingInterval = setInterval(() => {
@@ -300,12 +302,13 @@ module.exports = function setupWs(app) {
 
         // ── START event — initialize session ────────────────────────────
         if (msg.event === 'start') {
-          const callSid = msg.start?.callSid;
-          const callerNumber = msg.start?.customParameters?.callerNumber || '';
-          const streamSid = msg.streamSid;
+          // Plivo: callUuid comes from start event or query string
+          const callSid = msg.start?.callId || qsCallUuid || msg.streamId;
+          const callerNumber = msg.start?.from || qsCallerNumber || '';
+          const streamSid = msg.start?.streamId || msg.streamId || callSid;
 
           // FIX C2: Validate required fields before creating session
-          if (!callSid || !streamSid) {
+          if (!callSid) {
             logger.error('WS start event missing required fields', { callSid, streamSid });
             ws.close(1003, 'Missing required parameters');
             return;
@@ -315,7 +318,7 @@ module.exports = function setupWs(app) {
           session.streamSid = streamSid;
           sessions.set(callSid, session);
 
-          logger.log('📞 Stream started', { callSid, callerNumber, streamSid });
+          logger.log('📞 Stream started (Plivo)', { callSid, callerNumber, streamSid });
 
           // Max call duration safety
           session.maxDurationTimer = setTimeout(async () => {
@@ -348,11 +351,10 @@ module.exports = function setupWs(app) {
             // If agent is currently playing audio and user starts speaking → interrupt
             if (session.isPlaying) {
               logger.log('🔇 User interrupted agent playback', session.callSid);
-              // Clear the audio queue on the Twilio side
+              // Clear the audio queue on the Plivo side
               try {
                 ws.send(JSON.stringify({
-                  event: 'clear',
-                  streamSid: session.streamSid
+                  event: 'clearAudio'
                 }));
               } catch (e) { /* ignore */ }
               session.isPlaying = false;
@@ -468,8 +470,8 @@ async function deliverInitialGreeting(session, ws) {
     if (ttsResult && ttsResult.mulawBuffer && ws.readyState === 1) {
       await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
     } else if (session.callSid) {
-      // Fallback: Use Twilio REST API only as last resort
-      await twilioClient.sayText(session.callSid, greetingText).catch(e =>
+      // Fallback: Use Plivo REST Speak API only as last resort
+      await plivoClient.sayText(session.callSid, greetingText).catch(e =>
         logger.error('Say fallback failed', e.message)
       );
     }
@@ -613,12 +615,12 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
     if (ttsResult && ttsResult.mulawBuffer) {
       await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
     } else {
-      // Fallback: use Twilio REST Say (will interrupt the stream — last resort)
-      logger.warn('TTS raw synthesis failed, falling back to REST Say');
+      // Fallback: use Plivo REST Speak (will interrupt the stream — last resort)
+      logger.warn('TTS raw synthesis failed, falling back to REST Speak');
       try {
-        await twilioClient.sayText(session.callSid, reply.speak);
+        await plivoClient.sayText(session.callSid, reply.speak);
       } catch (e) {
-        logger.error('Say fallback also failed', e.message);
+        logger.error('Speak fallback also failed', e.message);
       }
     }
 
@@ -686,7 +688,7 @@ function startSilenceTimer(session, ws) {
           if (ttsResult && ttsResult.mulawBuffer) {
             await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
           } else if (session.callSid) {
-            await twilioClient.sayText(session.callSid, promptText);
+            await plivoClient.sayText(session.callSid, promptText);
           }
         }
       } catch (err) {
@@ -717,7 +719,7 @@ async function endCallGracefully(session, ws, farewellText) {
           // Wait for audio to play (~2.5s for a farewell)
           await new Promise(r => setTimeout(r, 2500));
         } else if (session.callSid) {
-          await twilioClient.sayText(session.callSid, farewellText);
+          await plivoClient.sayText(session.callSid, farewellText);
           await new Promise(r => setTimeout(r, 2500));
         }
       } catch (err) {
@@ -726,7 +728,7 @@ async function endCallGracefully(session, ws, farewellText) {
     }
 
     if (session.callSid) {
-      await twilioClient.endCall(session.callSid).catch(e => logger.warn('End call API error', e.message));
+      await plivoClient.endCall(session.callSid).catch(e => logger.warn('End call API error', e.message));
     }
   } catch (err) {
     logger.error('Graceful end error', err.message);

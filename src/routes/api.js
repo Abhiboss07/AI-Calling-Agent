@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const twilioClient = require('../services/twilioClient');
+const plivoClient = require('../services/plivoClient');
 const Call = require('../models/call.model');
 const Lead = require('../models/lead.model');
 const Transcript = require('../models/transcript.model');
@@ -47,14 +47,14 @@ router.post('/v1/calls/start', async (req, res) => {
       });
     }
 
-    const webhookUrl = `${req.protocol}://${req.get('host')}/twilio/voice`;
-    const twCall = await twilioClient.makeOutboundCall(cleanPhone, fromNumber || undefined, webhookUrl);
-    const call = await Call.create({ campaignId, phoneNumber: cleanPhone, callSid: twCall.sid, status: 'ringing' });
+    const webhookUrl = `${req.protocol}://${req.get('host')}/plivo/voice`;
+    const plivoCall = await plivoClient.makeOutboundCall(cleanPhone, fromNumber || undefined, webhookUrl);
+    const call = await Call.create({ campaignId, phoneNumber: cleanPhone, callSid: plivoCall.sid, status: 'ringing' });
 
-    costControl.trackCall(twCall.sid);
+    costControl.trackCall(plivoCall.sid);
     metrics.incrementCallsStarted();
 
-    res.json({ ok: true, callId: call._id, callSid: twCall.sid });
+    res.json({ ok: true, callId: call._id, callSid: plivoCall.sid });
   } catch (err) {
     logger.error('API start call error', err.message);
     metrics.incrementCallsFailed();

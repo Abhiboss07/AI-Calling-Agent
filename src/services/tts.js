@@ -59,7 +59,7 @@ function pcmBufferToMulaw(pcmBuffer) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// RESAMPLE: OpenAI TTS outputs 24kHz, Twilio needs 8kHz
+// RESAMPLE: OpenAI TTS outputs 24kHz, Plivo needs 8kHz
 // ══════════════════════════════════════════════════════════════════════════════
 // Simple 3:1 downsampling (24kHz → 8kHz) with averaging filter
 function resample24kTo8k(pcm24kBuffer) {
@@ -120,10 +120,10 @@ async function synthesizeRaw(text, callSid) {
     }
 
     // OpenAI PCM output is 24kHz 16-bit mono
-    // Resample to 8kHz for Twilio
+    // Resample to 8kHz for Plivo
     const pcm8k = resample24kTo8k(Buffer.from(rawBuffer));
 
-    // Encode to µ-law for Twilio bidirectional stream
+    // Encode to µ-law for Plivo bidirectional stream
     const mulawBuffer = pcmBufferToMulaw(pcm8k);
 
     logger.debug(`TTS raw: ${cleanText.length} chars → ${mulawBuffer.length} bytes µ-law (${synthMs}ms)`);

@@ -5,7 +5,7 @@ const costTracker = new Map();
 const MAX_TRACKED = 1000; // Safety cap
 
 const COSTS = {
-  twilio_per_min: 0.50,    // ₹0.50/min
+  plivo_per_min: 0.32,     // ~₹0.32/min (Plivo voice + streaming)
   whisper_per_min: 0.40,    // ₹0.40/min
   gpt4o_mini_per_token: 0.00001, // ~₹0.00001/token
   tts_per_char: 0.00002  // ~₹0.00002/char
@@ -45,7 +45,7 @@ function getEstimatedCost(callSid) {
   const cost = costTracker.get(callSid);
   if (!cost) return 0;
   return (
-    cost.minutes * COSTS.twilio_per_min +
+    cost.minutes * COSTS.plivo_per_min +
     cost.minutes * COSTS.whisper_per_min +
     cost.tokens * COSTS.gpt4o_mini_per_token +
     cost.ttsChars * COSTS.tts_per_char
@@ -70,7 +70,7 @@ function endCallTracking(callSid) {
       {
         $set: {
           estimatedCost: finalCost, costBreakdown: {
-            twilio: entry.twilio || 0,
+            plivo: entry.minutes * COSTS.plivo_per_min || 0,
             whisper: entry.whisper || 0,
             gpt: entry.gpt || 0,
             tts: entry.tts || 0

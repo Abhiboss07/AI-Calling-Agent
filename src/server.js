@@ -3,7 +3,7 @@ const expressWs = require('express-ws');
 const config = require('./config');
 const logger = require('./utils/logger');
 const db = require('./services/db');
-const twilioRoutes = require('./routes/twilio');
+const plivoRoutes = require('./routes/plivo');
 const apiRoutes = require('./routes/api');
 const setupWs = require('./ws-media');
 const metrics = require('./services/metrics');
@@ -183,10 +183,10 @@ async function start() {
   // ══════════════════════════════════════════════════════════════════════════
   // ROUTES
   // ══════════════════════════════════════════════════════════════════════════
-  app.use('/twilio', twilioRoutes);
+  app.use('/plivo', plivoRoutes);
   app.use('/api', apiRoutes);
 
-  // WebSocket for Twilio Media Streams
+  // WebSocket for Plivo Bidirectional Audio Streams
   setupWs(app);
 
   // ── Global error handler ────────────────────────────────────────────────

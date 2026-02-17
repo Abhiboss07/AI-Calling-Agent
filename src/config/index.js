@@ -4,7 +4,7 @@ const path = require('path');
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 // ── Validation ──────────────────────────────────────────────────────────────
-const REQUIRED = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_CALLER_ID', 'OPENAI_API_KEY'];
+const REQUIRED = ['PLIVO_AUTH_ID', 'PLIVO_AUTH_TOKEN', 'PLIVO_CALLER_ID', 'OPENAI_API_KEY'];
 const missing = REQUIRED.filter(k => !process.env[k]);
 if (missing.length) {
   // L5: use stderr directly here since logger depends on config (circular)
@@ -18,10 +18,10 @@ module.exports = {
   port: Number(process.env.PORT) || 3000,
   host: process.env.HOST || '0.0.0.0',
 
-  twilio: {
-    accountSid: process.env.TWILIO_ACCOUNT_SID,
-    authToken: process.env.TWILIO_AUTH_TOKEN,
-    callerId: process.env.TWILIO_CALLER_ID
+  plivo: {
+    authId: process.env.PLIVO_AUTH_ID,
+    authToken: process.env.PLIVO_AUTH_TOKEN,
+    callerId: process.env.PLIVO_CALLER_ID
   },
 
   openaiApiKey: process.env.OPENAI_API_KEY,
