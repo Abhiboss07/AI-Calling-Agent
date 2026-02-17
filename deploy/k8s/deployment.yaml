@@ -14,8 +14,8 @@ metadata:
 ---
 # ── SECRETS (create before deployment) ───────────────────────────────────────
 # kubectl create secret generic app-secrets -n ai-calling \
-#   --from-literal=TWILIO_ACCOUNT_SID=AC... \
-#   --from-literal=TWILIO_AUTH_TOKEN=... \
+#   --from-literal=PLIVO_AUTH_ID=MA... \
+#   --from-literal=PLIVO_AUTH_TOKEN=... \
 #   --from-literal=OPENAI_API_KEY=sk-... \
 #   --from-literal=S3_ACCESS_KEY=... \
 #   --from-literal=S3_SECRET_KEY=... \
@@ -29,9 +29,9 @@ type: Opaque
 data:
   # Base64 encoded values — REPLACE with your actual secrets
   # echo -n "your-value" | base64
-  TWILIO_ACCOUNT_SID: REPLACE_BASE64
-  TWILIO_AUTH_TOKEN: REPLACE_BASE64
-  TWILIO_CALLER_ID: REPLACE_BASE64
+  PLIVO_AUTH_ID: REPLACE_BASE64
+  PLIVO_AUTH_TOKEN: REPLACE_BASE64
+  PLIVO_CALLER_ID: REPLACE_BASE64
   OPENAI_API_KEY: REPLACE_BASE64
   MONGODB_URI: REPLACE_BASE64
   S3_BUCKET: REPLACE_BASE64

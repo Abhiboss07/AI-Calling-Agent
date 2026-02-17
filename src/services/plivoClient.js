@@ -69,7 +69,7 @@ async function sayText(callUuid, text) {
     ensureClient();
     logger.debug('Plivo: speak text on call', callUuid);
     try {
-        await client.calls.speak(callUuid, text, { voice: 'WOMAN', language: 'en-IN' });
+        await client.calls.speakText(callUuid, text, { voice: 'WOMAN', language: 'en-IN' });
     } catch (err) {
         logger.warn('Plivo speak failed (may be expected during stream)', err.message);
     }

@@ -51,7 +51,7 @@ function validatePlivoSignature(req, res, next) {
 
     try {
         const plivo = require('plivo');
-        const isValid = plivo.validateV2Signature(url, nonce, signature, config.plivo.authToken);
+        const isValid = plivo.validateSignature(url, nonce, signature, config.plivo.authToken);
         if (!isValid) {
             logger.warn('REJECTED: Invalid Plivo signature', req.originalUrl);
             return res.status(403).send('Forbidden');

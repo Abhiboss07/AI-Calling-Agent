@@ -4,7 +4,7 @@
  * LOAD TEST — AI Calling Agent WebSocket + API
  * ══════════════════════════════════════════════════════════════════════════════
  *
- * Simulates concurrent Twilio WebSocket connections sending µ-law audio.
+ * Simulates concurrent Plivo WebSocket connections sending µ-law audio.
  * This is the ONLY way to properly load test a real-time voice system —
  * HTTP load testers (k6, artillery) can't simulate WebSocket media streams.
  *
@@ -108,20 +108,18 @@ function simulateCall(callId) {
         stats.peakConnections = stats.activeConnections;
       }
 
-      // Send 'start' event (simulating Twilio)
+      // Send 'start' event (simulating Plivo)
       ws.send(JSON.stringify({
         event: 'start',
-        streamSid: `MZ_TEST_${callId}`,
+        streamId: `MZ_TEST_${callId}`,
         start: {
-          callSid,
-          customParameters: {
-            callerNumber: `+9199${String(callId).padStart(8, '0')}`,
-            direction: 'inbound'
-          }
+          callId: callSid,
+          from: `+9199${String(callId).padStart(8, '0')}`,
+          streamId: `MZ_TEST_${callId}`
         }
       }));
 
-      // Send media events at ~50ms intervals (20 chunks/sec like Twilio)
+      // Send media events at ~50ms intervals (20 chunks/sec like Plivo)
       let chunksSent = 0;
       const totalChunks = DURATION_SEC * 20;
       const voiceStartChunk = Math.floor(totalChunks * 0.1);  // Start "speaking" at 10%
@@ -150,8 +148,8 @@ function simulateCall(callId) {
 
         ws.send(JSON.stringify({
           event: 'media',
-          streamSid: `MZ_TEST_${callId}`,
           media: {
+            contentType: 'audio/x-mulaw;rate=8000',
             payload,
             track: 'inbound',
             timestamp: String(chunksSent * 50),

@@ -202,8 +202,7 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
   // Clear any previously queued audio first
   try {
     ws.send(JSON.stringify({
-      event: 'clear',
-      streamSid: session.streamSid
+      event: 'clearAudio'
     }));
   } catch (e) { /* ignore */ }
 

@@ -1,6 +1,6 @@
 # AI Calling Agent
 
-**Production-grade AI Voice Agent** for outbound calling, lead qualification, and real-time conversation. Built with Node.js, Express, Twilio, OpenAI (Whisper + GPT-4o-mini + TTS), and Next.js.
+**Production-grade AI Voice Agent** for outbound calling, lead qualification, and real-time conversation. Built with Node.js, Express, Plivo, OpenAI (Whisper + GPT-4o-mini + TTS), and Next.js.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)
@@ -9,7 +9,7 @@
 
 ## 🚀 Features
 
-- **Bidirectional Low-Latency Audio:** Uses Twilio Media Streams with direct µ-law streaming (no REST API overhead).
+- **Bidirectional Low-Latency Audio:** Uses Plivo Audio Streams with direct µ-law streaming (no REST API overhead).
 - **Real Estate Persona:** Pre-configured "Priya" persona for lead qualification, objection handling, and appointment booking.
 - **Smart Pipeline:**
   - **Speech-to-Text:** OpenAI Whisper (optimized for short utterances).
@@ -26,7 +26,7 @@
 The system consists of two main parts:
 
 ### 1. Backend (`/src`)
-- **Express Server:** Handles API endpoints and Twilio webhooks.
+- **Express Server:** Handles API endpoints and Plivo webhooks.
 - **WebSocket Server:** Manages real-time audio streams (`/stream`).
 - **Services:** Modular services for STT, LLM, TTS, Storage (S3/R2), and Database (MongoDB).
 - **Worker:** Processes background tasks (optional, strictly speaking this is monolithic async).
@@ -42,7 +42,7 @@ The system consists of two main parts:
 
 - **Node.js** v20+
 - **MongoDB** v6+ (Local or Atlas)
-- **Twilio Account** (Account SID, Auth Token, Phone Number)
+- **Plivo Account** (Auth ID, Auth Token, Phone Number)
 - **OpenAI API Key**
 - **AWS S3** or **Cloudflare R2** bucket (for recordings/logs)
 
@@ -74,10 +74,10 @@ The system consists of two main parts:
     # Database
     MONGODB_URI=mongodb://localhost:27017/ai_outbound
 
-    # Twilio
-    TWILIO_ACCOUNT_SID=AC...
-    TWILIO_AUTH_TOKEN=...
-    TWILIO_CALLER_ID=+1234567890
+    # Plivo
+    PLIVO_AUTH_ID=MA...
+    PLIVO_AUTH_TOKEN=...
+    PLIVO_CALLER_ID=+1234567890
 
     # OpenAI
     OPENAI_API_KEY=sk-...
@@ -177,7 +177,7 @@ npm run load-test:100
 - [ ] Set `NODE_ENV=production`
 - [ ] Use `S3_PUBLIC_URL` for faster asset delivery.
 - [ ] Ensure MongoDB has persistent storage.
-- [ ] Configure Twilio Webhook to point to your domain (e.g., `https://api.myapp.com/twilio/voice`).
+- [ ] Configure Plivo Webhook to point to your domain (e.g., `https://api.myapp.com/plivo/voice`).
 - [ ] Enable `trust proxy` in Express if behind Nginx/Load Balancer.
 
 ---
