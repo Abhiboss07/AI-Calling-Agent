@@ -27,10 +27,25 @@ Always respond in JSON: {"speak":"...","action":"continue|collect|hangup|escalat
 }
 
 // ── Inject dynamic variables into prompt ────────────────────────────────────
-function buildSystemPrompt() {
-  return SYSTEM_PROMPT
-    .replace(/\{\{company_name\}\}/g, config.companyName)
-    .replace(/\{\{agent_name\}\}/g, config.agentName);
+// ── Inject dynamic variables into prompt ────────────────────────────────────
+function buildSystemPrompt(knowledgeBase, script) {
+  let basePrompt = SYSTEM_PROMPT;
+
+  // 1. Prefer Knowledge Base system prompt if available
+  if (knowledgeBase && knowledgeBase.systemPrompt && knowledgeBase.systemPrompt.trim()) {
+    basePrompt = knowledgeBase.systemPrompt;
+  }
+
+  // 2. Determine variable values
+  const companyName = knowledgeBase?.companyName || script?.companyName || config.companyName;
+  const agentName = knowledgeBase?.agentName || config.agentName;
+  const kbContent = knowledgeBase?.content || '';
+
+  // 3. Replace variables
+  return basePrompt
+    .replace(/\{\{company_name\}\}/g, companyName)
+    .replace(/\{\{agent_name\}\}/g, agentName)
+    .replace(/\{\{knowledge_base\}\}/g, kbContent);
 }
 
 // ── Conversation history per call (in-memory, bounded) ──────────────────────
@@ -79,7 +94,7 @@ const FALLBACK_RESPONSE = {
 };
 
 // ── Main generate function ──────────────────────────────────────────────────
-async function generateReply({ callState, script, lastTranscript, customerName, callSid }) {
+async function generateReply({ callState, script, lastTranscript, customerName, callSid, knowledgeBase }) {
   try {
     // Build user message with context
     const userMsg = [
@@ -91,7 +106,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
     ].join('\n');
 
     // Build full message array with history
-    const systemMsg = { role: 'system', content: buildSystemPrompt() };
+    const systemMsg = { role: 'system', content: buildSystemPrompt(knowledgeBase, script) };
     const history = callSid ? getHistory(callSid).messages : [];
     const messages = [
       systemMsg,

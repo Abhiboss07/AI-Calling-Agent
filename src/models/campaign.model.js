@@ -5,7 +5,8 @@ const CampaignSchema = new mongoose.Schema({
   name: { type: String, index: true },
   script: { type: Array, default: [] },
   dialSettings: { type: Object, default: {} },
-  costBudgetPerMin: { type: Number, default: 0 }
+  costBudgetPerMin: { type: Number, default: 0 },
+  knowledgeBaseId: { type: mongoose.Schema.Types.ObjectId, ref: 'KnowledgeBase' }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Campaign', CampaignSchema);

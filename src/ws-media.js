@@ -4,6 +4,8 @@ const llm = require('./services/llm');
 const tts = require('./services/tts');
 const plivoClient = require('./services/plivoClient');
 const Call = require('./models/call.model');
+const Campaign = require('./models/campaign.model');
+const KnowledgeBase = require('./models/knowledgeBase.model');
 const Lead = require('./models/lead.model');
 const Transcript = require('./models/transcript.model');
 const config = require('./config');
@@ -144,6 +146,7 @@ class CallSession {
     this.transcriptEntries = [];
     this.leadData = {};
     this.qualityScore = 0;
+    this.knowledgeBase = null; // KB context for this call
 
     // Timing
     this.startTime = Date.now();
@@ -317,7 +320,24 @@ module.exports = function setupWs(app) {
           session.streamSid = streamSid;
           sessions.set(callSid, session);
 
-          logger.log('📞 Stream started (Plivo)', { callSid, callerNumber, streamSid });
+          session.streamSid = streamSid;
+          sessions.set(callSid, session);
+
+          // ── Fetch Call -> Campaign -> KnowledgeBase ──────────────────
+          try {
+            const call = await Call.findOne({ callSid }).populate('campaignId');
+            if (call && call.campaignId) {
+              const campaign = await Campaign.findById(call.campaignId).populate('knowledgeBaseId');
+              if (campaign && campaign.knowledgeBaseId) {
+                session.knowledgeBase = campaign.knowledgeBaseId;
+                logger.log('🧠 Knowledge Base loaded:', session.knowledgeBase.name);
+              }
+            }
+          } catch (err) {
+            logger.error('Failed to load KB context', err.message);
+          }
+
+          logger.log('📞 Stream started (Plivo)', { callSid, callerNumber, streamSid, kb: session.knowledgeBase?.name });
 
           // Max call duration safety
           session.maxDurationTimer = setTimeout(async () => {
@@ -461,7 +481,9 @@ module.exports = function setupWs(app) {
 // ══════════════════════════════════════════════════════════════════════════════
 async function deliverInitialGreeting(session, ws) {
   try {
-    const greetingText = `Hi! This is ${config.agentName} from ${config.companyName}. How can I help you with your property search today?`;
+    const agentName = session.knowledgeBase?.agentName || config.agentName;
+    const companyName = session.knowledgeBase?.companyName || config.companyName;
+    const greetingText = `Hi! This is ${agentName} from ${companyName}. How can I help you with your property search today?`;
 
     // Synthesize → get raw PCM buffer (not mp3+upload)
     const ttsResult = await tts.synthesizeRaw(greetingText, session.callSid);
@@ -567,10 +589,12 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
   const llmStart = Date.now();
   const reply = await llm.generateReply({
     callState: session.callState,
-    script: { companyName: config.companyName },
+    callState: session.callState,
+    script: { companyName: session.knowledgeBase?.companyName || config.companyName },
     lastTranscript: sttResult.text,
     customerName: session.leadData.name || session.callerNumber,
-    callSid: session.callSid
+    callSid: session.callSid,
+    knowledgeBase: session.knowledgeBase
   });
   const llmLatency = Date.now() - llmStart;
 

@@ -13,7 +13,7 @@ export default function CSVManagement() {
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState(null);
-    const [campaignId, setCampaignId] = useState('default');
+    const [campaignId, setCampaignId] = useState('');
     const [mode, setMode] = useState('append');
     const [history, setHistory] = useState([]);
 
@@ -91,19 +91,26 @@ export default function CSVManagement() {
                     <h3>Upload Numbers</h3>
                     <div style={{ display: 'grid', gap: '1rem' }}>
                         <div>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Campaign ID</label>
-                            <input type="text" value={campaignId} onChange={e => setCampaignId(e.target.value)} placeholder="e.g. campaign_01" />
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Campaign</label>
+                            <CampaignSelector
+                                selectedId={campaignId}
+                                onSelect={(id) => setCampaignId(id)}
+                            />
                         </div>
                         <div>
                             <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Upload Mode</label>
-                            <select value={mode} onChange={e => setMode(e.target.value)}>
+                            <select
+                                value={mode}
+                                onChange={e => setMode(e.target.value)}
+                                style={{ width: '100%', padding: '0.5rem', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', color: 'white', borderRadius: '4px' }}
+                            >
                                 <option value="append">Append (Add to existing)</option>
                                 <option value="replace">Replace (Clear queued & add new)</option>
                             </select>
                         </div>
                         <div>
                             <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Select File (.csv, .txt)</label>
-                            <input type="file" accept=".csv,.txt" onChange={handleFile} />
+                            <input type="file" accept=".csv,.txt" onChange={handleFile} style={{ width: '100%' }} />
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
                                 <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Format: phone, name, email</span>
                                 <button type="button" onClick={loadSample} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.8rem', textDecoration: 'underline' }}>
@@ -112,7 +119,7 @@ export default function CSVManagement() {
                             </div>
                         </div>
 
-                        <button className="btn btn-primary" onClick={upload} disabled={!file || loading}>
+                        <button className="btn btn-primary" onClick={upload} disabled={!file || !campaignId || loading}>
                             {loading ? 'Uploading...' : 'Upload File'}
                         </button>
                     </div>
@@ -184,6 +191,99 @@ export default function CSVManagement() {
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+function CampaignSelector({ selectedId, onSelect }) {
+    const [campaigns, setCampaigns] = useState([]);
+    const [kbs, setKbs] = useState([]);
+    const [showNew, setShowNew] = useState(false);
+    const [newName, setNewName] = useState('');
+    const [newKbId, setNewKbId] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        fetch('/api/v1/campaigns').then(r => r.json()).then(d => d.ok && setCampaigns(d.data));
+        fetch('/api/v1/knowledge-bases').then(r => r.json()).then(d => d.ok && setKbs(d.data));
+    }, []);
+
+    const createCampaign = async () => {
+        if (!newName) return;
+        setLoading(true);
+        try {
+            const res = await fetch('/api/v1/campaigns', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newName, knowledgeBaseId: newKbId || null })
+            });
+            const d = await res.json();
+            if (d.ok) {
+                setCampaigns([d.data, ...campaigns]);
+                onSelect(d.data._id);
+                setShowNew(false);
+                setNewName('');
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (showNew) {
+        return (
+            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '4px', border: '1px solid var(--accent)' }}>
+                <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem' }}>New Campaign</h4>
+                <input
+                    type="text"
+                    placeholder="Campaign Name"
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    style={{ width: '100%', marginBottom: '0.5rem', padding: '0.4rem', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white' }}
+                />
+                <select
+                    value={newKbId}
+                    onChange={e => setNewKbId(e.target.value)}
+                    style={{ width: '100%', marginBottom: '0.5rem', padding: '0.4rem', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white' }}
+                >
+                    <option value="">-- No Knowledge Base --</option>
+                    {kbs.map(kb => (
+                        <option key={kb._id} value={kb._id}>{kb.name} ({kb.companyName})</option>
+                    ))}
+                </select>
+                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                    <button onClick={() => setShowNew(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>Cancel</button>
+                    <button onClick={createCampaign} disabled={loading} style={{ background: 'var(--accent)', border: 'none', color: 'white', padding: '0.2rem 0.6rem', borderRadius: '2px', cursor: 'pointer', fontSize: '0.8rem' }}>
+                        {loading ? 'Creating...' : 'Create'}
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <select
+                value={selectedId}
+                onChange={e => onSelect(e.target.value)}
+                style={{ flex: 1, padding: '0.5rem', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', color: 'white', borderRadius: '4px' }}
+            >
+                <option value="">Select or Create Campaign...</option>
+                {campaigns.map(c => (
+                    <option key={c._id} value={c._id}>
+                        {c.name} {c.knowledgeBaseId ? `(KB: ${c.knowledgeBaseId.name || 'Linked'})` : ''}
+                    </option>
+                ))}
+            </select>
+            <button
+                onClick={() => setShowNew(true)}
+                title="Create New Campaign"
+                className="btn btn-outline"
+                style={{ padding: '0 0.8rem', minHeight: 'auto' }}
+            >
+                +
+            </button>
         </div>
     );
 }

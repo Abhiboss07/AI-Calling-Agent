@@ -10,6 +10,7 @@ const Sidebar = () => {
     const links = [
         { href: '/', label: 'Overview', icon: LayoutDashboard },
         { href: '/clients', label: 'Clients', icon: Users },
+        { href: '/knowledge-bases', label: 'Knowledge Base', icon: FileText },
         { href: '/csv', label: 'Management', icon: Upload },
         // { href: '/settings', label: 'Settings', icon: Settings },
     ];
