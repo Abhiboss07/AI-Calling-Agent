@@ -5,6 +5,7 @@ const logger = require('../utils/logger');
 const metrics = require('./metrics');
 const costControl = require('./costControl');
 const config = require('../config');
+const { getLanguage } = require('../config/languages');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TTS SERVICE — OpenAI Speech Synthesis
@@ -17,14 +18,15 @@ const MAX_CACHE = config.tts?.cacheMaxEntries || 50;
 const MAX_CACHE_BYTES = config.tts?.cacheMaxBytes || (3 * 1024 * 1024); // 3MB
 let currentCacheBytes = 0;
 
-function cacheKey(text) {
+function cacheKey(text, language) {
   // Simple FNV-1a hash for fast unique key generation
+  const input = `${language || 'en-IN'}:${text}`;
   let hash = 2166136261;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
     hash = (hash * 16777619) >>> 0;
   }
-  return `${hash}_${text.length}`;
+  return `${hash}_${input.length}`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -59,7 +61,7 @@ function pcmBufferToMulaw(pcmBuffer) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// RESAMPLE: OpenAI TTS outputs 24kHz, Plivo needs 8kHz
+// RESAMPLE: OpenAI TTS outputs 24kHz, Vobiz needs 8kHz
 // ══════════════════════════════════════════════════════════════════════════════
 // Simple 3:1 downsampling (24kHz → 8kHz) with averaging filter
 function resample24kTo8k(pcm24kBuffer) {
@@ -90,14 +92,14 @@ function resample24kTo8k(pcm24kBuffer) {
 // that can be sent directly through the WebSocket without any REST API calls.
 // This avoids the fatal bug where client.calls(sid).update({twiml}) kills
 // the <Connect><Stream>.
-async function synthesizeRaw(text, callSid) {
+async function synthesizeRaw(text, callSid, language = 'en-IN') {
   if (!text || text.trim().length === 0) {
     logger.warn('TTS: empty text, skipping');
     return null;
   }
 
   const cleanText = text.trim();
-  const key = cacheKey(cleanText);
+  const key = cacheKey(cleanText, language);
 
   // Check cache
   if (ttsCache.has(key)) {
@@ -110,8 +112,10 @@ async function synthesizeRaw(text, callSid) {
   try {
     metrics.incrementTtsRequest(true);
 
-    // Request PCM output from OpenAI TTS (wav format, easier to process)
-    const rawBuffer = await openai.ttsSynthesize(cleanText, 'alloy', 'pcm');
+    // Request PCM output from OpenAI TTS
+    const langConfig = getLanguage(language);
+    const voice = langConfig.ttsVoice || 'alloy';
+    const rawBuffer = await openai.ttsSynthesize(cleanText, voice, 'pcm');
     const synthMs = Date.now() - startMs;
 
     if (!rawBuffer || rawBuffer.length === 0) {
@@ -120,10 +124,10 @@ async function synthesizeRaw(text, callSid) {
     }
 
     // OpenAI PCM output is 24kHz 16-bit mono
-    // Resample to 8kHz for Plivo
+    // Resample to 8kHz for Vobiz bidirectional stream
     const pcm8k = resample24kTo8k(Buffer.from(rawBuffer));
 
-    // Encode to µ-law for Plivo bidirectional stream
+    // Encode to µ-law for Vobiz bidirectional stream
     const mulawBuffer = pcmBufferToMulaw(pcm8k);
 
     logger.debug(`TTS raw: ${cleanText.length} chars → ${mulawBuffer.length} bytes µ-law (${synthMs}ms)`);
@@ -154,7 +158,7 @@ async function synthesizeRaw(text, callSid) {
 // ══════════════════════════════════════════════════════════════════════════════
 // synthesizeAndUpload() — Returns a URL (for legacy/fallback use)
 // ══════════════════════════════════════════════════════════════════════════════
-async function synthesizeAndUpload(text, callSid) {
+async function synthesizeAndUpload(text, callSid, language = 'en-IN') {
   if (!text || text.trim().length === 0) {
     logger.warn('TTS: empty text, skipping');
     return null;
@@ -167,7 +171,9 @@ async function synthesizeAndUpload(text, callSid) {
   try {
     metrics.incrementTtsRequest(true);
 
-    const audioBuffer = await openai.ttsSynthesize(cleanText, 'alloy', 'mp3');
+    const langConfig = getLanguage(language);
+    const voice = langConfig.ttsVoice || 'alloy';
+    const audioBuffer = await openai.ttsSynthesize(cleanText, voice, 'mp3');
     const synthMs = Date.now() - startMs;
 
     const key = `tts/${Date.now()}-${uuidv4().substring(0, 8)}.mp3`;

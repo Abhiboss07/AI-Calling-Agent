@@ -5,6 +5,7 @@ const metrics = require('./metrics');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { getLanguage } = require('../config/languages');
 
 // ── Load system prompt ──────────────────────────────────────────────────────
 let SYSTEM_PROMPT = '';
@@ -27,25 +28,10 @@ Always respond in JSON: {"speak":"...","action":"continue|collect|hangup|escalat
 }
 
 // ── Inject dynamic variables into prompt ────────────────────────────────────
-// ── Inject dynamic variables into prompt ────────────────────────────────────
-function buildSystemPrompt(knowledgeBase, script) {
-  let basePrompt = SYSTEM_PROMPT;
-
-  // 1. Prefer Knowledge Base system prompt if available
-  if (knowledgeBase && knowledgeBase.systemPrompt && knowledgeBase.systemPrompt.trim()) {
-    basePrompt = knowledgeBase.systemPrompt;
-  }
-
-  // 2. Determine variable values
-  const companyName = knowledgeBase?.companyName || script?.companyName || config.companyName;
-  const agentName = knowledgeBase?.agentName || config.agentName;
-  const kbContent = knowledgeBase?.content || '';
-
-  // 3. Replace variables
-  return basePrompt
-    .replace(/\{\{company_name\}\}/g, companyName)
-    .replace(/\{\{agent_name\}\}/g, agentName)
-    .replace(/\{\{knowledge_base\}\}/g, kbContent);
+function buildSystemPrompt() {
+  return SYSTEM_PROMPT
+    .replace(/\{\{company_name\}\}/g, config.companyName)
+    .replace(/\{\{agent_name\}\}/g, config.agentName);
 }
 
 // ── Conversation history per call (in-memory, bounded) ──────────────────────
@@ -94,8 +80,16 @@ const FALLBACK_RESPONSE = {
 };
 
 // ── Main generate function ──────────────────────────────────────────────────
-async function generateReply({ callState, script, lastTranscript, customerName, callSid, knowledgeBase }) {
+async function generateReply({ callState, script, lastTranscript, customerName, callSid, language }) {
   try {
+    const langConfig = getLanguage(language || config.language?.default || 'en-IN');
+
+    // Build language-aware system prompt
+    let systemContent = buildSystemPrompt();
+    if (language && language !== 'en-IN') {
+      systemContent += `\n\nIMPORTANT LANGUAGE INSTRUCTION: The customer is speaking in ${langConfig.name}. You MUST respond in ${langConfig.name}. Use natural, conversational ${langConfig.name}. Keep the same JSON format but the "speak" field must be in ${langConfig.name}.`;
+    }
+
     // Build user message with context
     const userMsg = [
       `CUSTOMER NAME: ${customerName || 'unknown'}`,
@@ -106,7 +100,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
     ].join('\n');
 
     // Build full message array with history
-    const systemMsg = { role: 'system', content: buildSystemPrompt(knowledgeBase, script) };
+    const systemMsg = { role: 'system', content: systemContent };
     const history = callSid ? getHistory(callSid).messages : [];
     const messages = [
       systemMsg,
@@ -159,7 +153,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
   } catch (err) {
     logger.error('LLM error', err.message || err);
     metrics.incrementLlmRequest(false);
-    return { ...FALLBACK_RESPONSE, speak: 'Thank you for your time. We will call you back. Goodbye.', action: 'hangup', nextStep: 'close' };
+    return { ...FALLBACK_RESPONSE, speak: (getLanguage(language)?.farewell) || 'Thank you for your time. We will call you back. Goodbye.', action: 'hangup', nextStep: 'close' };
   }
 }
 

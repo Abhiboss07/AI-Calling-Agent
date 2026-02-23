@@ -24,7 +24,7 @@ const apiClient = axios.create({
 /** @param {Buffer} buffer - WAV audio buffer (8kHz mono 16-bit PCM)
  *  @param {string} mimeType
  *  @returns {Promise<{text: string, segments?: Array}>} */
-async function transcribeAudio(buffer, mimeType = 'audio/wav') {
+async function transcribeAudio(buffer, mimeType = 'audio/wav', language = 'en') {
   if (!config.openaiApiKey) throw new Error('OPENAI_API_KEY missing');
 
   return sttBreaker.exec(async () => {
@@ -34,6 +34,7 @@ async function transcribeAudio(buffer, mimeType = 'audio/wav') {
       form.append('file', Buffer.from(buffer), { filename: 'audio.wav', contentType: mimeType });
       form.append('model', 'whisper-1');
       form.append('response_format', 'verbose_json');
+      if (language) form.append('language', language);
 
       const resp = await apiClient.post('/v1/audio/transcriptions', form, {
         headers: { ...form.getHeaders() },
@@ -75,7 +76,7 @@ async function chatCompletion(messages, model = 'gpt-4o-mini', opts = {}) {
 
 // ── TTS: Text-to-Speech ─────────────────────────────────────────────────────
 // format: 'mp3' (default, for S3 upload) or 'pcm' (for direct stream playback)
-// PCM output: 24kHz 16-bit mono little-endian (needs resampling to 8kHz for Plivo)
+// PCM output: 24kHz 16-bit mono little-endian (needs resampling to 8kHz for Vobiz)
 /** @param {string} text - The text to synthesize
  *  @param {string} voice - Voice id (alloy, echo, fable, onyx, nova, shimmer)
  *  @param {string} format - 'mp3' or 'pcm' */

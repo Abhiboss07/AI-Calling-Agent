@@ -9,7 +9,7 @@ const costControl = require('./costControl');
 // Input: WAV buffer (8kHz mono 16-bit PCM with proper header)
 // The µ-law→PCM→WAV conversion happens in ws-media.js BEFORE calling this.
 
-async function transcribe(buffer, callSid, mime = 'audio/wav') {
+async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') {
   // ── Guard: Empty or missing buffer ────────────────────────────────────
   if (!buffer || buffer.length === 0) {
     return { text: '', confidence: 0, empty: true };
@@ -31,7 +31,9 @@ async function transcribe(buffer, callSid, mime = 'audio/wav') {
     const startMs = Date.now();
     metrics.incrementSttRequest(true);
 
-    const resp = await openai.transcribeAudio(buffer, mime);
+    // Extract Whisper language code (e.g., 'en' from 'en-IN')
+    const whisperLang = language ? language.split('-')[0] : 'en';
+    const resp = await openai.transcribeAudio(buffer, mime, whisperLang);
     const latencyMs = Date.now() - startMs;
     const text = (resp.text || '').trim();
 

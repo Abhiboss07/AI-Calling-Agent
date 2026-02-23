@@ -3,10 +3,8 @@ const expressWs = require('express-ws');
 const config = require('./config');
 const logger = require('./utils/logger');
 const db = require('./services/db');
-const plivoRoutes = require('./routes/plivo');
+const vobizRoutes = require('./routes/vobiz');
 const apiRoutes = require('./routes/api');
-const knowledgeBaseRoutes = require('./routes/knowledgeBase');
-const campaignRoutes = require('./routes/campaigns');
 const setupWs = require('./ws-media');
 const metrics = require('./services/metrics');
 
@@ -185,12 +183,21 @@ async function start() {
   // ══════════════════════════════════════════════════════════════════════════
   // ROUTES
   // ══════════════════════════════════════════════════════════════════════════
-  app.use('/plivo', plivoRoutes);
-  app.use('/api', apiRoutes);
-  app.use('/api/v1/knowledge-bases', knowledgeBaseRoutes);
-  app.use('/api/v1/campaigns', campaignRoutes);
 
-  // WebSocket for Plivo Bidirectional Audio Streams
+  // FIX: Add root route to confirm server is running
+  app.get('/', (req, res) => {
+    res.json({
+      ok: true,
+      service: 'AI Calling Agent',
+      version: '2.0.0',
+      docs: '/documentation' // Placeholder
+    });
+  });
+
+  app.use('/vobiz', vobizRoutes);
+  app.use('/api', apiRoutes);
+
+  // WebSocket for Vobiz Media Streams
   setupWs(app);
 
   // ── Global error handler ────────────────────────────────────────────────
@@ -219,6 +226,16 @@ async function start() {
   // ══════════════════════════════════════════════════════════════════════════
   // GRACEFUL SHUTDOWN (zero-downtime deploys)
   // ══════════════════════════════════════════════════════════════════════════
+  // Sequence:
+  //   1. SIGTERM received (from Docker/K8s/PM2)
+  //   2. Stop accepting new connections (isShuttingDown = true)
+  //   3. Wait for in-flight requests to complete (connection drain)
+  //   4. Close database connection
+  //   5. Exit cleanly
+  //
+  // K8s sends SIGTERM, then waits terminationGracePeriodSeconds (30s default),
+  // then sends SIGKILL. We must finish within that window.
+
   let shutdownRequested = false;
 
   async function shutdown(signal) {

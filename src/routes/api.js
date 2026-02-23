@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const plivoClient = require('../services/plivoClient');
+const vobizClient = require('../services/vobizClient');
+const config = require('../config');
 const Call = require('../models/call.model');
 const Lead = require('../models/lead.model');
 const Transcript = require('../models/transcript.model');
@@ -18,13 +19,13 @@ const UploadLog = require('../models/uploadLog.model');
 // Start a call
 router.post('/v1/calls/start', async (req, res) => {
   try {
-    const { campaignId, phoneNumber, fromNumber } = req.body;
+    const { campaignId, phoneNumber, fromNumber, language } = req.body;
     if (!campaignId || !phoneNumber) return res.status(400).json({ ok: false, error: 'campaignId and phoneNumber required' });
 
     // FIX H1: Proper E.164 phone number validation
     const cleanPhone = phoneNumber.replace(/[^+\d]/g, '');
     if (!cleanPhone.startsWith('+')) {
-      return res.status(400).json({ ok: false, error: 'Phone number must include country code (e.g., +1234567890)' });
+      return res.status(400).json({ ok: false, error: 'Phone number must include country code (e.g., +91XXXXXXXXXX)' });
     }
     if (cleanPhone.length < 11 || cleanPhone.length > 16) {
       return res.status(400).json({ ok: false, error: 'Invalid phone number length' });
@@ -47,14 +48,22 @@ router.post('/v1/calls/start', async (req, res) => {
       });
     }
 
-    const webhookUrl = `${req.protocol}://${req.get('host')}/plivo/voice`;
-    const plivoCall = await plivoClient.makeOutboundCall(cleanPhone, fromNumber || undefined, webhookUrl);
-    const call = await Call.create({ campaignId, phoneNumber: cleanPhone, callSid: plivoCall.sid, status: 'ringing' });
+    const callLanguage = language || config.language?.default || 'en-IN';
+    const answerUrl = `${config.baseUrl}/vobiz/answer?language=${encodeURIComponent(callLanguage)}`;
+    const hangupUrl = `${config.baseUrl}/vobiz/hangup`;
+    const vbCall = await vobizClient.makeOutboundCall(cleanPhone, fromNumber || undefined, answerUrl, hangupUrl);
+    const call = await Call.create({
+      campaignId,
+      phoneNumber: cleanPhone,
+      callSid: vbCall.callUuid,
+      status: 'ringing',
+      language: callLanguage
+    });
 
-    costControl.trackCall(plivoCall.sid);
+    costControl.trackCall(vbCall.callUuid);
     metrics.incrementCallsStarted();
 
-    res.json({ ok: true, callId: call._id, callSid: plivoCall.sid });
+    res.json({ ok: true, callId: call._id, callSid: vbCall.callUuid });
   } catch (err) {
     logger.error('API start call error', err.message);
     metrics.incrementCallsFailed();

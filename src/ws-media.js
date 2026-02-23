@@ -2,18 +2,17 @@ const logger = require('./utils/logger');
 const stt = require('./services/stt');
 const llm = require('./services/llm');
 const tts = require('./services/tts');
-const plivoClient = require('./services/plivoClient');
+const vobizClient = require('./services/vobizClient');
 const Call = require('./models/call.model');
-const Campaign = require('./models/campaign.model');
-const KnowledgeBase = require('./models/knowledgeBase.model');
 const Lead = require('./models/lead.model');
 const Transcript = require('./models/transcript.model');
 const config = require('./config');
 const metrics = require('./services/metrics');
 const { retry } = require('./utils/retry');
+const { getLanguage } = require('./config/languages');
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MULAW ↔ PCM CONVERSION (Plivo sends µ-law 8kHz, Whisper needs PCM/WAV)
+// MULAW ↔ PCM CONVERSION (Vobiz streams µ-law 8kHz, Whisper needs PCM/WAV)
 // ══════════════════════════════════════════════════════════════════════════════
 const MULAW_DECODE = new Int16Array(256);
 (function buildTable() {
@@ -62,14 +61,10 @@ function buildWavBuffer(pcmData) {
 // ══════════════════════════════════════════════════════════════════════════════
 // PCM → µ-law ENCODING (for sending audio BACK through bidirectional stream)
 // ══════════════════════════════════════════════════════════════════════════════
-// We send µ-law audio directly through the WebSocket as 'playAudio' events
-// instead of using REST API calls which would interrupt the bidirectional stream.
-
 const MULAW_BIAS = 0x84;
 const MULAW_CLIP = 32635;
 
 function pcm16ToMulaw(sample) {
-  // Clamp
   if (sample > MULAW_CLIP) sample = MULAW_CLIP;
   if (sample < -MULAW_CLIP) sample = -MULAW_CLIP;
 
@@ -100,13 +95,6 @@ function pcmBufferToMulaw(pcmBuffer) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MP3 → PCM CONVERSION (decode TTS mp3 output for bidirectional stream)
-// ══════════════════════════════════════════════════════════════════════════════
-// We need to convert the MP3 from OpenAI TTS to µ-law 8kHz for Plivo.
-// Since we can't easily decode MP3 in pure Node without native deps,
-// we request TTS output in PCM format instead. See updated tts.js.
-
-// ══════════════════════════════════════════════════════════════════════════════
 // RMS-based Voice Activity Detection on PCM samples
 // ══════════════════════════════════════════════════════════════════════════════
 function computeRms(pcmBuffer) {
@@ -126,10 +114,12 @@ const VAD_THRESHOLD = config.pipeline.vadThreshold;
 // PER-CALL SESSION STATE
 // ══════════════════════════════════════════════════════════════════════════════
 class CallSession {
-  constructor(callSid, callerNumber) {
-    this.callSid = callSid;
+  constructor(callUuid, callerNumber, language) {
+    this.callSid = callUuid;     // Unified field name (used throughout DB and session)
+    this.callUuid = callUuid;    // Vobiz-specific alias
     this.callerNumber = callerNumber;
-    this.streamSid = null;
+    this.streamSid = null;       // Vobiz stream ID
+    this.language = language || config.language?.default || 'en-IN';
 
     // Audio buffering
     this.audioChunks = [];
@@ -138,15 +128,14 @@ class CallSession {
 
     // Pipeline state
     this.isProcessing = false;
-    this.currentPipelineId = 0;    // The pipeline that currently "owns" isProcessing
-    this.lastPipelineId = 0;       // Monotonically increasing ID
+    this.currentPipelineId = 0;
+    this.lastPipelineId = 0;
 
     // Conversation state
     this.callState = { step: 'greeting', turnCount: 0, silenceCount: 0 };
     this.transcriptEntries = [];
     this.leadData = {};
     this.qualityScore = 0;
-    this.knowledgeBase = null; // KB context for this call
 
     // Timing
     this.startTime = Date.now();
@@ -160,7 +149,7 @@ class CallSession {
     this.speechChunkCount = 0;
     this.silentChunkCount = 0;
 
-    // Playback state — track if we're currently playing audio to the caller
+    // Playback state
     this.isPlaying = false;
 
     // Guards
@@ -172,7 +161,7 @@ class CallSession {
 
 const sessions = new Map();
 
-// ── Tuning Constants (M2: pulled from centralized config) ──────────────────
+// ── Tuning Constants ──────────────────────────────────────────────────────────
 const SPEECH_START_CHUNKS = config.pipeline.speechStartChunks;
 const SPEECH_END_CHUNKS = config.pipeline.speechEndChunks;
 const MIN_UTTERANCE_BYTES = config.pipeline.minUtteranceBytes;
@@ -182,41 +171,34 @@ const MAX_CALL_MS = config.callMaxMinutes * 60 * 1000;
 const WS_PING_INTERVAL = config.pipeline.wsPingIntervalMs;
 
 // Chunk size for streaming audio back over WebSocket
-// Plivo expects 20ms chunks at 8kHz = 160 bytes of µ-law
+// Vobiz expects 20ms chunks at 8kHz = 160 bytes of µ-law
 const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize;
 const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs;
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SEND AUDIO THROUGH BIDIRECTIONAL STREAM (NO REST API CALLS)
+// SEND AUDIO THROUGH BIDIRECTIONAL STREAM (VOBIZ FORMAT)
 // ══════════════════════════════════════════════════════════════════════════════
-// Audio playback through bidirectional WebSocket stream.
-// We send audio back by writing 'media' events to the WebSocket.
-// This avoids REST API calls which would interrupt the <Connect><Stream>.
-//
-// The format is:
-// { event: 'playAudio', media: { contentType: 'audio/x-mulaw;rate=8000', payload: '<base64 µ-law>' } }
+// Vobiz bidirectional stream: We send audio back by writing JSON 'playAudio'
+// events to the WebSocket. The format is:
+// { "event": "playAudio", "media": { "contentType": "audio/x-mulaw;rate=8000", "payload": "<base64>" } }
 //
 async function sendAudioThroughStream(session, ws, mulawBuffer) {
   if (!session.streamSid || ws.readyState !== 1) return;
 
   session.isPlaying = true;
-  const playbackId = ++session.lastPipelineId; // Track this playback for interruption
+  const playbackId = ++session.lastPipelineId;
 
   // Clear any previously queued audio first
   try {
-    ws.send(JSON.stringify({
-      event: 'clearAudio'
-    }));
+    ws.send(JSON.stringify({ event: 'clearAudio' }));
   } catch (e) { /* ignore */ }
 
   // Send in 20ms chunks (160 bytes of µ-law at 8kHz)
   // Batch 10 chunks at a time (200ms of audio) then yield to event loop
-  // This prevents WebSocket backpressure/overflow
   const totalChunks = Math.ceil(mulawBuffer.length / PLAYBACK_CHUNK_SIZE);
-  const BATCH_SIZE = 10; // 10 × 20ms = 200ms per batch
+  const BATCH_SIZE = 10;
 
   for (let i = 0; i < totalChunks; i++) {
-    // Check if playback was interrupted (user started speaking or new pipeline)
     if (ws.readyState !== 1 || !session.isPlaying || session.lastPipelineId !== playbackId) {
       logger.debug('Playback interrupted at chunk', i, 'of', totalChunks);
       break;
@@ -241,18 +223,16 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
       break;
     }
 
-    // Yield to event loop every BATCH_SIZE chunks to prevent blocking
-    // This allows incoming media events (user speech) to be processed
     if ((i + 1) % BATCH_SIZE === 0 && i + 1 < totalChunks) {
       await new Promise(r => setImmediate(r));
     }
   }
 
-  // Send a mark event so we know when Plivo finishes playing the audio
+  // Send a checkpoint event so we know when Vobiz finishes playing the audio
   try {
     ws.send(JSON.stringify({
-      event: 'mark',
-      mark: { name: `speech_${Date.now()}` }
+      event: 'checkpoint',
+      name: `speech_${Date.now()}`
     }));
   } catch (e) { /* ignore */ }
 
@@ -267,14 +247,14 @@ module.exports = function setupWs(app) {
     let session = null;
     let pingInterval = null;
 
-    // Extract Plivo params from query string (set in plivo.js voice webhook)
-    const qsCallUuid = req.query?.callUuid || null;
-    const qsCallerNumber = req.query?.callerNumber || '';
+    // Extract parameters from query string (passed from Vobiz XML <Stream>)
+    const queryCallUuid = req.query?.callUuid;
+    const queryCallerNumber = req.query?.callerNumber || '';
+    const queryLanguage = req.query?.language || config.language?.default || 'en-IN';
 
     // ── WebSocket Heartbeat (detect stale connections) ─────────────────────
     pingInterval = setInterval(() => {
       if (ws.readyState === ws.OPEN) {
-        // FIX H8: Detect stale connections via pong timeout
         if (session && Date.now() - session._lastPong > WS_PING_INTERVAL * 3) {
           logger.warn('WebSocket pong timeout, closing stale connection', session.callSid);
           ws.close(1001, 'Pong timeout');
@@ -294,6 +274,20 @@ module.exports = function setupWs(app) {
     // ── Message handler ───────────────────────────────────────────────────
     ws.on('message', async (msgStr) => {
       try {
+        // Vobiz sends binary audio data and text JSON control messages
+        if (Buffer.isBuffer(msgStr)) {
+          // Binary frame = raw µ-law audio from caller
+          if (!session) return;
+
+          const mulawBytes = msgStr;
+          const pcmChunk = mulawToPcm16(mulawBytes);
+          const rms = computeRms(pcmChunk);
+          const hasVoice = rms > VAD_THRESHOLD;
+
+          processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice);
+          return;
+        }
+
         const msg = JSON.parse(msgStr);
 
         // ── CONNECTED event ─────────────────────────────────────────────
@@ -304,45 +298,28 @@ module.exports = function setupWs(app) {
 
         // ── START event — initialize session ────────────────────────────
         if (msg.event === 'start') {
-          // Plivo: callUuid comes from start event or query string
-          const callSid = msg.start?.callId || qsCallUuid || msg.streamId;
-          const callerNumber = msg.start?.from || qsCallerNumber || '';
-          const streamSid = msg.start?.streamId || msg.streamId || callSid;
+          const callUuid = msg.start?.callSid || msg.start?.callUuid || queryCallUuid;
+          const callerNumber = msg.start?.customParameters?.callerNumber || queryCallerNumber;
+          const streamSid = msg.streamSid || msg.start?.streamId || `stream_${Date.now()}`;
+          const language = msg.start?.customParameters?.language || queryLanguage;
 
-          // FIX C2: Validate required fields before creating session
-          if (!callSid) {
-            logger.error('WS start event missing required fields', { callSid, streamSid });
+          if (!callUuid) {
+            logger.error('WS start event missing required fields', { callUuid, streamSid });
             ws.close(1003, 'Missing required parameters');
             return;
           }
 
-          session = new CallSession(callSid, callerNumber);
+          session = new CallSession(callUuid, callerNumber, language);
           session.streamSid = streamSid;
-          sessions.set(callSid, session);
+          sessions.set(callUuid, session);
 
-          session.streamSid = streamSid;
-          sessions.set(callSid, session);
-
-          // ── Fetch Call -> Campaign -> KnowledgeBase ──────────────────
-          try {
-            const call = await Call.findOne({ callSid }).populate('campaignId');
-            if (call && call.campaignId) {
-              const campaign = await Campaign.findById(call.campaignId).populate('knowledgeBaseId');
-              if (campaign && campaign.knowledgeBaseId) {
-                session.knowledgeBase = campaign.knowledgeBaseId;
-                logger.log('🧠 Knowledge Base loaded:', session.knowledgeBase.name);
-              }
-            }
-          } catch (err) {
-            logger.error('Failed to load KB context', err.message);
-          }
-
-          logger.log('📞 Stream started (Plivo)', { callSid, callerNumber, streamSid, kb: session.knowledgeBase?.name });
+          logger.log('📞 Stream started', { callUuid, callerNumber, streamSid, language });
 
           // Max call duration safety
           session.maxDurationTimer = setTimeout(async () => {
-            logger.warn('⏰ Max call duration reached', callSid);
-            await endCallGracefully(session, ws, 'We have reached the maximum call time. Thank you for your interest. Goodbye!');
+            const langConfig = getLanguage(session.language);
+            logger.warn('⏰ Max call duration reached', callUuid);
+            await endCallGracefully(session, ws, langConfig.farewell);
           }, MAX_CALL_MS);
 
           // Deliver the initial greeting via the bidirectional stream
@@ -351,77 +328,17 @@ module.exports = function setupWs(app) {
           return;
         }
 
-        // ── MEDIA event — audio chunks ──────────────────────────────────
+        // ── MEDIA event — JSON-wrapped audio chunks ─────────────────────
         if (msg.event === 'media' && session) {
           const payload = msg.media?.payload;
           if (!payload) return;
 
-          // Decode µ-law to PCM for VAD
           const mulawBytes = Buffer.from(payload, 'base64');
           const pcmChunk = mulawToPcm16(mulawBytes);
           const rms = computeRms(pcmChunk);
           const hasVoice = rms > VAD_THRESHOLD;
 
-          if (hasVoice) {
-            session.speechChunkCount++;
-            session.silentChunkCount = 0;
-            session.lastVoiceActivityAt = Date.now();
-
-            // If agent is currently playing audio and user starts speaking → interrupt
-            if (session.isPlaying) {
-              logger.log('🔇 User interrupted agent playback', session.callSid);
-              // Clear the audio queue on the Plivo side
-              try {
-                ws.send(JSON.stringify({
-                  event: 'clearAudio'
-                }));
-              } catch (e) { /* ignore */ }
-              session.isPlaying = false;
-              metrics.incrementInterrupt();
-            }
-
-            if (!session.isSpeaking && session.speechChunkCount >= SPEECH_START_CHUNKS) {
-              session.isSpeaking = true;
-              session.speechStartedAt = Date.now();
-              session.callState.silenceCount = 0;
-              logger.debug('🎤 Speech started', session.callSid);
-              clearTimeout(session.silenceTimer);
-            }
-
-            if (session.isSpeaking) {
-              session.audioChunks.push(mulawBytes);
-              session.pcmBuffer.push(pcmChunk);
-              session.totalPcmBytes += pcmChunk.length;
-
-              if (session.totalPcmBytes > MAX_BUFFER_BYTES) {
-                logger.warn('Buffer overflow, forcing processing', session.callSid);
-                metrics.incrementBufferOverflow();
-                triggerProcessing(session, ws);
-              }
-            }
-
-          } else {
-            session.silentChunkCount++;
-            session.speechChunkCount = 0;
-
-            if (session.isSpeaking && session.silentChunkCount >= SPEECH_END_CHUNKS) {
-              session.isSpeaking = false;
-              logger.debug('🔇 Speech ended', session.callSid, session.totalPcmBytes, 'bytes');
-
-              if (session.totalPcmBytes >= MIN_UTTERANCE_BYTES) {
-                triggerProcessing(session, ws);
-              } else {
-                clearBuffers(session);
-              }
-
-              startSilenceTimer(session, ws);
-            }
-
-            if (!session.isSpeaking && !session.silenceTimer) {
-              startSilenceTimer(session, ws);
-            }
-          }
-
+          processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice);
           return;
         }
 
@@ -432,9 +349,15 @@ module.exports = function setupWs(app) {
           return;
         }
 
-        // ── MARK event (audio playback completed) ───────────────────────
-        if (msg.event === 'mark') {
-          logger.debug('✅ Audio mark reached', msg.mark?.name);
+        // ── CHECKPOINT / MARK event (audio playback completed) ──────────
+        if (msg.event === 'checkpoint' || msg.event === 'mark' || msg.event === 'playedStream') {
+          logger.debug('✅ Audio checkpoint reached', msg.name || msg.mark?.name);
+          return;
+        }
+
+        // ── CLEARED AUDIO event ─────────────────────────────────────────
+        if (msg.event === 'clearedAudio') {
+          logger.debug('🔇 Audio cleared');
           return;
         }
 
@@ -442,7 +365,6 @@ module.exports = function setupWs(app) {
         logger.error('WS message handler error', err.message || err);
         metrics.incrementWsError();
 
-        // FIX H5: Notify client of error and clean up if critical
         if (ws.readyState === ws.OPEN) {
           try {
             ws.send(JSON.stringify({ event: 'error', error: 'Internal processing error' }));
@@ -456,7 +378,6 @@ module.exports = function setupWs(app) {
       const reasonStr = reason?.toString();
       logger.log('WS closed', { callSid: session?.callSid, code, reason: reasonStr });
 
-      // FIX M7: Categorize close reasons for better metrics
       if (code === 1000) {
         metrics.incrementWsDisconnect('normal');
       } else if (code >= 1001 && code <= 1003) {
@@ -477,22 +398,83 @@ module.exports = function setupWs(app) {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
+// PROCESS AUDIO CHUNK — Shared logic for both binary and JSON media
+// ══════════════════════════════════════════════════════════════════════════════
+function processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice) {
+  if (hasVoice) {
+    session.speechChunkCount++;
+    session.silentChunkCount = 0;
+    session.lastVoiceActivityAt = Date.now();
+
+    // If agent is currently playing audio and user starts speaking → interrupt
+    if (session.isPlaying) {
+      logger.log('🔇 User interrupted agent playback', session.callSid);
+      try {
+        ws.send(JSON.stringify({ event: 'clearAudio' }));
+      } catch (e) { /* ignore */ }
+      session.isPlaying = false;
+      metrics.incrementInterrupt();
+    }
+
+    if (!session.isSpeaking && session.speechChunkCount >= SPEECH_START_CHUNKS) {
+      session.isSpeaking = true;
+      session.speechStartedAt = Date.now();
+      session.callState.silenceCount = 0;
+      logger.debug('🎤 Speech started', session.callSid);
+      clearTimeout(session.silenceTimer);
+    }
+
+    if (session.isSpeaking) {
+      session.audioChunks.push(mulawBytes);
+      session.pcmBuffer.push(pcmChunk);
+      session.totalPcmBytes += pcmChunk.length;
+
+      if (session.totalPcmBytes > MAX_BUFFER_BYTES) {
+        logger.warn('Buffer overflow, forcing processing', session.callSid);
+        metrics.incrementBufferOverflow();
+        triggerProcessing(session, ws);
+      }
+    }
+
+  } else {
+    session.silentChunkCount++;
+    session.speechChunkCount = 0;
+
+    if (session.isSpeaking && session.silentChunkCount >= SPEECH_END_CHUNKS) {
+      session.isSpeaking = false;
+      logger.debug('🔇 Speech ended', session.callSid, session.totalPcmBytes, 'bytes');
+
+      if (session.totalPcmBytes >= MIN_UTTERANCE_BYTES) {
+        triggerProcessing(session, ws);
+      } else {
+        clearBuffers(session);
+      }
+
+      startSilenceTimer(session, ws);
+    }
+
+    if (!session.isSpeaking && !session.silenceTimer) {
+      startSilenceTimer(session, ws);
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // INITIAL GREETING (via bidirectional stream — sends µ-law audio directly)
 // ══════════════════════════════════════════════════════════════════════════════
 async function deliverInitialGreeting(session, ws) {
   try {
-    const agentName = session.knowledgeBase?.agentName || config.agentName;
-    const companyName = session.knowledgeBase?.companyName || config.companyName;
-    const greetingText = `Hi! This is ${agentName} from ${companyName}. How can I help you with your property search today?`;
+    const langConfig = getLanguage(session.language);
+    const greetingText = `${langConfig.greeting.substring(0, 5)} ${config.agentName} from ${config.companyName}. ${langConfig.greeting}`;
 
     // Synthesize → get raw PCM buffer (not mp3+upload)
-    const ttsResult = await tts.synthesizeRaw(greetingText, session.callSid);
+    const ttsResult = await tts.synthesizeRaw(greetingText, session.callSid, session.language);
 
     if (ttsResult && ttsResult.mulawBuffer && ws.readyState === 1) {
       await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
     } else if (session.callSid) {
-      // Fallback: Use Plivo REST Speak API only as last resort
-      await plivoClient.sayText(session.callSid, greetingText).catch(e =>
+      // Fallback: Use Vobiz REST API only as last resort
+      await vobizClient.sayText(session.callSid, greetingText).catch(e =>
         logger.error('Say fallback failed', e.message)
       );
     }
@@ -509,7 +491,6 @@ async function deliverInitialGreeting(session, ws) {
 
   } catch (err) {
     logger.error('Initial greeting error', err.message);
-    // Non-fatal — the TwiML Say already greeted them
   }
 }
 
@@ -517,14 +498,11 @@ async function deliverInitialGreeting(session, ws) {
 // TRIGGER PROCESSING (speech → STT → LLM → TTS → play through stream)
 // ══════════════════════════════════════════════════════════════════════════════
 function triggerProcessing(session, ws) {
-  // Grab accumulated audio BEFORE anything else
   const pcmChunks = session.pcmBuffer.slice();
   const pipelineId = ++session.lastPipelineId;
   clearBuffers(session);
 
   if (session.isProcessing) {
-    // Pipeline already running — let it finish but its results will be
-    // discarded by the supersede check (pipelineId !== lastPipelineId)
     logger.log('🔄 Superseding previous pipeline', session.callSid, { old: session.currentPipelineId, new: pipelineId });
     metrics.incrementInterrupt();
   }
@@ -535,8 +513,6 @@ function triggerProcessing(session, ws) {
   processUtterance(session, pcmChunks, ws, pipelineId)
     .catch(err => logger.error('Pipeline error', session.callSid, err.message))
     .finally(() => {
-      // FIX C3: Only release the lock if THIS pipeline still owns it
-      // AND it hasn't already been released by someone else.
       if (session.currentPipelineId === pipelineId && session.isProcessing) {
         session.isProcessing = false;
       }
@@ -559,9 +535,9 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
   const pcmData = Buffer.concat(pcmChunks);
   const wavBuffer = buildWavBuffer(pcmData);
 
-  // ── 2. Speech-to-Text ─────────────────────────────────────────────────
+  // ── 2. Speech-to-Text (with language) ─────────────────────────────────
   const sttStart = Date.now();
-  const sttResult = await stt.transcribe(wavBuffer, session.callSid, 'audio/wav');
+  const sttResult = await stt.transcribe(wavBuffer, session.callSid, 'audio/wav', session.language);
   const sttLatency = Date.now() - sttStart;
 
   if (pipelineId !== session.lastPipelineId) {
@@ -585,16 +561,15 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
     confidence: sttResult.confidence
   });
 
-  // ── 3. LLM — Generate reply ──────────────────────────────────────────
+  // ── 3. LLM — Generate reply (with language) ──────────────────────────
   const llmStart = Date.now();
   const reply = await llm.generateReply({
     callState: session.callState,
-    callState: session.callState,
-    script: { companyName: session.knowledgeBase?.companyName || config.companyName },
+    script: { companyName: config.companyName },
     lastTranscript: sttResult.text,
     customerName: session.leadData.name || session.callerNumber,
     callSid: session.callSid,
-    knowledgeBase: session.knowledgeBase
+    language: session.language
   });
   const llmLatency = Date.now() - llmStart;
 
@@ -625,8 +600,8 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
       return;
     }
 
-    // Synthesize to µ-law for direct stream playback
-    const ttsResult = await tts.synthesizeRaw(reply.speak, session.callSid);
+    // Synthesize to µ-law for direct stream playback (with language)
+    const ttsResult = await tts.synthesizeRaw(reply.speak, session.callSid, session.language);
     const ttsLatency = Date.now() - ttsStart;
 
     if (pipelineId !== session.lastPipelineId) {
@@ -638,10 +613,10 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
     if (ttsResult && ttsResult.mulawBuffer) {
       await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
     } else {
-      // Fallback: use Plivo REST Speak (will interrupt the stream — last resort)
+      // Fallback: use Vobiz REST Speak (will interrupt the stream — last resort)
       logger.warn('TTS raw synthesis failed, falling back to REST Speak');
       try {
-        await plivoClient.sayText(session.callSid, reply.speak);
+        await vobizClient.sayText(session.callSid, reply.speak);
       } catch (e) {
         logger.error('Speak fallback also failed', e.message);
       }
@@ -653,6 +628,8 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
   }
 
   // ── 5. Handle actions ─────────────────────────────────────────────────
+  const langConfig = getLanguage(session.language);
+
   if (reply.action === 'hangup') {
     await endCallGracefully(session, ws, null);
   } else if (reply.action === 'escalate') {
@@ -679,7 +656,6 @@ function updateLeadData(session, reply) {
   if (d.siteVisitDate) session.leadData.siteVisitDate = d.siteVisitDate;
   if (d.objection) {
     session.leadData.objections = session.leadData.objections || [];
-    // FIX M10: Cap objections at 10 to prevent unbounded growth
     if (session.leadData.objections.length < 10) {
       session.leadData.objections.push(d.objection);
     }
@@ -697,21 +673,21 @@ function startSilenceTimer(session, ws) {
 
   session.silenceTimer = setTimeout(async () => {
     session.callState.silenceCount++;
+    const langConfig = getLanguage(session.language);
 
     if (session.callState.silenceCount >= 2) {
       logger.log('🔇 Second silence, ending call', session.callSid);
-      await endCallGracefully(session, ws, 'I haven\'t heard from you. Thank you for calling. Goodbye!');
+      await endCallGracefully(session, ws, langConfig.farewell);
     } else {
       logger.log('🔇 First silence, prompting', session.callSid);
-      const promptText = 'Are you still there? I am happy to help you find the right property.';
 
       try {
         if (ws.readyState === 1) {
-          const ttsResult = await tts.synthesizeRaw(promptText, session.callSid);
+          const ttsResult = await tts.synthesizeRaw(langConfig.silencePrompt, session.callSid, session.language);
           if (ttsResult && ttsResult.mulawBuffer) {
             await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
           } else if (session.callSid) {
-            await plivoClient.sayText(session.callSid, promptText);
+            await vobizClient.sayText(session.callSid, langConfig.silencePrompt);
           }
         }
       } catch (err) {
@@ -736,13 +712,12 @@ async function endCallGracefully(session, ws, farewellText) {
   try {
     if (farewellText && ws.readyState === 1) {
       try {
-        const ttsResult = await tts.synthesizeRaw(farewellText, session.callSid);
+        const ttsResult = await tts.synthesizeRaw(farewellText, session.callSid, session.language);
         if (ttsResult && ttsResult.mulawBuffer) {
           await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
-          // Wait for audio to play (~2.5s for a farewell)
           await new Promise(r => setTimeout(r, 2500));
         } else if (session.callSid) {
-          await plivoClient.sayText(session.callSid, farewellText);
+          await vobizClient.sayText(session.callSid, farewellText);
           await new Promise(r => setTimeout(r, 2500));
         }
       } catch (err) {
@@ -751,7 +726,7 @@ async function endCallGracefully(session, ws, farewellText) {
     }
 
     if (session.callSid) {
-      await plivoClient.endCall(session.callSid).catch(e => logger.warn('End call API error', e.message));
+      await vobizClient.endCall(session.callSid).catch(e => logger.warn('End call API error', e.message));
     }
   } catch (err) {
     logger.error('Graceful end error', err.message);
@@ -789,17 +764,16 @@ async function finalizeCall(session) {
     callSid: session.callSid,
     duration: `${callDuration}s`,
     turns: session.callState.turnCount,
-    score: session.qualityScore
+    score: session.qualityScore,
+    language: session.language
   });
 
   try {
-    // FIX M8: Use retry for critical DB operations
     const call = session.callSid ? await retry(
       () => Call.findOne({ callSid: session.callSid }),
       { retries: 3, minDelay: 500, factor: 2 }
     ) : null;
 
-    // Update call record with duration
     if (call) {
       call.durationSec = callDuration;
       call.endAt = new Date();
@@ -807,11 +781,9 @@ async function finalizeCall(session) {
       await retry(() => call.save(), { retries: 3, minDelay: 500, factor: 2 });
     }
 
-    // Save transcript
     if (call && session.transcriptEntries.length > 0) {
       const fullText = session.transcriptEntries.map(e => `${e.speaker}: ${e.text}`).join('\n');
 
-      // Generate summary using LLM (non-blocking, with timeout)
       let summary = fullText.substring(0, 2000);
       try {
         const summaryPromise = generateCallSummary(fullText, session.leadData);
@@ -832,7 +804,6 @@ async function finalizeCall(session) {
       logger.log('✅ Transcript saved', session.callSid, session.transcriptEntries.length, 'entries');
     }
 
-    // Save lead
     if (session.callerNumber && Object.keys(session.leadData).length > 0) {
       const leadStatus = session.leadData.siteVisitDate ? 'site-visit-booked'
         : session.qualityScore >= 50 ? 'qualified'
@@ -891,7 +862,7 @@ async function generateCallSummary(fullText, leadData) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// M12: PERIODIC MEMORY & MAP SIZE MONITORING
+// PERIODIC MEMORY & MAP SIZE MONITORING
 // ══════════════════════════════════════════════════════════════════════════════
 setInterval(() => {
   const mem = process.memoryUsage();
@@ -901,12 +872,10 @@ setInterval(() => {
     sessionsCount: sessions.size
   };
 
-  // Only log when there are active sessions or high memory
   if (sessions.size > 0 || info.heapUsedMB > 200) {
     logger.debug('Resource monitor', info);
   }
 
-  // Warn if any Map grows excessively
   if (sessions.size > 100) {
     logger.warn('Suspicious sessions count — possible leak', sessions.size);
   }

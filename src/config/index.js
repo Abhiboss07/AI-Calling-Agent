@@ -4,7 +4,7 @@ const path = require('path');
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 // ── Validation ──────────────────────────────────────────────────────────────
-const REQUIRED = ['PLIVO_AUTH_ID', 'PLIVO_AUTH_TOKEN', 'PLIVO_CALLER_ID', 'OPENAI_API_KEY'];
+const REQUIRED = ['VOBIZ_AUTH_ID', 'VOBIZ_AUTH_TOKEN', 'VOBIZ_CALLER_ID', 'OPENAI_API_KEY'];
 const missing = REQUIRED.filter(k => !process.env[k]);
 if (missing.length) {
   // L5: use stderr directly here since logger depends on config (circular)
@@ -18,10 +18,10 @@ module.exports = {
   port: Number(process.env.PORT) || 3000,
   host: process.env.HOST || '0.0.0.0',
 
-  plivo: {
-    authId: process.env.PLIVO_AUTH_ID,
-    authToken: process.env.PLIVO_AUTH_TOKEN,
-    callerId: process.env.PLIVO_CALLER_ID
+  vobiz: {
+    authId: process.env.VOBIZ_AUTH_ID,
+    authToken: process.env.VOBIZ_AUTH_TOKEN,
+    callerId: process.env.VOBIZ_CALLER_ID
   },
 
   openaiApiKey: process.env.OPENAI_API_KEY,
@@ -44,6 +44,12 @@ module.exports = {
   agentName: process.env.AGENT_NAME || 'Priya',
   systemPromptFile: process.env.SYSTEM_PROMPT_FILE || 'config/ai_calling_agent_system_prompt.txt',
 
+  // ── Language config ───────────────────────────────────────────────────────
+  language: {
+    default: process.env.DEFAULT_LANGUAGE || 'en-IN',
+    supported: (process.env.SUPPORTED_LANGUAGES || 'en-IN,hi-IN,ta-IN,te-IN,bn-IN,mr-IN,kn-IN,gu-IN,ml-IN').split(',').map(s => s.trim())
+  },
+
   // ── Pipeline tuning constants (M2: centralized, configurable via env) ─────
   pipeline: {
     vadThreshold: Number(process.env.VAD_THRESHOLD) || 0.008,
@@ -65,5 +71,8 @@ module.exports = {
   tts: {
     cacheMaxEntries: Number(process.env.TTS_CACHE_MAX_ENTRIES) || 50,
     cacheMaxBytes: Number(process.env.TTS_CACHE_MAX_BYTES) || 3 * 1024 * 1024 // 3MB
-  }
+  },
+
+  // Public URL for webhooks (important for production/ngrok)
+  baseUrl: process.env.BASE_URL || `http://${process.env.HOST || 'localhost'}:${process.env.PORT || 3000}`
 };

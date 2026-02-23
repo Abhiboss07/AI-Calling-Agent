@@ -7,6 +7,7 @@ const CallSchema = new mongoose.Schema({
   callSid: { type: String, index: true, unique: true, sparse: true },
   status: { type: String, enum: ['queued', 'ringing', 'in-progress', 'completed', 'failed', 'busy', 'no-answer'], default: 'queued' },
   direction: { type: String, enum: ['outbound', 'inbound'], default: 'outbound' },
+  language: { type: String, default: 'en-IN' },
   startAt: Date,
   endAt: Date,
   durationSec: { type: Number, default: 0 },
