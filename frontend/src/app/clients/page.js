@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Users } from 'lucide-react';
 
 export default function ClientList() {
     const [clients, setClients] = useState([]);
@@ -42,13 +43,23 @@ export default function ClientList() {
                     </thead>
                     <tbody>
                         {loading ? (
-                            <tr><td colSpan="5" style={{ textAlign: 'center', padding: '2rem' }}>Loading...</td></tr>
+                            <tr><td colSpan="5" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Loading...</td></tr>
                         ) : clients.length === 0 ? (
-                            <tr><td colSpan="5" style={{ textAlign: 'center', padding: '2rem' }}>No clients found</td></tr>
+                            <tr>
+                                <td colSpan="5">
+                                    <div className="empty-state">
+                                        <div className="empty-state-icon">
+                                            <Users size={32} />
+                                        </div>
+                                        <h3>No clients found</h3>
+                                        <p>Start a campaign or upload numbers to see clients here.</p>
+                                    </div>
+                                </td>
+                            </tr>
                         ) : (
                             clients.map(client => (
                                 <tr key={client.phoneNumber}>
-                                    <td>{client.phoneNumber}</td>
+                                    <td style={{ fontWeight: 600 }}>{client.phoneNumber}</td>
                                     <td>{client.totalCalls}</td>
                                     <td>{(client.totalDuration / 60).toFixed(1)}</td>
                                     <td>{new Date(client.lastCall).toLocaleString()}</td>
@@ -56,7 +67,7 @@ export default function ClientList() {
                                         <Link
                                             href={`/clients/${encodeURIComponent(client.phoneNumber)}`}
                                             className="btn btn-outline"
-                                            style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
+                                            style={{ fontSize: 12, padding: '4px 12px' }}
                                         >
                                             Details
                                         </Link>
@@ -68,16 +79,15 @@ export default function ClientList() {
                 </table>
             </div>
 
-            <div className="pagination" style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+            <div className="pagination">
                 <button
                     className="btn btn-outline"
                     disabled={page <= 1}
                     onClick={() => setPage(p => p - 1)}
-                    style={{ opacity: page <= 1 ? 0.5 : 1 }}
                 >
                     Previous
                 </button>
-                <span style={{ color: 'var(--text-secondary)' }}>Page {page}</span>
+                <span>Page {page}</span>
                 <button className="btn btn-outline" onClick={() => setPage(p => p + 1)}>Next</button>
             </div>
         </div>

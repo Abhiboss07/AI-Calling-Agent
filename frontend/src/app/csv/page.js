@@ -1,11 +1,10 @@
 "use client";
 import { useState, useEffect } from 'react';
 
-// Sample data to simulate "numbers.csv" or a template
 const SAMPLE_CSV = [
-    ['+15550101', 'John Doe', 'john@example.com'],
-    ['+15550102', 'Jane Smith', 'jane@example.com'],
-    ['+15550103', 'Bob Johnson', 'bob@example.com']
+    ['+915550101', 'John Doe', 'john@example.com'],
+    ['+915550102', 'Jane Smith', 'jane@example.com'],
+    ['+915550103', 'Bob Johnson', 'bob@example.com']
 ];
 
 export default function CSVManagement() {
@@ -31,11 +30,10 @@ export default function CSVManagement() {
     const loadSample = () => {
         setData(SAMPLE_CSV);
         setMessage('Loaded sample data into preview. Upload to proceed.');
-        // Create a dummy file object for upload if user clicks upload
         const content = SAMPLE_CSV.map(row => row.join(',')).join('\n');
         const blob = new Blob([content], { type: 'text/csv' });
-        const file = new File([blob], 'sample_numbers.csv', { type: 'text/csv' });
-        setFile(file);
+        const f = new File([blob], 'sample_numbers.csv', { type: 'text/csv' });
+        setFile(f);
     };
 
     const handleFile = (e) => {
@@ -85,35 +83,35 @@ export default function CSVManagement() {
                 <h1>CSV Management</h1>
             </div>
 
-            <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                {/* Left Column: Upload Form */}
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                {/* Upload Form */}
                 <div className="card" style={{ flex: '1 1 400px' }}>
                     <h3>Upload Numbers</h3>
-                    <div style={{ display: 'grid', gap: '1rem' }}>
+                    <div style={{ display: 'grid', gap: 14 }}>
                         <div>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Campaign</label>
+                            <label>Campaign</label>
                             <CampaignSelector
                                 selectedId={campaignId}
                                 onSelect={(id) => setCampaignId(id)}
                             />
                         </div>
                         <div>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Upload Mode</label>
-                            <select
-                                value={mode}
-                                onChange={e => setMode(e.target.value)}
-                                style={{ width: '100%', padding: '0.5rem', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', color: 'white', borderRadius: '4px' }}
-                            >
+                            <label>Upload Mode</label>
+                            <select value={mode} onChange={e => setMode(e.target.value)}>
                                 <option value="append">Append (Add to existing)</option>
                                 <option value="replace">Replace (Clear queued & add new)</option>
                             </select>
                         </div>
                         <div>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Select File (.csv, .txt)</label>
-                            <input type="file" accept=".csv,.txt" onChange={handleFile} style={{ width: '100%' }} />
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
-                                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Format: phone, name, email</span>
-                                <button type="button" onClick={loadSample} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.8rem', textDecoration: 'underline' }}>
+                            <label>Select File (.csv, .txt)</label>
+                            <input type="file" accept=".csv,.txt" onChange={handleFile} />
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+                                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Format: phone, name, email</span>
+                                <button
+                                    type="button"
+                                    onClick={loadSample}
+                                    style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, fontWeight: 500 }}
+                                >
                                     Load Sample
                                 </button>
                             </div>
@@ -125,34 +123,47 @@ export default function CSVManagement() {
                     </div>
 
                     {message && (
-                        <div style={{ marginTop: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '0.5rem', border: '1px solid var(--glass-border)', color: 'var(--text-primary)' }}>
+                        <div style={{
+                            marginTop: 14,
+                            padding: 12,
+                            background: message.startsWith('Error') ? 'var(--danger-light)' : 'var(--success-light)',
+                            borderRadius: 8,
+                            border: `1px solid ${message.startsWith('Error') ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)'}`,
+                            color: message.startsWith('Error') ? 'var(--danger)' : 'var(--success)',
+                            fontSize: 13,
+                            fontWeight: 500
+                        }}>
                             {message}
                         </div>
                     )}
                 </div>
 
-                {/* Right Column: Upload History */}
-                <div className="card" style={{ flex: '1 1 400px', maxHeight: '500px', display: 'flex', flexDirection: 'column' }}>
+                {/* Upload History */}
+                <div className="card" style={{ flex: '1 1 400px', maxHeight: 500, display: 'flex', flexDirection: 'column' }}>
                     <h3>Upload History</h3>
                     <div style={{ overflowY: 'auto', flex: 1 }}>
                         {history.length === 0 ? (
-                            <p style={{ color: 'var(--text-secondary)', padding: '1rem', textAlign: 'center' }}>No upload history found.</p>
+                            <p style={{ color: 'var(--text-muted)', padding: 16, textAlign: 'center', fontSize: 13 }}>
+                                No upload history found.
+                            </p>
                         ) : (
-                            <table style={{ width: '100%', fontSize: '0.9rem' }}>
+                            <table style={{ width: '100%', fontSize: 13 }}>
                                 <thead>
-                                    <tr style={{ background: 'rgba(0,0,0,0.2)' }}>
-                                        <th style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--text-secondary)' }}>Date</th>
-                                        <th style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--text-secondary)' }}>Campaign</th>
-                                        <th style={{ padding: '0.75rem', textAlign: 'right', color: 'var(--text-secondary)' }}>Status</th>
+                                    <tr>
+                                        <th style={{ padding: 10, textAlign: 'left' }}>Date</th>
+                                        <th style={{ padding: 10, textAlign: 'left' }}>Campaign</th>
+                                        <th style={{ padding: 10, textAlign: 'right' }}>Status</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {history.map(log => (
-                                        <tr key={log._id} style={{ borderBottom: '1px solid var(--glass-border)' }}>
-                                            <td style={{ padding: '0.75rem' }}>{new Date(log.createdAt).toLocaleDateString()} {new Date(log.createdAt).toLocaleTimeString()}</td>
-                                            <td style={{ padding: '0.75rem' }}>{log.campaignId}</td>
-                                            <td style={{ padding: '0.75rem', textAlign: 'right' }}>
-                                                <span style={{ color: 'var(--success)', marginRight: '0.5rem' }}>{log.recordsAccepted} ok</span>
+                                        <tr key={log._id}>
+                                            <td style={{ padding: 10 }}>
+                                                {new Date(log.createdAt).toLocaleDateString()} {new Date(log.createdAt).toLocaleTimeString()}
+                                            </td>
+                                            <td style={{ padding: 10 }}>{log.campaignId}</td>
+                                            <td style={{ padding: 10, textAlign: 'right' }}>
+                                                <span style={{ color: 'var(--success)', marginRight: 8 }}>{log.recordsAccepted} ok</span>
                                                 {log.recordsRejected > 0 && <span style={{ color: 'var(--danger)' }}>{log.recordsRejected} err</span>}
                                             </td>
                                         </tr>
@@ -164,11 +175,11 @@ export default function CSVManagement() {
                 </div>
             </div>
 
-            {/* Full Width: Preview */}
+            {/* Preview */}
             {data.length > 0 && (
-                <div style={{ marginTop: '2rem' }}>
-                    <h3>Data Preview ({data.length} records)</h3>
-                    <div className="table-wrapper" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                <div style={{ marginTop: 24 }}>
+                    <div className="section-label">DATA PREVIEW ({data.length} RECORDS)</div>
+                    <div className="table-wrapper" style={{ maxHeight: 400, overflowY: 'auto' }}>
                         <table>
                             <thead>
                                 <tr>
@@ -187,7 +198,7 @@ export default function CSVManagement() {
                                 ))}
                             </tbody>
                         </table>
-                        {data.length > 100 && <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Showing first 100 rows...</div>}
+                        {data.length > 100 && <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Showing first 100 rows...</div>}
                     </div>
                 </div>
             )}
@@ -233,28 +244,28 @@ function CampaignSelector({ selectedId, onSelect }) {
 
     if (showNew) {
         return (
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '4px', border: '1px solid var(--accent)' }}>
-                <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem' }}>New Campaign</h4>
+            <div style={{ background: 'var(--bg-primary)', padding: 14, borderRadius: 8, border: '1px solid var(--accent)' }}>
+                <h4 style={{ margin: '0 0 10px 0', fontSize: 13, fontWeight: 600 }}>New Campaign</h4>
                 <input
                     type="text"
                     placeholder="Campaign Name"
                     value={newName}
                     onChange={e => setNewName(e.target.value)}
-                    style={{ width: '100%', marginBottom: '0.5rem', padding: '0.4rem', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white' }}
+                    style={{ marginBottom: 8 }}
                 />
                 <select
                     value={newKbId}
                     onChange={e => setNewKbId(e.target.value)}
-                    style={{ width: '100%', marginBottom: '0.5rem', padding: '0.4rem', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white' }}
+                    style={{ marginBottom: 10 }}
                 >
                     <option value="">-- No Knowledge Base --</option>
                     {kbs.map(kb => (
                         <option key={kb._id} value={kb._id}>{kb.name} ({kb.companyName})</option>
                     ))}
                 </select>
-                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                    <button onClick={() => setShowNew(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.8rem' }}>Cancel</button>
-                    <button onClick={createCampaign} disabled={loading} style={{ background: 'var(--accent)', border: 'none', color: 'white', padding: '0.2rem 0.6rem', borderRadius: '2px', cursor: 'pointer', fontSize: '0.8rem' }}>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button onClick={() => setShowNew(false)} className="btn btn-outline" style={{ fontSize: 12, padding: '4px 12px' }}>Cancel</button>
+                    <button onClick={createCampaign} disabled={loading} className="btn btn-primary" style={{ fontSize: 12, padding: '4px 12px' }}>
                         {loading ? 'Creating...' : 'Create'}
                     </button>
                 </div>
@@ -263,12 +274,8 @@ function CampaignSelector({ selectedId, onSelect }) {
     }
 
     return (
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <select
-                value={selectedId}
-                onChange={e => onSelect(e.target.value)}
-                style={{ flex: 1, padding: '0.5rem', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', color: 'white', borderRadius: '4px' }}
-            >
+        <div style={{ display: 'flex', gap: 8 }}>
+            <select value={selectedId} onChange={e => onSelect(e.target.value)} style={{ flex: 1 }}>
                 <option value="">Select or Create Campaign...</option>
                 {campaigns.map(c => (
                     <option key={c._id} value={c._id}>
@@ -279,8 +286,8 @@ function CampaignSelector({ selectedId, onSelect }) {
             <button
                 onClick={() => setShowNew(true)}
                 title="Create New Campaign"
-                className="btn btn-outline"
-                style={{ padding: '0 0.8rem', minHeight: 'auto' }}
+                className="btn btn-primary"
+                style={{ padding: '0 12px' }}
             >
                 +
             </button>

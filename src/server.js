@@ -4,7 +4,9 @@ const config = require('./config');
 const logger = require('./utils/logger');
 const db = require('./services/db');
 const vobizRoutes = require('./routes/vobiz');
+const authRoutes = require('./routes/auth');
 const apiRoutes = require('./routes/api');
+const { verifyToken } = require('./middleware/auth');
 const setupWs = require('./ws-media');
 const metrics = require('./services/metrics');
 
@@ -195,7 +197,8 @@ async function start() {
   });
 
   app.use('/vobiz', vobizRoutes);
-  app.use('/api', apiRoutes);
+  app.use('/api/v1/auth', authRoutes);  // Public auth routes
+  app.use('/api', verifyToken, apiRoutes);  // Protected API routes
 
   // WebSocket for Vobiz Media Streams
   setupWs(app);

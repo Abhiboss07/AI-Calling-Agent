@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { FileText } from 'lucide-react';
 
 export default function KnowledgeBaseList() {
     const [kbs, setKbs] = useState([]);
@@ -16,41 +17,56 @@ export default function KnowledgeBaseList() {
             .finally(() => setLoading(false));
     }, []);
 
-    if (loading) return <div className="p-8 text-center text-secondary">Loading...</div>;
+    if (loading) {
+        return (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', color: 'var(--text-muted)' }}>
+                Loading...
+            </div>
+        );
+    }
 
     return (
         <div>
             <div className="header-actions">
                 <h1>Knowledge Bases</h1>
                 <Link href="/knowledge-bases/create" className="btn btn-primary">
-                    <span>+ New Knowledge Base</span>
+                    + New Knowledge Base
                 </Link>
             </div>
 
             {kbs.length === 0 ? (
-                <div className="card text-center p-8">
-                    <p className="text-secondary mb-4">No Knowledge Bases found.</p>
-                    <Link href="/knowledge-bases/create" className="btn btn-primary">
-                        Create your first one
-                    </Link>
+                <div className="card">
+                    <div className="empty-state">
+                        <div className="empty-state-icon">
+                            <FileText size={32} />
+                        </div>
+                        <h3>No Knowledge Bases found</h3>
+                        <p>Create your first knowledge base to get started.</p>
+                        <Link href="/knowledge-bases/create" className="btn btn-primary" style={{ marginTop: 16 }}>
+                            Create your first one
+                        </Link>
+                    </div>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
                     {kbs.map(kb => (
-                        <div key={kb._id} className="card hover:border-accent transition-colors">
-                            <div className="flex justify-between items-start mb-4">
-                                <h3 className="text-lg font-semibold">{kb.name}</h3>
-                                <Link href={`/knowledge-bases/${kb._id}`} className="text-accent text-sm hover:underline">
+                        <div key={kb._id} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                                <h3 style={{ margin: 0, fontSize: 16 }}>{kb.name}</h3>
+                                <Link
+                                    href={`/knowledge-bases/${kb._id}`}
+                                    style={{ color: 'var(--accent)', fontSize: 13, fontWeight: 500 }}
+                                >
                                     Edit
                                 </Link>
                             </div>
-                            <div className="text-sm text-secondary mb-2">
+                            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>
                                 <strong>Agent:</strong> {kb.agentName}
                             </div>
-                            <div className="text-sm text-secondary mb-4">
+                            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
                                 <strong>Company:</strong> {kb.companyName}
                             </div>
-                            <div className="text-xs text-secondary opacity-70">
+                            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 'auto' }}>
                                 Created: {new Date(kb.createdAt).toLocaleDateString()}
                             </div>
                         </div>
