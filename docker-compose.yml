@@ -22,9 +22,9 @@ services:
       - PORT=3000
       - HOST=0.0.0.0
       - MONGODB_URI=mongodb://mongo:27017/ai_outbound
-      - PLIVO_AUTH_ID=${PLIVO_AUTH_ID}
-      - PLIVO_AUTH_TOKEN=${PLIVO_AUTH_TOKEN}
-      - PLIVO_CALLER_ID=${PLIVO_CALLER_ID}
+      - VOBIZ_AUTH_ID=${VOBIZ_AUTH_ID}
+      - VOBIZ_AUTH_TOKEN=${VOBIZ_AUTH_TOKEN}
+      - VOBIZ_CALLER_ID=${VOBIZ_CALLER_ID}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - S3_BUCKET=${S3_BUCKET}
       - S3_REGION=${S3_REGION:-auto}
