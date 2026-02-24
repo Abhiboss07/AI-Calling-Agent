@@ -36,7 +36,7 @@ function buildSystemPrompt() {
 
 // ── Conversation history per call (in-memory, bounded) ──────────────────────
 const conversationHistory = new Map(); // callSid → [{role, content}]
-const MAX_HISTORY = config.llm?.maxHistory || 20; // FIX M2: configurable via env
+const MAX_HISTORY = config.llm?.maxHistory || 10; // Optimized: 10 turns is enough context
 const HISTORY_TTL_MS = config.llm?.historyTtlMs || (30 * 60 * 1000);
 
 function getHistory(callSid) {
@@ -112,14 +112,14 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
 
     const resp = await openai.chatCompletion(messages, 'gpt-4o-mini', {
       temperature: 0.3,
-      max_tokens: 200
+      max_tokens: 150
     });
 
     const assistant = resp.choices?.[0]?.message?.content || '';
 
-    // Track cost
+    // Track cost — separate input/output for accurate pricing
     if (callSid && resp.usage) {
-      costControl.addTokenUsage(callSid, resp.usage.total_tokens);
+      costControl.addTokenUsage(callSid, resp.usage.prompt_tokens || 0, resp.usage.completion_tokens || 0);
     }
 
     // Store in conversation history
@@ -144,9 +144,9 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       parsed = { ...FALLBACK_RESPONSE, speak: speakText.length > 5 ? speakText.substring(0, 150) : FALLBACK_RESPONSE.speak };
     }
 
-    // Enforce max response length for TTS (avoid long audio)
-    if (parsed.speak && parsed.speak.length > 200) {
-      parsed.speak = parsed.speak.substring(0, 200);
+    // Enforce max response length for TTS (shorter = cheaper + faster)
+    if (parsed.speak && parsed.speak.length > 150) {
+      parsed.speak = parsed.speak.substring(0, 150);
     }
 
     return parsed;

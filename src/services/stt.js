@@ -15,11 +15,18 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') 
     return { text: '', confidence: 0, empty: true };
   }
 
-  // ── Guard: Too small to contain speech (WAV header + data) ────────────
+  // Guard: Too small to contain speech (WAV header + data)
   // 44-byte header + at least 2000 bytes of PCM data (~125ms of audio)
   if (buffer.length < 2044) {
     logger.debug('STT: buffer too small', buffer.length, 'bytes');
     return { text: '', confidence: 0, empty: true };
+  }
+
+  // Guard: Too large — cap at 30 seconds to prevent excessive Whisper costs
+  // 30s at 8kHz mono 16-bit = 480000 bytes + 44 header
+  if (buffer.length > 480044) {
+    logger.warn('STT: buffer too large, truncating to 30s', buffer.length, 'bytes');
+    buffer = buffer.subarray(0, 480044);
   }
 
   // ── Compute actual audio duration for cost tracking ───────────────────
@@ -41,8 +48,8 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') 
     if (callSid) costControl.addSttUsage(callSid, durationSec);
 
     // Filter noise-only transcriptions
-    // Whisper sometimes returns ".", "...", "you", "Thank you." for silence/noise
-    const NOISE_PATTERNS = /^[.\s…]+$|^(you\.?|thank you\.?|thanks\.?|bye\.?)$/i;
+    // Whisper sometimes returns short fragments for silence/noise
+    const NOISE_PATTERNS = /^[.\s…]+$|^(you\.?|thank you\.?|thanks\.?|bye\.?|hmm\.?|uh+\.?|um+\.?|okay\.?|yes\.?|no\.?|hello\.?|hi\.?)$/i;
     if (!text || text.length < 2 || NOISE_PATTERNS.test(text)) {
       logger.debug(`STT: noise filtered "${text}" (${latencyMs}ms)`);
       return { text: '', confidence: 0, empty: true };

@@ -146,12 +146,15 @@ async function start() {
   app.get('/health/ready', async (req, res) => {
     const dbReady = db.isReady();
 
-    // FIX L4: Lightweight OpenAI check (cached for 60s)
+    // FIX: Lightweight OpenAI check using free /v1/models endpoint (cached for 60s)
     const now = Date.now();
     if (now - lastOpenAICheck > 60000) {
       try {
-        const openai = require('./services/openaiClient');
-        await openai.chatCompletion([{ role: 'user', content: 'ping' }], 'gpt-4o-mini', { max_tokens: 1 });
+        const axios = require('axios');
+        await axios.get('https://api.openai.com/v1/models', {
+          headers: { Authorization: `Bearer ${config.openaiApiKey}` },
+          timeout: 5000
+        });
         openAIHealthy = true;
         lastOpenAICheck = now;
       } catch (err) {

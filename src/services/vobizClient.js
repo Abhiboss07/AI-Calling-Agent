@@ -3,10 +3,8 @@ const config = require('../config');
 const logger = require('../utils/logger');
 
 // ══════════════════════════════════════════════════════════════════════════════
-// VOBIZ REST API CLIENT
+// VOBIZ REST API CLIENT — Call lifecycle only (no IVR)
 // ══════════════════════════════════════════════════════════════════════════════
-// Vobiz API: https://api.vobiz.ai/api/v1/Account/{authId}/
-// Auth: X-Auth-ID + X-Auth-Token headers
 
 const BASE_URL = 'https://api.vobiz.ai/api/v1';
 
@@ -36,11 +34,6 @@ function ensureClient() {
     }
 }
 
-// Escape text for XML
-function xmlEscape(str) {
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
 /**
  * Make an outbound call via Vobiz REST API
  * @param {string} to - Destination phone number (E.164)
@@ -66,10 +59,9 @@ async function makeOutboundCall(to, from, answerUrl, hangupUrl) {
     }, { headers: getHeaders() });
 
     const data = resp.data;
-    // Vobiz returns { request_uuid, message, api_id } or similar
     return {
         callUuid: data.request_uuid || data.call_uuid || data.callUuid,
-        sid: data.request_uuid || data.call_uuid || data.callUuid, // Compatibility alias
+        sid: data.request_uuid || data.call_uuid || data.callUuid,
         message: data.message,
         raw: data
     };
@@ -87,7 +79,6 @@ async function endCall(callUuid) {
             headers: getHeaders()
         });
     } catch (err) {
-        // If call already ended, Vobiz returns 404 — that's fine
         if (err.response?.status === 404) {
             logger.debug('Vobiz: call already ended', callUuid);
         } else {
@@ -96,46 +87,4 @@ async function endCall(callUuid) {
     }
 }
 
-/**
- * Speak text on an active call (fallback — uses Vobiz REST API)
- * CAUTION: This may interrupt the current call flow. Prefer WebSocket audio.
- * @param {string} callUuid - The call UUID
- * @param {string} text - Text to speak
- */
-async function sayText(callUuid, text) {
-    ensureClient();
-    const escaped = xmlEscape(text);
-    logger.debug('Vobiz: say text', callUuid);
-
-    try {
-        await axios.post(`${getAccountUrl()}/Call/${callUuid}/Speak/`, {
-            text: escaped,
-            voice: 'WOMAN',
-            language: 'en-IN'
-        }, { headers: getHeaders() });
-    } catch (err) {
-        logger.warn('Vobiz: say text failed', err.message);
-        throw err;
-    }
-}
-
-/**
- * Play audio on an active call (fallback — uses Vobiz REST API)
- * @param {string} callUuid - The call UUID
- * @param {string} audioUrl - URL of audio file to play
- */
-async function playAudio(callUuid, audioUrl) {
-    ensureClient();
-    logger.debug('Vobiz: play audio', callUuid);
-
-    try {
-        await axios.post(`${getAccountUrl()}/Call/${callUuid}/Play/`, {
-            urls: audioUrl
-        }, { headers: getHeaders() });
-    } catch (err) {
-        logger.warn('Vobiz: play audio failed', err.message);
-        throw err;
-    }
-}
-
-module.exports = { makeOutboundCall, playAudio, sayText, endCall, ensureClient };
+module.exports = { makeOutboundCall, endCall, ensureClient };

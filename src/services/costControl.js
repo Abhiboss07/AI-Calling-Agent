@@ -4,12 +4,18 @@ const logger = require('../utils/logger');
 const costTracker = new Map();
 const MAX_TRACKED = 1000; // Safety cap
 
+// ── Accurate cost rates (₹ per unit) ────────────────────────────────────────
+// Target: ₹2/min total
 const COSTS = {
-  vobiz_per_min: 0.50,    // ₹0.50/min
-  whisper_per_min: 0.40,    // ₹0.40/min
-  gpt4o_mini_per_token: 0.00001, // ~₹0.00001/token
-  tts_per_char: 0.00002  // ~₹0.00002/char
+  vobiz_per_min: 0.50,       // ₹0.50/min telephony
+  whisper_per_min: 0.50,     // ₹0.50/min (~$0.006/min OpenAI Whisper)
+  gpt4o_mini_input_per_token: 0.000012,  // ~$0.15/1M input tokens
+  gpt4o_mini_output_per_token: 0.00006,  // ~$0.60/1M output tokens
+  tts_per_char: 0.00125      // ₹0.00125/char (~$15/1M chars OpenAI TTS)
 };
+
+// Per-call budget cap (₹) — auto-hangup if exceeded
+const PER_CALL_BUDGET_RS = 30; // ₹30 max per call (~15 min)
 
 function trackCall(callSid) {
   // Prevent unbounded growth
@@ -18,20 +24,30 @@ function trackCall(callSid) {
     costTracker.delete(oldest);
     logger.warn('Cost tracker at capacity, evicted oldest entry');
   }
-  costTracker.set(callSid, { tokens: 0, minutes: 0, sttCount: 0, ttsCount: 0, ttsChars: 0, startedAt: Date.now() });
+  costTracker.set(callSid, {
+    inputTokens: 0,
+    outputTokens: 0,
+    sttMinutes: 0,
+    sttCount: 0,
+    ttsCount: 0,
+    ttsChars: 0,
+    callDurationSec: 0,
+    startedAt: Date.now()
+  });
 }
 
-function addTokenUsage(callSid, tokenCount) {
+function addTokenUsage(callSid, inputTokens = 0, outputTokens = 0) {
   const cost = costTracker.get(callSid);
   if (!cost) return;
-  cost.tokens += tokenCount;
+  cost.inputTokens += inputTokens;
+  cost.outputTokens += outputTokens;
 }
 
 function addSttUsage(callSid, durationSec) {
   const cost = costTracker.get(callSid);
   if (!cost) return;
   cost.sttCount++;
-  cost.minutes += durationSec / 60;
+  cost.sttMinutes += durationSec / 60;
 }
 
 function addTtsUsage(callSid, charCount) {
@@ -42,39 +58,54 @@ function addTtsUsage(callSid, charCount) {
 }
 
 function getEstimatedCost(callSid) {
-  const cost = costTracker.get(callSid);
-  if (!cost) return 0;
-  return (
-    cost.minutes * COSTS.vobiz_per_min +
-    cost.minutes * COSTS.whisper_per_min +
-    cost.tokens * COSTS.gpt4o_mini_per_token +
-    cost.ttsChars * COSTS.tts_per_char
-  );
+  const entry = costTracker.get(callSid);
+  if (!entry) return 0;
+
+  // Total call duration in minutes
+  const callMinutes = (Date.now() - entry.startedAt) / 60000;
+
+  const vobizCost = callMinutes * COSTS.vobiz_per_min;
+  const sttCost = entry.sttMinutes * COSTS.whisper_per_min;
+  const llmCost = (entry.inputTokens * COSTS.gpt4o_mini_input_per_token) +
+    (entry.outputTokens * COSTS.gpt4o_mini_output_per_token);
+  const ttsCost = entry.ttsChars * COSTS.tts_per_char;
+
+  return vobizCost + sttCost + llmCost + ttsCost;
 }
 
-function isWithinBudget(callSid, maxCostRs) {
-  return getEstimatedCost(callSid) < maxCostRs;
+function isWithinBudget(callSid) {
+  return getEstimatedCost(callSid) < PER_CALL_BUDGET_RS;
 }
 
 function endCallTracking(callSid) {
-  const finalCost = getEstimatedCost(callSid);
   const entry = costTracker.get(callSid);
-  const durationMin = entry ? ((Date.now() - entry.startedAt) / 60000).toFixed(1) : '?';
-  logger.log(`Call ${callSid} ended — cost: ₹${finalCost.toFixed(2)}, duration: ${durationMin}min`);
+  if (!entry) return 0;
 
-  // FIX M4: Persist cost to database for historical analysis
+  const callMinutes = ((Date.now() - entry.startedAt) / 60000);
+  const vobizCost = callMinutes * COSTS.vobiz_per_min;
+  const sttCost = entry.sttMinutes * COSTS.whisper_per_min;
+  const llmCost = (entry.inputTokens * COSTS.gpt4o_mini_input_per_token) +
+    (entry.outputTokens * COSTS.gpt4o_mini_output_per_token);
+  const ttsCost = entry.ttsChars * COSTS.tts_per_char;
+  const finalCost = vobizCost + sttCost + llmCost + ttsCost;
+
+  logger.log(`Call ${callSid} ended — cost: ₹${finalCost.toFixed(2)}, duration: ${callMinutes.toFixed(1)}min, STT:${entry.sttCount} TTS:${entry.ttsCount}`);
+
+  // Persist cost to database for historical analysis
   if (callSid && entry) {
     const Call = require('../models/call.model');
     Call.findOneAndUpdate(
       { callSid },
       {
         $set: {
-          estimatedCost: finalCost, costBreakdown: {
-            vobiz: entry.vobiz || 0,
-            whisper: entry.whisper || 0,
-            gpt: entry.gpt || 0,
-            tts: entry.tts || 0
-          }
+          estimatedCost: finalCost,
+          costBreakdown: {
+            vobiz: vobizCost,
+            whisper: sttCost,
+            gpt: llmCost,
+            tts: ttsCost
+          },
+          callDurationMin: callMinutes
         }
       }
     ).catch(err => logger.warn('Failed to persist cost data', err.message));
@@ -97,5 +128,6 @@ setInterval(() => {
 
 module.exports = {
   trackCall, addTokenUsage, addSttUsage, addTtsUsage,
-  getEstimatedCost, isWithinBudget, endCallTracking
+  getEstimatedCost, isWithinBudget, endCallTracking,
+  PER_CALL_BUDGET_RS
 };

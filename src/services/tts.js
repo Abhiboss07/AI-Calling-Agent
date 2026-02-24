@@ -14,7 +14,7 @@ const { getLanguage } = require('../config/languages');
 // In-memory LRU cache for frequently spoken phrases (avoid re-synthesis)
 // FIX H3: Cache keyed by hash, with memory cap to prevent OOM
 const ttsCache = new Map();    // fullText → { url, mulawBuffer }
-const MAX_CACHE = config.tts?.cacheMaxEntries || 50;
+const MAX_CACHE = config.tts?.cacheMaxEntries || 100;
 const MAX_CACHE_BYTES = config.tts?.cacheMaxBytes || (3 * 1024 * 1024); // 3MB
 let currentCacheBytes = 0;
 
@@ -155,41 +155,4 @@ async function synthesizeRaw(text, callSid, language = 'en-IN') {
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// synthesizeAndUpload() — Returns a URL (for legacy/fallback use)
-// ══════════════════════════════════════════════════════════════════════════════
-async function synthesizeAndUpload(text, callSid, language = 'en-IN') {
-  if (!text || text.trim().length === 0) {
-    logger.warn('TTS: empty text, skipping');
-    return null;
-  }
-
-  const cleanText = text.trim();
-
-  const startMs = Date.now();
-
-  try {
-    metrics.incrementTtsRequest(true);
-
-    const langConfig = getLanguage(language);
-    const voice = langConfig.ttsVoice || 'alloy';
-    const audioBuffer = await openai.ttsSynthesize(cleanText, voice, 'mp3');
-    const synthMs = Date.now() - startMs;
-
-    const key = `tts/${Date.now()}-${uuidv4().substring(0, 8)}.mp3`;
-    const url = await storage.uploadBuffer(Buffer.from(audioBuffer), key, 'audio/mpeg');
-    const totalMs = Date.now() - startMs;
-
-    logger.debug(`TTS upload: ${cleanText.length} chars → ${(audioBuffer.length / 1024).toFixed(1)}KB (synth:${synthMs}ms total:${totalMs}ms)`);
-
-    if (callSid) costControl.addTtsUsage(callSid, cleanText.length);
-
-    return url;
-  } catch (err) {
-    logger.error('TTS upload error:', err.message || err);
-    metrics.incrementTtsRequest(false);
-    return null;
-  }
-}
-
-module.exports = { synthesizeRaw, synthesizeAndUpload };
+module.exports = { synthesizeRaw, pcm16ToMulaw, pcmBufferToMulaw };

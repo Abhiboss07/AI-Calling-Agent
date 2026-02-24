@@ -54,7 +54,7 @@ module.exports = {
   pipeline: {
     vadThreshold: Number(process.env.VAD_THRESHOLD) || 0.008,
     speechStartChunks: Number(process.env.SPEECH_START_CHUNKS) || 3,
-    speechEndChunks: Number(process.env.SPEECH_END_CHUNKS) || 12,
+    speechEndChunks: Number(process.env.SPEECH_END_CHUNKS) || 8,
     minUtteranceBytes: Number(process.env.MIN_UTTERANCE_BYTES) || 4000,
     maxBufferBytes: Number(process.env.MAX_BUFFER_BYTES) || 320000,
     silencePromptMs: Number(process.env.SILENCE_PROMPT_MS) || 10000,
@@ -64,12 +64,12 @@ module.exports = {
   },
 
   llm: {
-    maxHistory: Number(process.env.LLM_MAX_HISTORY) || 20,
+    maxHistory: Number(process.env.LLM_MAX_HISTORY) || 10,
     historyTtlMs: Number(process.env.LLM_HISTORY_TTL_MS) || 30 * 60 * 1000
   },
 
   tts: {
-    cacheMaxEntries: Number(process.env.TTS_CACHE_MAX_ENTRIES) || 50,
+    cacheMaxEntries: Number(process.env.TTS_CACHE_MAX_ENTRIES) || 100,
     cacheMaxBytes: Number(process.env.TTS_CACHE_MAX_BYTES) || 3 * 1024 * 1024 // 3MB
   },
 

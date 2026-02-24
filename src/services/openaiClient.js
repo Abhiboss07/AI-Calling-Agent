@@ -38,7 +38,7 @@ async function transcribeAudio(buffer, mimeType = 'audio/wav', language = 'en') 
 
       const resp = await apiClient.post('/v1/audio/transcriptions', form, {
         headers: { ...form.getHeaders() },
-        timeout: 15000,
+        timeout: 10000,
         maxContentLength: Infinity,
         maxBodyLength: Infinity
       });

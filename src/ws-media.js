@@ -8,6 +8,7 @@ const Lead = require('./models/lead.model');
 const Transcript = require('./models/transcript.model');
 const config = require('./config');
 const metrics = require('./services/metrics');
+const costControl = require('./services/costControl');
 const { retry } = require('./utils/retry');
 const { getLanguage } = require('./config/languages');
 
@@ -312,6 +313,7 @@ module.exports = function setupWs(app) {
           session = new CallSession(callUuid, callerNumber, language);
           session.streamSid = streamSid;
           sessions.set(callUuid, session);
+          costControl.trackCall(callUuid);
 
           logger.log('📞 Stream started', { callUuid, callerNumber, streamSid, language });
 
@@ -467,16 +469,13 @@ async function deliverInitialGreeting(session, ws) {
     const langConfig = getLanguage(session.language);
     const greetingText = `${langConfig.greeting.substring(0, 5)} ${config.agentName} from ${config.companyName}. ${langConfig.greeting}`;
 
-    // Synthesize → get raw PCM buffer (not mp3+upload)
+    // Synthesize → get raw µ-law buffer for direct stream playback
     const ttsResult = await tts.synthesizeRaw(greetingText, session.callSid, session.language);
 
     if (ttsResult && ttsResult.mulawBuffer && ws.readyState === 1) {
       await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
-    } else if (session.callSid) {
-      // Fallback: Use Vobiz REST API only as last resort
-      await vobizClient.sayText(session.callSid, greetingText).catch(e =>
-        logger.error('Say fallback failed', e.message)
-      );
+    } else {
+      logger.warn('TTS greeting failed — no audio delivered', session.callSid);
     }
 
     session.transcriptEntries.push({
@@ -600,7 +599,7 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
       return;
     }
 
-    // Synthesize to µ-law for direct stream playback (with language)
+    // Synthesize to µ-law for direct stream playback
     const ttsResult = await tts.synthesizeRaw(reply.speak, session.callSid, session.language);
     const ttsLatency = Date.now() - ttsStart;
 
@@ -609,17 +608,11 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
       return;
     }
 
-    // Send audio through the WebSocket (no REST API call!)
+    // Send audio through the WebSocket — pure AI, no REST fallback
     if (ttsResult && ttsResult.mulawBuffer) {
       await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
     } else {
-      // Fallback: use Vobiz REST Speak (will interrupt the stream — last resort)
-      logger.warn('TTS raw synthesis failed, falling back to REST Speak');
-      try {
-        await vobizClient.sayText(session.callSid, reply.speak);
-      } catch (e) {
-        logger.error('Speak fallback also failed', e.message);
-      }
+      logger.warn('TTS synthesis failed, skipping audio', session.callSid);
     }
 
     const totalLatency = Date.now() - pipelineStart;
@@ -686,8 +679,8 @@ function startSilenceTimer(session, ws) {
           const ttsResult = await tts.synthesizeRaw(langConfig.silencePrompt, session.callSid, session.language);
           if (ttsResult && ttsResult.mulawBuffer) {
             await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
-          } else if (session.callSid) {
-            await vobizClient.sayText(session.callSid, langConfig.silencePrompt);
+          } else {
+            logger.warn('Silence prompt TTS failed', session.callSid);
           }
         }
       } catch (err) {
@@ -715,10 +708,7 @@ async function endCallGracefully(session, ws, farewellText) {
         const ttsResult = await tts.synthesizeRaw(farewellText, session.callSid, session.language);
         if (ttsResult && ttsResult.mulawBuffer) {
           await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
-          await new Promise(r => setTimeout(r, 2500));
-        } else if (session.callSid) {
-          await vobizClient.sayText(session.callSid, farewellText);
-          await new Promise(r => setTimeout(r, 2500));
+          await new Promise(r => setTimeout(r, 2000));
         }
       } catch (err) {
         logger.warn('Farewell play failed', err.message);
@@ -731,6 +721,11 @@ async function endCallGracefully(session, ws, farewellText) {
   } catch (err) {
     logger.error('Graceful end error', err.message);
   }
+
+  // FIX: Clean up session from map to prevent leaks
+  sessions.delete(session.callSid);
+  llm.clearHistory(session.callSid);
+  costControl.endCallTracking(session.callSid);
 
   await finalizeCall(session);
 }
@@ -810,7 +805,7 @@ async function finalizeCall(session) {
           : session.qualityScore > 0 ? 'follow-up'
             : 'new';
 
-      const fullText = session.transcriptEntries.map(e => `${e.speaker}: ${e.text}`).join('\n');
+      // FIX: reuse fullText from above instead of recomputing
 
       await Lead.findOneAndUpdate(
         { phoneNumber: session.callerNumber, callId: call?._id },
@@ -854,9 +849,9 @@ async function generateCallSummary(fullText, leadData) {
     },
     {
       role: 'user',
-      content: `Transcript:\n${fullText.substring(0, 3000)}\n\nLead data: ${JSON.stringify(leadData)}`
+      content: `Transcript:\n${fullText.substring(0, 2000)}\n\nLead data: ${JSON.stringify(leadData)}`
     }
-  ], 'gpt-4o-mini', { max_tokens: 150, temperature: 0.2 });
+  ], 'gpt-4o-mini', { max_tokens: 100, temperature: 0.2 });
 
   return resp.choices?.[0]?.message?.content || fullText.substring(0, 500);
 }
