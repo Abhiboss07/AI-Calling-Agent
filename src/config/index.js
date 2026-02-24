@@ -16,7 +16,7 @@ if (missing.length) {
 module.exports = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 3000,
-  host: process.env.HOST || '0.0.0.0',
+  host: process.env.HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost'),
 
   vobiz: {
     authId: process.env.VOBIZ_AUTH_ID,
