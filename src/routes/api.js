@@ -303,8 +303,17 @@ router.get('/v1/leads', async (req, res) => {
   try {
     const { status, minScore, page = 1, perPage = 50 } = req.query;
     const query = {};
-    if (status) query.status = status;
-    if (minScore) query.qualityScore = { $gte: Number(minScore) };
+    if (status && typeof status === 'string') {
+      const validLeadStatuses = ['new', 'follow-up', 'qualified', 'site-visit-booked', 'not-interested', 'converted'];
+      if (validLeadStatuses.includes(status)) {
+        query.status = status;
+      } else {
+        return res.status(400).json({ ok: false, error: 'Invalid lead status' });
+      }
+    }
+    if (minScore && typeof minScore === 'string' && !isNaN(Number(minScore))) {
+      query.qualityScore = { $gte: Number(minScore) };
+    }
 
     const pg = Math.max(1, Number(page));
     const pp = Math.min(100, Math.max(1, Number(perPage)));

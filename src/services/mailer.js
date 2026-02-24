@@ -3,11 +3,11 @@ const logger = require('../utils/logger');
 
 // Create reusable transporter
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.SMTP_EMAIL,
-        pass: process.env.SMTP_PASSWORD
-    }
+  service: 'gmail',
+  auth: {
+    user: process.env.SMTP_EMAIL,
+    pass: process.env.SMTP_PASSWORD
+  }
 });
 
 /**
@@ -16,8 +16,20 @@ const transporter = nodemailer.createTransport({
  * @param {string} code - 6-digit verification code
  * @param {string} name - User's name
  */
+// Sanitize HTML to prevent XSS in emails
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 async function sendVerificationCode(email, code, name = 'User') {
-    const html = `
+  const safeName = escapeHtml(name);
+  const safeCode = escapeHtml(code);
+  const html = `
     <!DOCTYPE html>
     <html>
     <head>
@@ -37,14 +49,14 @@ async function sendVerificationCode(email, code, name = 'User') {
 
         <!-- Body -->
         <div style="padding:32px;">
-          <h2 style="color:#111827;margin:0 0 8px;font-size:18px;">Hello ${name},</h2>
+          <h2 style="color:#111827;margin:0 0 8px;font-size:18px;">Hello ${safeName},</h2>
           <p style="color:#6b7280;margin:0 0 24px;font-size:14px;line-height:1.6;">
             Use the verification code below to complete your registration.
           </p>
 
           <!-- Code -->
           <div style="background:#EFF6FF;border:2px solid #2563EB;border-radius:12px;padding:20px;text-align:center;margin-bottom:24px;">
-            <div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#2563EB;">${code}</div>
+            <div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#2563EB;">${safeCode}</div>
           </div>
 
           <p style="color:#9ca3af;font-size:12px;margin:0;line-height:1.5;">
@@ -61,19 +73,19 @@ async function sendVerificationCode(email, code, name = 'User') {
     </html>
   `;
 
-    try {
-        await transporter.sendMail({
-            from: `"Estate Agent" <${process.env.SMTP_EMAIL}>`,
-            to: email,
-            subject: `${code} — Your Estate Agent Verification Code`,
-            html
-        });
-        logger.log(`Verification email sent to ${email}`);
-        return true;
-    } catch (err) {
-        logger.error('Failed to send verification email', err.message);
-        throw new Error('Failed to send verification email. Please check SMTP settings.');
-    }
+  try {
+    await transporter.sendMail({
+      from: `"Estate Agent" <${process.env.SMTP_EMAIL}>`,
+      to: email,
+      subject: `${code} — Your Estate Agent Verification Code`,
+      html
+    });
+    logger.log(`Verification email sent to ${email}`);
+    return true;
+  } catch (err) {
+    logger.error('Failed to send verification email', err.message);
+    throw new Error('Failed to send verification email. Please check SMTP settings.');
+  }
 }
 
 module.exports = { sendVerificationCode };

@@ -187,7 +187,9 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
   if (!session.streamSid || ws.readyState !== 1) return;
 
   session.isPlaying = true;
-  const playbackId = ++session.lastPipelineId;
+  // Use a separate playback counter so we don't invalidate pipeline checks
+  session._playbackId = (session._playbackId || 0) + 1;
+  const playbackId = session._playbackId;
 
   // Clear any previously queued audio first
   try {
@@ -200,7 +202,7 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
   const BATCH_SIZE = 10;
 
   for (let i = 0; i < totalChunks; i++) {
-    if (ws.readyState !== 1 || !session.isPlaying || session.lastPipelineId !== playbackId) {
+    if (ws.readyState !== 1 || !session.isPlaying || session._playbackId !== playbackId) {
       logger.debug('Playback interrupted at chunk', i, 'of', totalChunks);
       break;
     }
@@ -745,6 +747,7 @@ async function cleanupSession(session, ws, pingInterval) {
 
   sessions.delete(session.callSid);
   llm.clearHistory(session.callSid);
+  costControl.endCallTracking(session.callSid);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -822,7 +825,7 @@ async function finalizeCall(session) {
           qualityScore: session.qualityScore,
           status: leadStatus,
           siteVisitDate: session.leadData.siteVisitDate ? new Date(session.leadData.siteVisitDate) : null,
-          conversationSummary: fullText.substring(0, 2000),
+          conversationSummary: (session.transcriptEntries.map(e => `${e.speaker}: ${e.text}`).join('\n')).substring(0, 2000),
           objections: session.leadData.objections || [],
           source: 'ai-call'
         },

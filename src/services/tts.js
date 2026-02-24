@@ -1,6 +1,4 @@
 const openai = require('./openaiClient');
-const storage = require('./storage');
-const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
 const metrics = require('./metrics');
 const costControl = require('./costControl');
