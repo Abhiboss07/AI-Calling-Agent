@@ -21,7 +21,7 @@ services:
       - NODE_ENV=production
       - PORT=3000
       - HOST=0.0.0.0
-      - MONGODB_URI=mongodb://mongo:27017/ai_outbound
+      - MONGODB_URI=${MONGODB_URI}
       - VOBIZ_AUTH_ID=${VOBIZ_AUTH_ID}
       - VOBIZ_AUTH_TOKEN=${VOBIZ_AUTH_TOKEN}
       - VOBIZ_CALLER_ID=${VOBIZ_CALLER_ID}
@@ -35,9 +35,6 @@ services:
       - COMPANY_NAME=${COMPANY_NAME:-Premier Realty Group}
       - AGENT_NAME=${AGENT_NAME:-Priya}
       - CORS_ORIGINS=http://localhost:3001,http://localhost:3000
-    depends_on:
-      mongo:
-        condition: service_healthy
     restart: unless-stopped
     deploy:
       resources:
@@ -59,26 +56,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ── MongoDB ──────────────────────────────────────────────────────────────
-  mongo:
-    image: mongo:7
-    container_name: ai-calling-mongo
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-    healthcheck:
-      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-
   # ── Redis (for scaling: rate limiting, session store, pub/sub) ───────────
   redis:
     image: redis:7-alpine
@@ -96,5 +73,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  mongo_data:
   redis_data:

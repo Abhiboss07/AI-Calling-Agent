@@ -21,7 +21,10 @@ describe('Knowledge Base System', () => {
     beforeAll(async () => {
         // Check if we are already connected
         if (mongoose.connection.readyState === 0) {
-            await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ai_outbound_test');
+            if (!process.env.MONGODB_URI) {
+                throw new Error('MONGODB_URI is required for testing. Please provide an Atlas test URI or a local instance.');
+            }
+            await mongoose.connect(process.env.MONGODB_URI);
         }
 
         // Clean up

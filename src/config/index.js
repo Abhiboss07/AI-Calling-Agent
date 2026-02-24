@@ -26,7 +26,7 @@ module.exports = {
 
   openaiApiKey: process.env.OPENAI_API_KEY,
 
-  mongodbUri: process.env.MONGODB_URI || 'mongodb://localhost:27017/ai_outbound',
+  mongodbUri: process.env.MONGODB_URI, // Atlas URI required
 
   s3: {
     bucket: process.env.S3_BUCKET,
