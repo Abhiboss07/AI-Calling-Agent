@@ -4,6 +4,8 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Phone } from 'lucide-react';
 
+export const runtime = 'edge';
+
 export default function ClientDetail() {
     const params = useParams();
     const phoneNumber = decodeURIComponent(params.id);

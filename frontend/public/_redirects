@@ -1,2 +1,3 @@
 # Redirect all API calls to the Worker
 /api/*  https://ai-calling-agent-backend.abhicps19.workers.dev/api/:splat  200
+/* /index.html 200
