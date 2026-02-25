@@ -469,7 +469,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice) {
 async function deliverInitialGreeting(session, ws) {
   try {
     const langConfig = getLanguage(session.language);
-    const greetingText = `${langConfig.greeting.substring(0, 5)} ${config.agentName} from ${config.companyName}. ${langConfig.greeting}`;
+    const greetingText = `${config.agentName} from ${config.companyName}. ${langConfig.greeting}`;
 
     // Synthesize → get raw µ-law buffer for direct stream playback
     const ttsResult = await tts.synthesizeRaw(greetingText, session.callSid, session.language);
@@ -574,10 +574,14 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
   });
   const llmLatency = Date.now() - llmStart;
 
+  // FIX: Don't discard after LLM completion if we already have a reply. 
+  // Playback will be naturally interrupted if the user starts speaking again.
+  /*
   if (pipelineId !== session.lastPipelineId) {
-    logger.log('Pipeline superseded after LLM, discarding');
+    logger.log('Pipeline discarded after LLM completion', { pipelineId, latest: session.lastPipelineId, callSid: session.callSid });
     return;
   }
+  */
 
   logger.log(`💬 LLM (${llmLatency}ms): "${reply.speak}" | action: ${reply.action}`);
 

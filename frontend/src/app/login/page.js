@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthProvider';
+import { API_BASE } from '../../lib/api';
 
 export default function LoginPage() {
     const { login } = useAuth();
@@ -17,7 +18,7 @@ export default function LoginPage() {
         setLoading(true);
 
         try {
-            const res = await fetch('/api/v1/auth/login', {
+            const res = await fetch(`${API_BASE}/v1/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password })

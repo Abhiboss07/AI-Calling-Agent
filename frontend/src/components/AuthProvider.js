@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { API_BASE } from '../lib/api';
 
 const AuthContext = createContext(null);
 
@@ -32,7 +33,7 @@ export function AuthProvider({ children }) {
 
     async function fetchUser(jwt) {
         try {
-            const res = await fetch('/api/v1/auth/me', {
+            const res = await fetch(`${API_BASE}/v1/auth/me`, {
                 headers: { Authorization: `Bearer ${jwt}` }
             });
             if (res.ok) {

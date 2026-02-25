@@ -58,8 +58,8 @@ module.exports = {
   pipeline: {
     vadThreshold: Number(process.env.VAD_THRESHOLD) || 0.008,
     speechStartChunks: Number(process.env.SPEECH_START_CHUNKS) || 3,
-    speechEndChunks: Number(process.env.SPEECH_END_CHUNKS) || 8,
-    minUtteranceBytes: Number(process.env.MIN_UTTERANCE_BYTES) || 4000,
+    speechEndChunks: Number(process.env.SPEECH_END_CHUNKS) || 12,
+    minUtteranceBytes: Number(process.env.MIN_UTTERANCE_BYTES) || 6400,
     maxBufferBytes: Number(process.env.MAX_BUFFER_BYTES) || 320000,
     silencePromptMs: Number(process.env.SILENCE_PROMPT_MS) || 10000,
     playbackChunkSize: Number(process.env.PLAYBACK_CHUNK_SIZE) || 160,

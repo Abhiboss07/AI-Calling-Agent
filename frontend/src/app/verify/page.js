@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
+import { API_BASE } from '../../lib/api';
 
 function VerifyForm() {
     const searchParams = useSearchParams();
@@ -59,7 +60,7 @@ function VerifyForm() {
         setLoading(true);
 
         try {
-            const res = await fetch('/api/v1/auth/verify', {
+            const res = await fetch(`${API_BASE}/v1/auth/verify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, code: codeStr || code.join('') })
@@ -88,7 +89,7 @@ function VerifyForm() {
         setSuccess('');
 
         try {
-            const res = await fetch('/api/v1/auth/resend-code', {
+            const res = await fetch(`${API_BASE}/v1/auth/resend-code`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email })
