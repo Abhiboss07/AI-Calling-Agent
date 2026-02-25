@@ -1,4 +1,5 @@
 import { Inter } from "next/font/google";
+export const runtime = 'edge';
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
