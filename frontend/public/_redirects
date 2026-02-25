@@ -1,3 +1,2 @@
-# Handle API calls by proxying to the backend
-# Replace https://your-backend-url.com with your actual backend URL in the Cloudflare Dashboard
-/api/*  https://your-backend-url.com/api/:splat  200
+# Redirect all API calls to the Worker
+/api/*  https://ai-calling-agent-backend.abhicps19.workers.dev/api/:splat  200

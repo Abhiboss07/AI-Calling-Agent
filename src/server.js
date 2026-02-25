@@ -93,29 +93,17 @@ async function start() {
     next();
   });
 
-  // ── CORS (configurable via env) ─────────────────────────────────────────
-  const corsOriginsConfig = process.env.CORS_ORIGINS || '*';
-  const allowedOrigins = corsOriginsConfig.split(',').map(s => s.trim());
-
-  app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    const isAllowed = origin && (allowedOrigins.includes(origin) || allowedOrigins.includes('*'));
-
-    if (origin) {
-      if (isAllowed) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
-        res.setHeader('Access-Control-Max-Age', '86400');
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-      } else {
-        logger.warn(`[CORS] Rejected origin: ${origin} | Configured: ${corsOriginsConfig}`);
-      }
-    }
-
-    if (req.method === 'OPTIONS') return res.sendStatus(204);
-    next();
-  });
+  // ── CORS ───────────────────────────────────────────────────────────────
+  const cors = require('cors');
+  app.use(cors({
+    origin: (origin, callback) => {
+      // Allow all origins for debugging, or restrict as needed
+      callback(null, true);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
+  }));
 
   // ── Request tracking ────────────────────────────────────────────────────
   app.use((req, res, next) => {

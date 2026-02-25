@@ -1,0 +1,24 @@
+Checking CORS for origin: https://ai-calling-agent-udcaog7xo-abhishek-yadav-s-projects-2e9f191c.vercel.app
+Target URL: https://ai-calling-agent-bl3f.onrender.com/api/v1/auth/login
+
+Response Status: 204
+Response Headers:
+date: Wed, 25 Feb 2026 17:59:06 GMT
+connection: keep-alive
+cf-ray: 9d391836deca5510-DEL
+access-control-allow-credentials: true
+access-control-allow-headers: Content-Type,Authorization
+access-control-allow-methods: GET,POST,PUT,DELETE,OPTIONS
+access-control-allow-origin: https://ai-calling-agent-udcaog7xo-abhishek-yadav-s-projects-2e9f191c.vercel.app
+access-control-max-age: 86400
+etag: W/"a-bAsFyilMr4Ra1hIU5PyoyFRunpI"
+referrer-policy: strict-origin-when-cross-origin
+rndr-id: fba6c1ef-247d-47a1
+strict-transport-security: max-age=31536000; includeSubDomains
+x-content-type-options: nosniff
+x-frame-options: DENY
+x-render-origin-server: Render
+x-xss-protection: 0
+cf-cache-status: DYNAMIC
+server: cloudflare
+alt-svc: h3=":443"; ma=86400

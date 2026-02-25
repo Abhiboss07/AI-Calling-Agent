@@ -1,4 +1,4 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api';
+export const API_BASE = '/api';
 
 export async function fetchMetrics() {
     const res = await fetch(`${API_BASE}/v1/metrics`, { cache: 'no-store' });
