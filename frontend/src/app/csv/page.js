@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from 'react';
+import { API_BASE } from '../../lib/api';
 
 const SAMPLE_CSV = [
     ['+915550101', 'John Doe', 'john@example.com'],
@@ -21,7 +22,7 @@ export default function CSVManagement() {
     }, []);
 
     const fetchHistory = () => {
-        fetch('/api/v1/uploads')
+        fetch(`${API_BASE}/v1/uploads`)
             .then(res => res.json())
             .then(d => d.ok && setHistory(d.data))
             .catch(console.error);
@@ -56,7 +57,7 @@ export default function CSVManagement() {
         setLoading(true);
         setMessage(null);
         try {
-            const res = await fetch(`/api/v1/calls/upload-numbers?campaignId=${campaignId}&mode=${mode}`, {
+            const res = await fetch(`${API_BASE}/v1/calls/upload-numbers?campaignId=${campaignId}&mode=${mode}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/csv' },
                 body: await file.text()
@@ -215,15 +216,15 @@ function CampaignSelector({ selectedId, onSelect }) {
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        fetch('/api/v1/campaigns').then(r => r.json()).then(d => d.ok && setCampaigns(d.data));
-        fetch('/api/v1/knowledge-bases').then(r => r.json()).then(d => d.ok && setKbs(d.data));
+        fetch(`${API_BASE}/v1/campaigns`).then(r => r.json()).then(d => d.ok && setCampaigns(d.data));
+        fetch(`${API_BASE}/v1/knowledge-bases`).then(r => r.json()).then(d => d.ok && setKbs(d.data));
     }, []);
 
     const createCampaign = async () => {
         if (!newName) return;
         setLoading(true);
         try {
-            const res = await fetch('/api/v1/campaigns', {
+            const res = await fetch(`${API_BASE}/v1/campaigns`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name: newName, knowledgeBaseId: newKbId || null })

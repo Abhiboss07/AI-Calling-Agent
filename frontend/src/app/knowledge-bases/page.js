@@ -2,13 +2,14 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { FileText } from 'lucide-react';
+import { API_BASE } from '../../lib/api';
 
 export default function KnowledgeBaseList() {
     const [kbs, setKbs] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetch('/api/v1/knowledge-bases')
+        fetch(`${API_BASE}/v1/knowledge-bases`)
             .then(res => res.json())
             .then(data => {
                 if (data.ok) setKbs(data.data);
