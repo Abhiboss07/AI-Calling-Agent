@@ -1,7 +1,11 @@
 const dotenv = require('dotenv');
 const path = require('path');
 
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+// CRITICAL FIX: override=true ensures .env file values ALWAYS take precedence
+// over system/shell environment variables. Without this, a stale system-level
+// OPENAI_API_KEY (e.g. sk-or-v1-...) silently overrides the .env value,
+// causing all TTS/STT/LLM calls to fail with 401 Unauthorized.
+dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
 
 // ── Validation ──────────────────────────────────────────────────────────────
 const REQUIRED = ['VOBIZ_AUTH_ID', 'VOBIZ_AUTH_TOKEN', 'VOBIZ_CALLER_ID', 'OPENAI_API_KEY'];

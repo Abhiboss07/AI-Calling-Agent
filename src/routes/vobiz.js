@@ -128,11 +128,9 @@ router.post('/answer', webhookRateLimit(60000, 100), validateVobizSignature, asy
     const xml = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<Response>',
-        // No initial Speak — AI greets through the WebSocket stream (lower latency)
         // Bidirectional stream — call stays alive as long as WS is open
-        `  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000" statusCallbackUrl="${xmlEscape(statusUrl)}" statusCallbackMethod="POST">`,
-        `    ${xmlEscape(streamUrl)}?callUuid=${xmlEscape(callUuid)}&callerNumber=${xmlEscape(from)}&direction=${xmlEscape(direction)}&language=${xmlEscape(language)}`,
-        '  </Stream>',
+        // URL must be clean (no leading whitespace/newlines) for Vobiz to parse correctly
+        `  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000" statusCallbackUrl="${xmlEscape(statusUrl)}" statusCallbackMethod="POST">${streamUrl}?callUuid=${callUuid}&amp;callerNumber=${xmlEscape(from)}&amp;direction=${xmlEscape(direction)}&amp;language=${xmlEscape(language)}</Stream>`,
         // If stream disconnects, say goodbye rather than dead air
         `  <Speak voice="WOMAN" language="${xmlEscape(language)}">${xmlEscape(langConfig.farewell)}</Speak>`,
         '</Response>'

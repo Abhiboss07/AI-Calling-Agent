@@ -95,15 +95,40 @@ async function ttsSynthesize(text, voice = 'alloy', format = 'mp3') {
 
   return ttsBreaker.exec(async () => {
     const fn = async () => {
-      const resp = await apiClient.post('/v1/audio/speech', body, {
-        headers: { 'Content-Type': 'application/json' },
-        responseType: 'arraybuffer',
-        timeout
-      });
-      return resp.data;
+      try {
+        const resp = await apiClient.post('/v1/audio/speech', body, {
+          headers: { 'Content-Type': 'application/json' },
+          responseType: 'arraybuffer',
+          timeout
+        });
+        return resp.data;
+      } catch (err) {
+        // Enhanced error logging for TTS failures
+        const status = err.response?.status;
+        const detail = err.response?.data
+          ? Buffer.isBuffer(err.response.data) || err.response.data instanceof ArrayBuffer
+            ? Buffer.from(err.response.data).toString('utf8').substring(0, 300)
+            : JSON.stringify(err.response.data).substring(0, 300)
+          : '';
+        logger.error(`TTS API error: HTTP ${status || 'N/A'} — ${err.message}`, detail ? `Detail: ${detail}` : '');
+        throw err;
+      }
     };
     return retry(fn, { retries: 2, minDelay: 300, factor: 1.5 });
   });
 }
 
-module.exports = { transcribeAudio, chatCompletion, ttsSynthesize };
+// ── Startup Validation ──────────────────────────────────────────────────────
+// Quick check to verify the API key is valid (uses free /v1/models endpoint)
+async function validateApiKey() {
+  if (!config.openaiApiKey) return { valid: false, error: 'OPENAI_API_KEY missing' };
+  try {
+    await apiClient.get('/v1/models', { timeout: 8000 });
+    return { valid: true };
+  } catch (err) {
+    const status = err.response?.status;
+    return { valid: false, error: `HTTP ${status || 'N/A'}: ${err.message}` };
+  }
+}
+
+module.exports = { transcribeAudio, chatCompletion, ttsSynthesize, validateApiKey };

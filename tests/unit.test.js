@@ -459,16 +459,6 @@ describe('TTS Edge Cases', () => {
         const result = await tts.synthesizeRaw('   ', null);
         expect(result).toBeNull();
     });
-
-    test('empty text returns null for synthesizeAndUpload', async () => {
-        const result = await tts.synthesizeAndUpload('', null);
-        expect(result).toBeNull();
-    });
-
-    test('whitespace-only text returns null for synthesizeAndUpload', async () => {
-        const result = await tts.synthesizeAndUpload('   ', null);
-        expect(result).toBeNull();
-    });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

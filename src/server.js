@@ -61,6 +61,21 @@ let isShuttingDown = false;
 async function start() {
   await db.connect();
 
+  // ── Validate OpenAI API key at startup ──────────────────────────────────
+  try {
+    const openai = require('./services/openaiClient');
+    const keyCheck = await openai.validateApiKey();
+    if (keyCheck.valid) {
+      logger.log('✅ OpenAI API key validated — TTS/STT/LLM will work');
+    } else {
+      logger.error(`⚠️  OpenAI API key INVALID — ${keyCheck.error}`);
+      logger.error('   TTS, STT, and LLM will ALL fail during calls!');
+      logger.error('   Fix: Update OPENAI_API_KEY in your .env file with a valid key');
+    }
+  } catch (err) {
+    logger.warn('OpenAI key validation skipped:', err.message);
+  }
+
   const app = express();
   expressWs(app);
 

@@ -1,0 +1,253 @@
+﻿  console.log
+    [2026-02-25T11:48:01.174Z] INFO  Loaded system prompt from D:\AI Calling Agent\config\ai_calling_agent_system_prompt.txt
+
+      at Object.log (src/utils/logger.js:53:13)
+
+  console.log
+    [2026-02-25T11:48:01.198Z] INFO  test
+
+      at Object.log (src/utils/logger.js:53:13)
+
+  console.warn
+    [2026-02-25T11:48:01.200Z] WARN  test
+
+    [0m [90m 69 |[39m     console[33m.[39mwarn(jsonLog([32m'WARN'[39m[33m,[39m args))[33m;[39m
+     [90m 70 |[39m   } [36melse[39m {
+    [31m[1m>[22m[39m[90m 71 |[39m     console[33m.[39mwarn(humanLog([32m'WARN'[39m[33m,[39m args))[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 72 |[39m   }
+     [90m 73 |[39m }
+     [90m 74 |[39m[0m
+
+      at Object.warn (src/utils/logger.js:71:13)
+      at warn (tests/unit.test.js:25:29)
+      at Object.<anonymous> (node_modules/expect/build/toThrowMatchers.js:74:11)
+      at Object.throwingMatcher [as toThrow] (node_modules/expect/build/index.js:320:21)
+      at Object.toThrow (tests/unit.test.js:25:47)
+
+  console.log
+    [2026-02-25T11:48:01.205Z] INFO  test {"key":"value"}
+
+      at Object.log (src/utils/logger.js:53:13)
+
+  console.log
+    [2026-02-25T11:48:01.207Z] INFO  null undefined text
+
+      at Object.log (src/utils/logger.js:53:13)
+
+  console.log
+    [2026-02-25T11:48:01.357Z] INFO  Call test-stt ended ΓÇö cost: Γé╣0.25, duration: 0.0min, STT:1 TTS:0
+
+      at Object.log (src/utils/logger.js:53:13)
+
+  console.log
+    [2026-02-25T11:48:01.659Z] INFO  Call test-tts ended ΓÇö cost: Γé╣0.63, duration: 0.0min, STT:0 TTS:1
+
+      at Object.log (src/utils/logger.js:53:13)
+
+  console.log
+    [2026-02-25T11:48:01.661Z] INFO  Call test-3 ended ΓÇö cost: Γé╣0.01, duration: 0.0min, STT:0 TTS:0
+
+      at Object.log (src/utils/logger.js:53:13)
+
+  console.log
+    [2026-02-25T11:48:01.662Z] INFO  Call test-4 ended ΓÇö cost: Γé╣0.00, duration: 0.0min, STT:0 TTS:0
+
+      at Object.log (src/utils/logger.js:53:13)
+
+  console.warn
+    [2026-02-25T11:48:01.666Z] WARN  TTS: empty text, skipping
+
+    [0m [90m 69 |[39m     console[33m.[39mwarn(jsonLog([32m'WARN'[39m[33m,[39m args))[33m;[39m
+     [90m 70 |[39m   } [36melse[39m {
+    [31m[1m>[22m[39m[90m 71 |[39m     console[33m.[39mwarn(humanLog([32m'WARN'[39m[33m,[39m args))[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 72 |[39m   }
+     [90m 73 |[39m }
+     [90m 74 |[39m[0m
+
+      at Object.warn (src/utils/logger.js:71:13)
+      at Object.warn [as synthesizeRaw] (src/services/tts.js:95:12)
+      at Object.synthesizeRaw (tests/unit.test.js:454:34)
+
+  console.warn
+    [2026-02-25T11:48:01.668Z] WARN  TTS: empty text, skipping
+
+    [0m [90m 69 |[39m     console[33m.[39mwarn(jsonLog([32m'WARN'[39m[33m,[39m args))[33m;[39m
+     [90m 70 |[39m   } [36melse[39m {
+    [31m[1m>[22m[39m[90m 71 |[39m     console[33m.[39mwarn(humanLog([32m'WARN'[39m[33m,[39m args))[33m;[39m
+     [90m    |[39m             [31m[1m^[22m[39m
+     [90m 72 |[39m   }
+     [90m 73 |[39m }
+     [90m 74 |[39m[0m
+
+      at Object.warn (src/utils/logger.js:71:13)
+      at Object.warn [as synthesizeRaw] (src/services/tts.js:95:12)
+      at Object.synthesizeRaw (tests/unit.test.js:459:34)
+
+node.exe : FAIL tests/unit.test.js
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" 
+"C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( 
+   FAIL tests/unit.test.js:String) [], Remot  
+  eException
+    + FullyQualifiedErrorId : NativeCommandEr 
+   ror
+ 
+  Logger
+    ΓêÜ all 4 log levels exist (2 ms)
+    ΓêÜ log does not throw (2 ms)
+    ΓêÜ warn does not throw (5 ms)
+    ΓêÜ handles objects in args (1 ms)
+    ΓêÜ handles null/undefined args (1 ms)
+  Config
+    ΓêÜ port is a number (1 ms)
+    ΓêÜ callMaxMinutes is a positive number
+    ΓêÜ companyName is set
+    ΓêÜ agentName is set
+    ΓêÜ systemPromptFile is set
+  ┬╡-law ΓåÆ PCM ΓåÆ WAV Conversion
+    ΓêÜ ┬╡-law decode table has 256 entries
+    ΓêÜ silence byte 0xFF decodes to ~0 (1 ms)
+    ΓêÜ mulawToPcm16 doubles buffer size
+    ΓêÜ WAV buffer has correct header
+    ΓêÜ WAV data size matches PCM data (1 ms)
+  PCM ΓåÆ ┬╡-law Encoding
+    ΓêÜ silence encodes to known ┬╡-law value
+    ΓêÜ positive and negative samples produce 
+different results
+    ΓêÜ clipping works for max values
+    ΓêÜ round-trip maintains approximate 
+values (1 ms)
+  PCM-based Voice Activity Detection
+    ΓêÜ silence has RMS Γëê 0
+    ΓêÜ voice signal has RMS > threshold (1 
+ms)
+    ΓêÜ quiet noise is below threshold
+  Retry
+    ΓêÜ succeeds first try
+    ΓêÜ retries then succeeds (33 ms)
+    ΓêÜ exhausts retries then throws (45 ms)
+  Circuit Breaker
+    ΓêÜ starts CLOSED
+    ΓêÜ opens after threshold failures (1 ms)
+    ΓêÜ rejects when open (1 ms)
+    ΓêÜ recovers after timeout (61 ms)
+  Cost Control
+    ΓêÜ tracks calls correctly
+    ΓêÜ tokens increase cost (1 ms)
+    ΓêÜ STT usage increases cost (302 ms)
+    ΓêÜ TTS usage increases cost (1 ms)
+    ΓêÜ endCallTracking removes entry (2 ms)
+    ΓêÜ budget check works (1 ms)
+    ΓêÜ handles missing callSid gracefully
+  Metrics
+    ΓêÜ tracks call starts
+    ΓêÜ tracks active calls
+    ΓêÜ tracks peak concurrent
+    ΓêÜ tracks pipeline latency
+    ΓêÜ computes latency percentiles
+    ΓêÜ reports memory usage
+    ΓêÜ tracks WS errors and disconnects
+    ΓêÜ tracks interrupts
+  STT Edge Cases
+    ΓêÜ empty buffer returns empty
+    ΓêÜ tiny buffer returns empty
+    ΓêÜ null buffer returns empty
+  TTS Edge Cases
+    ΓêÜ empty text returns null for 
+synthesizeRaw (2 ms)
+    ΓêÜ whitespace-only text returns null for 
+synthesizeRaw (2 ms)
+    ├ù empty text returns null for 
+synthesizeAndUpload
+    ├ù whitespace-only text returns null for 
+synthesizeAndUpload
+  LLM History Management
+    ΓêÜ clearHistory does not throw for 
+nonexistent sid
+    ΓêÜ getHistory returns empty messages for 
+new sid
+  Pipeline Supersede Logic
+    ΓêÜ monotonic pipeline IDs
+    ΓêÜ isProcessing lock with 
+currentPipelineId
+  Audio Resampling
+    ΓêÜ reduces sample count by 3x (1 ms)
+    ΓêÜ preserves signal shape (1 ms)
+  TTS Cache Key
+    ΓêÜ different texts produce different keys
+    ΓêÜ same text produces same key
+    ΓêÜ texts with same prefix but different 
+length produce different keys
+  XML Escape
+    ΓêÜ escapes all XML special characters (1 
+ms)
+    ΓêÜ handles empty/null input
+    ΓêÜ prevents XSS in company name
+
+  ΓùÅ TTS Edge Cases ΓÇ║ empty text returns 
+null for synthesizeAndUpload
+
+    TypeError: tts.synthesizeAndUpload is not 
+a function
+
+    [0m [90m 462 |[39m
+     [90m 463 |[39m     test([32m'empty 
+text returns null for 
+synthesizeAndUpload'[39m[33m,[39m 
+[36masync[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 464 |[39m      
+   [36mconst[39m result [33m=[39m 
+[36mawait[39m tts[33m.[39msynthesizeAndUpl
+oad([32m''[39m[33m,[39m 
+[36mnull[39m)[33m;[39m
+     [90m     |[39m                         
+         [31m[1m^[22m[39m
+     [90m 465 |[39m         
+expect(result)[33m.[39mtoBeNull()[33m;[39m
+     [90m 466 |[39m     })[33m;[39m
+     [90m 467 |[39m[0m
+
+      at Object.synthesizeAndUpload 
+(tests/unit.test.js:464:34)
+
+  ΓùÅ TTS Edge Cases ΓÇ║ whitespace-only text 
+returns null for synthesizeAndUpload
+
+    TypeError: tts.synthesizeAndUpload is not 
+a function
+
+    [0m [90m 467 |[39m
+     [90m 468 |[39m     
+test([32m'whitespace-only text returns null 
+for synthesizeAndUpload'[39m[33m,[39m 
+[36masync[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 469 |[39m      
+   [36mconst[39m result [33m=[39m 
+[36mawait[39m 
+tts[33m.[39msynthesizeAndUpload([32m'   
+'[39m[33m,[39m [36mnull[39m)[33m;[39m
+     [90m     |[39m                         
+         [31m[1m^[22m[39m
+     [90m 470 |[39m         
+expect(result)[33m.[39mtoBeNull()[33m;[39m
+     [90m 471 |[39m     })[33m;[39m
+     [90m 472 |[39m })[33m;[39m[0m
+
+      at Object.synthesizeAndUpload 
+(tests/unit.test.js:469:34)
+
+Test Suites: 1 failed, 1 total
+Tests:       2 failed, 61 passed, 63 total
+Snapshots:   0 total
+Time:        0.825 s, estimated 1 s
+Ran all test suites matching 
+/tests\\unit.test.js/i.
+Force exiting Jest: Have you considered using 
+`--detectOpenHandles` to detect async 
+operations that kept running after all tests 
+finished?
