@@ -1,10 +1,13 @@
-import React, { createContext, useContext, useReducer, useEffect, useRef } from 'react';
+'use client';
+
+import React, { createContext, useContext, useReducer, useEffect, useRef, useCallback } from 'react';
 
 // Real-time WebSocket context for live call monitoring
 const WebSocketContext = createContext();
 
 // Action types for real-time updates
 const WS_ACTIONS = {
+  CONNECTING: 'connecting',
   CONNECT: 'connect',
   DISCONNECT: 'disconnect',
   CALL_STARTED: 'call_started',

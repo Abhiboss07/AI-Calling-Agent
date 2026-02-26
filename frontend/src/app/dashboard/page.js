@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useWebSocket } from '../contexts/WebSocketContext';
-import CallMonitor from '../components/CallMonitor';
+import { useWebSocket } from '../../contexts/WebSocketContext';
+import CallMonitor from '../../components/CallMonitor';
 import { Phone, Activity, Users, Clock, TrendingUp, AlertCircle, CheckCircle } from 'lucide-react';
 
 // Real-time Dashboard Page
