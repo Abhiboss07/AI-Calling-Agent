@@ -162,6 +162,20 @@ export default function Dashboard() {
             <span className="change-dash">—</span> vs previous period
           </div>
         </div>
+
+        {/* quick link to manual test call */}
+        <div className="stat-card">
+          <div className="stat-card-header">
+            <span className="stat-card-title">Test Outbound Call</span>
+            <div className="stat-card-icon gray">
+              <Zap size={18} />
+            </div>
+          </div>
+          <div className="stat-card-value">&nbsp;</div>
+          <Link href="/test-call" className="stat-card-link">
+            Make a call <ExternalLink size={12} />
+          </Link>
+        </div>
       </div>
 
       {/* ── USAGE & COST ── */}
