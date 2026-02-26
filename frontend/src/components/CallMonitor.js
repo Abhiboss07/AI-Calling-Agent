@@ -1,113 +1,107 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Phone, PhoneOff, Mic, MicOff, Volume2, VolumeX, Clock, Users, Activity } from 'lucide-react';
-import { useWebSocket, useCallData } from '../contexts/WebSocketContext';
+import { useMemo, useState } from 'react';
+import {
+  Activity,
+  Mic,
+  MicOff,
+  Phone,
+  PhoneOff,
+  Volume2
+} from 'lucide-react';
+import { useCallData, useWebSocket } from '../contexts/WebSocketContext';
 
-// Real-time Call Monitoring Component
 export default function CallMonitor() {
   const { connected, calls, activeCall, metrics, error } = useWebSocket();
   const [expandedCall, setExpandedCall] = useState(null);
+  const recentCalls = useMemo(() => [...calls].reverse(), [calls]);
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-        <div className="flex items-center gap-2 text-red-600">
-          <Activity className="w-5 h-5" />
-          <span className="font-medium">Connection Error</span>
+      <div className="card monitor-shell">
+        <div className="monitor-error">
+          <AlertIcon />
+          <div>
+            <p className="monitor-error-title">WebSocket Error</p>
+            <p className="monitor-error-text">{error}</p>
+          </div>
         </div>
-        <p className="text-red-600 text-sm mt-1">{error}</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Connection Status */}
-      <div className="bg-white rounded-lg border p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`w-3 h-3 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'} ${connected ? 'animate-pulse' : ''}`} />
-            <span className="font-medium">
-              {connected ? 'Connected' : 'Disconnected'}
-            </span>
+    <div className="monitor-stack">
+      <div className="card monitor-shell fade-in-up">
+        <div className="panel-head">
+          <h3>Connection Stream</h3>
+          <span className={`badge ${connected ? 'ok' : 'warn'}`}>
+            <span className={`monitor-dot ${connected ? 'online' : 'offline'}`} />
+            {connected ? 'Connected' : 'Disconnected'}
+          </span>
+        </div>
+        <div className="monitor-metrics">
+          <div>
+            <label>Active</label>
+            <p>{metrics.activeCalls || 0}</p>
           </div>
-          <div className="flex items-center gap-4 text-sm text-gray-600">
-            <div className="flex items-center gap-1">
-              <Users className="w-4 h-4" />
-              <span>{metrics.activeCalls} Active</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <Phone className="w-4 h-4" />
-              <span>{metrics.totalCalls} Total</span>
-            </div>
+          <div>
+            <label>Total</label>
+            <p>{metrics.totalCalls || 0}</p>
+          </div>
+          <div>
+            <label>Status</label>
+            <p>{connected ? 'Realtime sync healthy' : 'Waiting for reconnect'}</p>
           </div>
         </div>
       </div>
 
-      {/* Active Call */}
       {activeCall && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-blue-900">Active Call</h3>
-            <div className="flex items-center gap-2">
-              {activeCall.agentSpeaking && (
-                <div className="flex items-center gap-1 text-blue-600">
-                  <Volume2 className="w-4 h-4" />
-                  <span className="text-sm">Agent Speaking</span>
-                </div>
-              )}
-              {activeCall.customerSpeaking && (
-                <div className="flex items-center gap-1 text-green-600">
-                  <Mic className="w-4 h-4" />
-                  <span className="text-sm">Customer Speaking</span>
-                </div>
-              )}
-            </div>
+        <div className="card monitor-shell fade-in-up delay-1">
+          <div className="panel-head">
+            <h3>Live Call</h3>
+            <span className="badge badge-live"><Activity size={14} /> In Progress</span>
           </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="monitor-call-meta">
             <div>
-              <label className="text-sm font-medium text-gray-700">Call ID</label>
-              <p className="text-sm text-gray-900 font-mono">{activeCall.id}</p>
+              <label>Number</label>
+              <p>{activeCall.phoneNumber || 'Unknown'}</p>
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-700">Phone Number</label>
-              <p className="text-sm text-gray-900">{activeCall.phoneNumber}</p>
+              <label>Direction</label>
+              <p>{activeCall.direction || 'inbound'}</p>
             </div>
             <div>
-              <label className="text-sm font-medium text-gray-700">Duration</label>
-              <p className="text-sm text-gray-900">
-                <CallDuration startTime={activeCall.startTime} />
+              <label>Signals</label>
+              <p>
+                {activeCall.agentSpeaking && <span className="signal-chip agent"><Volume2 size={13} /> Agent</span>}
+                {activeCall.customerSpeaking && <span className="signal-chip customer"><Mic size={13} /> Customer</span>}
+                {!activeCall.agentSpeaking && !activeCall.customerSpeaking && <span className="text-muted">Silent</span>}
               </p>
             </div>
           </div>
-          
-          <div className="mt-3">
-            <CallTranscript callUuid={activeCall.id} />
-          </div>
+          <CallTranscript callUuid={activeCall.id} />
         </div>
       )}
 
-      {/* Recent Calls */}
-      <div className="bg-white rounded-lg border">
-        <div className="p-4 border-b">
-          <h3 className="font-semibold">Recent Calls</h3>
+      <div className="card monitor-shell fade-in-up delay-2">
+        <div className="panel-head">
+          <h3>Recent Calls</h3>
+          <span className="badge">{recentCalls.length} items</span>
         </div>
-        
-        {calls.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">
-            <Phone className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p>No calls yet</p>
-            <p className="text-sm">Calls will appear here in real-time</p>
+
+        {recentCalls.length === 0 ? (
+          <div className="empty-state compact">
+            <div className="empty-state-icon"><Phone size={24} /></div>
+            <p>No calls yet. Activity appears here in real time.</p>
           </div>
         ) : (
-          <div className="divide-y">
-            {calls.map((call) => (
-              <CallItem 
-                key={call.id} 
-                call={call} 
-                isExpanded={expandedCall === call.id}
+          <div className="monitor-list">
+            {recentCalls.map((call) => (
+              <CallRow
+                key={call.id}
+                call={call}
+                expanded={expandedCall === call.id}
                 onToggle={() => setExpandedCall(expandedCall === call.id ? null : call.id)}
               />
             ))}
@@ -118,127 +112,77 @@ export default function CallMonitor() {
   );
 }
 
-// Individual Call Item
-function CallItem({ call, isExpanded, onToggle }) {
+function CallRow({ call, expanded, onToggle }) {
   const { transcript } = useCallData(call.id);
-  
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'ringing': return 'text-yellow-600 bg-yellow-50';
-      case 'in-progress': return 'text-green-600 bg-green-50';
-      case 'completed': return 'text-gray-600 bg-gray-50';
-      default: return 'text-gray-600 bg-gray-50';
-    }
-  };
-
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'ringing': return <Phone className="w-4 h-4" />;
-      case 'in-progress': return <Phone className="w-4 h-4" />;
-      case 'completed': return <PhoneOff className="w-4 h-4" />;
-      default: return <Phone className="w-4 h-4" />;
-    }
-  };
+  const icon = call.status === 'completed' ? <PhoneOff size={14} /> : <Phone size={14} />;
 
   return (
-    <div className="p-4 hover:bg-gray-50 transition-colors">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-full ${getStatusColor(call.status)}`}>
-            {getStatusIcon(call.status)}
-          </div>
+    <div className="monitor-row">
+      <button className="monitor-row-head" onClick={onToggle}>
+        <div className="monitor-row-left">
+          <span className={`monitor-icon status-${call.status || 'queued'}`}>{icon}</span>
           <div>
-            <p className="font-medium">{call.phoneNumber}</p>
-            <p className="text-sm text-gray-600">
-              {call.direction === 'inbound' ? 'Incoming' : 'Outgoing'} • {call.agent}
-            </p>
+            <p className="monitor-row-title">{call.phoneNumber || 'Unknown number'}</p>
+            <p className="monitor-row-sub">{call.direction || 'inbound'} • {call.agent || 'Agent'}</p>
           </div>
         </div>
-        
-        <div className="flex items-center gap-3">
-          <div className="text-right">
-            <p className="text-sm font-medium">{call.status}</p>
-            <p className="text-xs text-gray-500">
-              {call.startTime && <CallDuration startTime={call.startTime} />}
-            </p>
-          </div>
-          
-          <button
-            onClick={onToggle}
-            className="p-1 hover:bg-gray-100 rounded"
-          >
-            <Activity className="w-4 h-4 text-gray-400" />
-          </button>
+        <div className="monitor-row-right">
+          <span className={`status-badge status-${call.status || 'queued'}`}>{call.status || 'queued'}</span>
         </div>
-      </div>
-      
-      {isExpanded && (
-        <div className="mt-4 pt-4 border-t">
-          <CallTranscript callUuid={call.id} />
+      </button>
+
+      {expanded && (
+        <div className="monitor-row-body">
+          {transcript.length === 0 ? (
+            <p className="text-muted">No transcript available for this call.</p>
+          ) : (
+            <div className="monitor-mini-transcript">
+              {transcript.slice(-6).map((entry, idx) => (
+                <div key={`${entry.timestamp}-${idx}`} className="transcript-line">
+                  <span className={`speaker ${entry.speaker === 'agent' ? 'agent' : 'customer'}`}>
+                    {entry.speaker === 'agent' ? 'Agent' : 'Customer'}
+                  </span>
+                  <p>{entry.text}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// Call Duration Component
-function CallDuration({ startTime }) {
-  const [duration, setDuration] = useState(0);
-
-  useEffect(() => {
-    if (!startTime) return;
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      const diff = now - new Date(startTime);
-      const seconds = Math.floor(diff / 1000);
-      const minutes = Math.floor(seconds / 60);
-      const remainingSeconds = seconds % 60;
-      
-      setDuration(`${minutes}:${remainingSeconds.toString().padStart(2, '0')}`);
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [startTime]);
-
-  return duration || '0:00';
-}
-
-// Call Transcript Component
 function CallTranscript({ callUuid }) {
   const { transcript } = useCallData(callUuid);
 
   if (transcript.length === 0) {
     return (
-      <div className="text-center text-gray-500 py-4">
-        <MicOff className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-        <p className="text-sm">No transcript yet</p>
+      <div className="monitor-empty-transcript">
+        <MicOff size={16} />
+        <span>Waiting for transcript segments...</span>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2 max-h-60 overflow-y-auto">
-      {transcript.map((entry, index) => (
-        <div key={index} className="flex gap-3 text-sm">
-          <div className={`flex-shrink-0 w-20 text-right ${
-            entry.speaker === 'agent' ? 'text-blue-600' : 'text-green-600'
-          }`}>
-            {entry.speaker === 'agent' ? 'Shubhi' : 'Customer'}
-          </div>
-          <div className="flex-1">
-            <p className="text-gray-900">{entry.text}</p>
-            {entry.confidence && (
-              <p className="text-xs text-gray-500">
-                Confidence: {Math.round(entry.confidence * 100)}%
-              </p>
-            )}
-          </div>
-          <div className="flex-shrink-0 text-xs text-gray-400">
-            {new Date(entry.timestamp).toLocaleTimeString()}
-          </div>
+    <div className="monitor-mini-transcript">
+      {transcript.slice(-8).map((entry, idx) => (
+        <div key={`${entry.timestamp}-${idx}`} className="transcript-line">
+          <span className={`speaker ${entry.speaker === 'agent' ? 'agent' : 'customer'}`}>
+            {entry.speaker === 'agent' ? 'Agent' : 'Customer'}
+          </span>
+          <p>{entry.text}</p>
         </div>
       ))}
     </div>
+  );
+}
+
+function AlertIcon() {
+  return (
+    <span className="monitor-alert-icon">
+      <Activity size={14} />
+    </span>
   );
 }

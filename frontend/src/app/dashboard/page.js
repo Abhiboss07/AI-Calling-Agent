@@ -1,234 +1,229 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  Clock4,
+  Phone,
+  PhoneCall,
+  Users,
+  Waves
+} from 'lucide-react';
 import { useWebSocket } from '../../contexts/WebSocketContext';
-import CallMonitor from '../../components/CallMonitor';
-import { Phone, Activity, Users, Clock, TrendingUp, AlertCircle, CheckCircle } from 'lucide-react';
+import { API_BASE, getAuthHeaders } from '../../lib/api';
 
-// Real-time Dashboard Page
-export default function Dashboard() {
-  const { connected, metrics, calls } = useWebSocket();
+function formatDuration(startTime) {
+  if (!startTime) return '0m';
+  const totalSec = Math.max(0, Math.floor((Date.now() - new Date(startTime).getTime()) / 1000));
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  return `${mins}m ${secs}s`;
+}
+
+function formatRelative(startTime) {
+  if (!startTime) return 'just now';
+  const sec = Math.max(1, Math.floor((Date.now() - new Date(startTime).getTime()) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h ago`;
+}
+
+export default function DashboardPage() {
+  const { connected, calls, activeCall, metrics, transcripts } = useWebSocket();
   const [stats, setStats] = useState({
     todayCalls: 0,
     avgDuration: 0,
-    conversionRate: 0,
-    activeAgents: 1
+    conversionRate: 0
   });
 
-  // Fetch additional stats
   useEffect(() => {
+    let mounted = true;
     const fetchStats = async () => {
       try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/stats`);
-        if (response.ok) {
-          const data = await response.json();
-          setStats(data);
-        }
-      } catch (error) {
-        console.error('Failed to fetch stats:', error);
+        const res = await fetch(`${API_BASE}/v1/stats`, {
+          headers: getAuthHeaders(),
+          cache: 'no-store'
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (mounted) setStats((prev) => ({ ...prev, ...data }));
+      } catch {
+        // keep graceful fallback values
       }
     };
 
     fetchStats();
-    const interval = setInterval(fetchStats, 30000); // Update every 30 seconds
-    return () => clearInterval(interval);
+    const id = setInterval(fetchStats, 30000);
+    return () => {
+      mounted = false;
+      clearInterval(id);
+    };
   }, []);
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-white rounded-lg border p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Real-Time Dashboard</h1>
-            <p className="text-gray-600 mt-1">Live call monitoring and analytics</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium ${
-              connected 
-                ? 'bg-green-100 text-green-800' 
-                : 'bg-red-100 text-red-800'
-            }`}>
-              <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'} ${connected ? 'animate-pulse' : ''}`} />
-              {connected ? 'Connected' : 'Disconnected'}
-            </div>
-          </div>
-        </div>
-      </div>
+  const recentCalls = useMemo(() => [...calls].reverse().slice(0, 7), [calls]);
+  const activeTranscript = activeCall ? (transcripts[activeCall.id] || []).slice(-8) : [];
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <MetricCard
-          title="Active Calls"
-          value={metrics.activeCalls}
-          icon={<Phone className="w-5 h-5 text-blue-600" />}
-          color="blue"
-          change={0}
-        />
-        <MetricCard
-          title="Total Today"
-          value={stats.todayCalls}
-          icon={<Users className="w-5 h-5 text-green-600" />}
-          color="green"
-          change={12}
-        />
-        <MetricCard
-          title="Avg Duration"
-          value={`${Math.round(stats.avgDuration)}s`}
-          icon={<Clock className="w-5 h-5 text-purple-600" />}
-          color="purple"
-          change={-5}
-        />
-        <MetricCard
-          title="Conversion Rate"
-          value={`${stats.conversionRate}%`}
-          icon={<TrendingUp className="w-5 h-5 text-orange-600" />}
-          color="orange"
-          change={8}
-        />
-      </div>
-
-      {/* Live Activity Feed */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Call Monitor */}
-        <div className="lg:col-span-2">
-          <CallMonitor />
-        </div>
-
-        {/* System Status */}
-        <div className="space-y-6">
-          <div className="bg-white rounded-lg border p-4">
-            <h3 className="font-semibold text-gray-900 mb-4">System Status</h3>
-            <div className="space-y-3">
-              <StatusItem
-                label="WebSocket Server"
-                status={connected ? 'healthy' : 'error'}
-                lastCheck="Just now"
-              />
-              <StatusItem
-                label="AI Processing"
-                status="healthy"
-                lastCheck="Just now"
-              />
-              <StatusItem
-                label="TTS Service"
-                status="healthy"
-                lastCheck="Just now"
-              />
-              <StatusItem
-                label="STT Service"
-                status="healthy"
-                lastCheck="Just now"
-              />
-              <StatusItem
-                label="Database"
-                status="healthy"
-                lastCheck="Just now"
-              />
-            </div>
-          </div>
-
-          {/* Recent Activity */}
-          <div className="bg-white rounded-lg border p-4">
-            <h3 className="font-semibold text-gray-900 mb-4">Recent Activity</h3>
-            <div className="space-y-3">
-              {calls.length === 0 ? (
-                <p className="text-gray-500 text-sm">No recent calls</p>
-              ) : (
-                calls.slice(0, 5).map((call) => (
-                  <div key={call.id} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      <Phone className="w-3 h-3 text-gray-400" />
-                      <span className="text-gray-900">{call.phoneNumber}</span>
-                    </div>
-                    <div className="text-gray-500">
-                      {call.status}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Performance Chart */}
-      <div className="bg-white rounded-lg border p-6">
-        <h3 className="font-semibold text-gray-900 mb-4">Call Volume Today</h3>
-        <div className="h-64 flex items-center justify-center text-gray-500">
-          <Activity className="w-8 h-8 mb-2" />
-          <p>Chart integration coming soon</p>
-          <p className="text-sm">Real-time call data will appear here</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Metric Card Component
-function MetricCard({ title, value, icon, color, change }) {
-  const colorClasses = {
-    blue: 'bg-blue-50 border-blue-200',
-    green: 'bg-green-50 border-green-200',
-    purple: 'bg-purple-50 border-purple-200',
-    orange: 'bg-orange-50 border-orange-200'
-  };
+  const systemChecks = [
+    { label: 'WebSocket Channel', healthy: connected },
+    { label: 'Call Pipeline', healthy: true },
+    { label: 'Database', healthy: true },
+    { label: 'Speech Services', healthy: true }
+  ];
 
   return (
-    <div className={`bg-white rounded-lg border p-6 ${colorClasses[color]}`}>
-      <div className="flex items-center justify-between">
+    <div className="realtime-page">
+      <section className="realtime-hero fade-in-up">
         <div>
-          <p className="text-sm font-medium text-gray-600">{title}</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
+          <p className="section-label">REAL-TIME OPERATIONS</p>
+          <h1 className="page-title" style={{ marginBottom: 8 }}>Live Call Dashboard</h1>
+          <p className="text-secondary">Monitor active conversations, agent signals, and system health in one place.</p>
         </div>
-        <div className="text-gray-400">
-          {icon}
+        <div className={`realtime-connection ${connected ? 'online' : 'offline'}`}>
+          <span className="dot" />
+          {connected ? 'Live Connected' : 'Disconnected'}
         </div>
-      </div>
-      
-      {change !== undefined && (
-        <div className="mt-4 flex items-center text-sm">
-          <span className={change >= 0 ? 'text-green-600' : 'text-red-600'}>
-            {change >= 0 ? '+' : ''}{change}%
-          </span>
-          <span className="text-gray-500 ml-1">from yesterday</span>
+      </section>
+
+      <section className="kpi-grid">
+        <article className="stat-card fade-in-up delay-1">
+          <div className="stat-card-header">
+            <span className="stat-card-title">Active Calls</span>
+            <div className="stat-card-icon blue"><Phone size={18} /></div>
+          </div>
+          <div className="stat-card-value">{metrics.activeCalls || 0}</div>
+          <div className="stat-card-change"><span className="change-dash">Live</span> on the line now</div>
+        </article>
+
+        <article className="stat-card fade-in-up delay-2">
+          <div className="stat-card-header">
+            <span className="stat-card-title">Total Calls</span>
+            <div className="stat-card-icon green"><Users size={18} /></div>
+          </div>
+          <div className="stat-card-value">{metrics.totalCalls || 0}</div>
+          <div className="stat-card-change"><span className="change-dash">Today</span> {stats.todayCalls || 0} new</div>
+        </article>
+
+        <article className="stat-card fade-in-up delay-3">
+          <div className="stat-card-header">
+            <span className="stat-card-title">Avg Duration</span>
+            <div className="stat-card-icon purple"><Clock4 size={18} /></div>
+          </div>
+          <div className="stat-card-value">{Math.round(stats.avgDuration || 0)}s</div>
+          <div className="stat-card-change"><span className="change-dash">Rolling</span> last call sessions</div>
+        </article>
+
+        <article className="stat-card fade-in-up delay-4">
+          <div className="stat-card-header">
+            <span className="stat-card-title">Conversion</span>
+            <div className="stat-card-icon orange"><PhoneCall size={18} /></div>
+          </div>
+          <div className="stat-card-value">{stats.conversionRate || 0}%</div>
+          <div className="stat-card-change"><span className="change-dash">Trend</span> qualification rate</div>
+        </article>
+      </section>
+
+      <section className="realtime-grid">
+        <article className="card realtime-panel fade-in-up delay-1">
+          <div className="panel-head">
+            <h3>Current Conversation</h3>
+            {activeCall ? (
+              <span className="badge badge-live"><Waves size={14} /> In Progress</span>
+            ) : (
+              <span className="badge">No Active Call</span>
+            )}
+          </div>
+
+          {!activeCall && (
+            <div className="empty-state compact">
+              <div className="empty-state-icon"><Activity size={28} /></div>
+              <p>Waiting for the next live call stream.</p>
+            </div>
+          )}
+
+          {activeCall && (
+            <div className="active-call-body">
+              <div className="active-call-meta">
+                <div>
+                  <label>Phone</label>
+                  <p>{activeCall.phoneNumber || 'Unknown'}</p>
+                </div>
+                <div>
+                  <label>Duration</label>
+                  <p>{formatDuration(activeCall.startTime)}</p>
+                </div>
+                <div>
+                  <label>Status</label>
+                  <p className="text-accent">{activeCall.status || 'in-progress'}</p>
+                </div>
+              </div>
+
+              <div className="transcript-box">
+                {activeTranscript.length === 0 && <p className="text-muted">Transcript will appear as speech is processed.</p>}
+                {activeTranscript.map((entry, idx) => (
+                  <div key={`${entry.timestamp}-${idx}`} className="transcript-line">
+                    <span className={`speaker ${entry.speaker === 'agent' ? 'agent' : 'customer'}`}>
+                      {entry.speaker === 'agent' ? 'Agent' : 'Customer'}
+                    </span>
+                    <p>{entry.text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </article>
+
+        <article className="card realtime-panel fade-in-up delay-2">
+          <div className="panel-head">
+            <h3>System Health</h3>
+            <span className={`badge ${connected ? 'ok' : 'warn'}`}>
+              {connected ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+              {connected ? 'Stable' : 'Needs Attention'}
+            </span>
+          </div>
+          <div className="status-stack">
+            {systemChecks.map((item) => (
+              <div key={item.label} className="status-row">
+                <span>{item.label}</span>
+                <span className={`status-chip ${item.healthy ? 'healthy' : 'error'}`}>
+                  {item.healthy ? 'Healthy' : 'Down'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </article>
+      </section>
+
+      <section className="card fade-in-up delay-3">
+        <div className="panel-head">
+          <h3>Recent Call Activity</h3>
+          <span className="badge">{recentCalls.length} tracked</span>
         </div>
-      )}
-    </div>
-  );
-}
-
-// Status Item Component
-function StatusItem({ label, status, lastCheck }) {
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'healthy':
-        return <CheckCircle className="w-4 h-4 text-green-500" />;
-      case 'error':
-        return <AlertCircle className="w-4 h-4 text-red-500" />;
-      default:
-        return <Activity className="w-4 h-4 text-gray-400" />;
-    }
-  };
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'healthy':
-        return 'text-green-600';
-      case 'error':
-        return 'text-red-600';
-      default:
-        return 'text-gray-600';
-    }
-  };
-
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-sm text-gray-700">{label}</span>
-      <div className="flex items-center gap-2">
-        {getStatusIcon(status)}
-        <span className={`text-xs ${getStatusColor(status)}`}>{lastCheck}</span>
-      </div>
+        {recentCalls.length === 0 ? (
+          <div className="empty-state compact">
+            <div className="empty-state-icon"><Phone size={28} /></div>
+            <p>No recent calls. Activity will show here in real time.</p>
+          </div>
+        ) : (
+          <div className="activity-list">
+            {recentCalls.map((call) => (
+              <div key={call.id} className="activity-item">
+                <div>
+                  <p className="activity-title">{call.phoneNumber || 'Unknown number'}</p>
+                  <p className="activity-meta">{call.direction || 'inbound'} • {call.agent || 'Agent'}</p>
+                </div>
+                <div className="activity-right">
+                  <span className={`status-badge status-${call.status || 'queued'}`}>{call.status || 'queued'}</span>
+                  <span className="text-muted">{formatRelative(call.startTime)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
