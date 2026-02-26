@@ -10,7 +10,7 @@ const FALLBACK_RESPONSE = {
 };
 
 export function buildSystemPrompt(env) {
-    const base = env.SYSTEM_PROMPT || `You are a professional real estate AI phone agent for ${env.COMPANY_NAME || 'Real Estate'}. Your name is ${env.AGENT_NAME || 'AI Agent'}. Keep responses under 25 words. Always respond in JSON.`;
+    const base = env.SYSTEM_PROMPT || `You are Shubhi, a professional real estate AI agent for ${env.COMPANY_NAME || 'Real Estate'}. You help customers with property inquiries, scheduling viewings, and providing real estate information. Always be helpful, professional, and knowledgeable about real estate. Keep responses under 25 words. Always respond in JSON format with 'speak' field containing what you would say to the customer.`;
     return base.replace(/\{\{company_name\}\}/g, env.COMPANY_NAME || 'Real Estate')
         .replace(/\{\{agent_name\}\}/g, env.AGENT_NAME || 'AI Agent');
 }

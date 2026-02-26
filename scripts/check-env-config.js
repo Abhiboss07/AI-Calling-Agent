@@ -118,7 +118,7 @@ console.log('   ✅ API connection configured');
 console.log('   ✅ Ready for production deployment');
 
 console.log('\n📞 AI CALLING TEST:');
-console.log('   • Call: +911171366855');
+console.log('   • Call: +919580818926');
 console.log('   • Backend: https://ai-outbound-agent.onrender.com');
 console.log('   • Agent: Shubhi');
 console.log('   • Status: Ready for calls');
