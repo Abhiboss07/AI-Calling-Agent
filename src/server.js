@@ -220,6 +220,7 @@ async function start() {
 
   app.use('/vobiz', vobizRoutes);
   app.use('/api/v1/auth', authRoutes);  // Public auth routes
+  app.use('/api/v1/calls/test-start', apiRoutes);  // Public test endpoint
   app.use('/api', verifyToken, apiRoutes);  // Protected API routes
   app.use('/monitor', monitoringRoutes);  // Monitoring API routes
 
