@@ -78,7 +78,7 @@ async function start() {
   }
 
   const app = express();
-  const wsInstance = expressWs(app, {
+  expressWs(app, null, {
     wsOptions: {
       verifyClient: (info, cb) => {
         // Allow all WebSocket connections
@@ -306,6 +306,6 @@ async function start() {
 }
 
 start().catch(err => {
-  logger.error('FATAL: Server failed to start', err);
+  logger.error('FATAL: Server failed to start', err?.message || err, err?.stack);
   process.exit(1);
 });

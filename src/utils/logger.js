@@ -9,6 +9,9 @@ const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 function formatArgs(args) {
   return args.map(a => {
     if (a === null || a === undefined) return String(a);
+    if (a instanceof Error) {
+      return a.stack || a.message || String(a);
+    }
     if (typeof a === 'object') {
       try { return JSON.stringify(a); }
       catch { return String(a); }
