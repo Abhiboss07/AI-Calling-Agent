@@ -18,8 +18,14 @@ export default function LoginPage() {
         setError('');
         setLoading(true);
 
+        // debug information
+        console.debug('Login page - API_BASE =', API_BASE);
+        console.debug('login payload', { email, password });
+
         try {
-            const res = await fetch(`${API_BASE}/v1/auth/login`, {
+            const url = `${API_BASE}/v1/auth/login`;
+            console.debug('fetching', url);
+            const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password })

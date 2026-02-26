@@ -19,8 +19,14 @@ export default function SignupPage() {
         setError('');
         setLoading(true);
 
+        // debug info
+        console.debug('Signup page - API_BASE =', API_BASE);
+        console.debug('signup payload', { name, email, password });
+
         try {
-            const res = await fetch(`${API_BASE}/v1/auth/signup`, {
+            const url = `${API_BASE}/v1/auth/signup`;
+            console.debug('fetching', url);
+            const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, email, password })

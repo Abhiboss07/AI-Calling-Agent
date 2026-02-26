@@ -15,6 +15,11 @@ export function AuthProvider({ children }) {
     const [loading, setLoading] = useState(true);
     const [token, setToken] = useState(null);
 
+    // debug: show configured API base
+    useEffect(() => {
+        console.debug('AuthProvider initializing, API_BASE =', API_BASE);
+    }, []);
+
     useEffect(() => {
         const stored = localStorage.getItem('ea_token');
         if (stored) {

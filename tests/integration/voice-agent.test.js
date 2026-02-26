@@ -45,8 +45,15 @@ describe('LLM voice agent', () => {
   });
 });
 
-describe('STT transcription', () => {
-  test('returns transcript with confidence', async () => {
+// skip STT integration in CI or when no OpenAI key (Cloudflare Pages build, GitHub Actions, etc.)
+const shouldRunStt = !!process.env.OPENAI_API_KEY && !process.env.CI;
+
+// choose suite name dynamically, but always call describe normally
+const suiteName = shouldRunStt ? 'STT transcription' : 'STT transcription (skipped in CI)';
+describe(suiteName, () => {
+  const testFn = shouldRunStt ? test : test.skip;
+
+  testFn('returns transcript with confidence', async () => {
     const audioBuffer = Buffer.alloc(8000); // minimal audio
     const result = await stt.transcribe(audioBuffer);
 
@@ -54,7 +61,7 @@ describe('STT transcription', () => {
     expect(result).toHaveProperty('confidence');
   });
 
-  test('handles transcription errors gracefully', async () => {
+  testFn('handles transcription errors gracefully', async () => {
     const result = await stt.transcribe(null);
     expect(result.text).toBeDefined();
     expect(result.confidence >= 0).toBe(true);

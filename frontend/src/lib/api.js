@@ -1,4 +1,7 @@
-export const API_BASE = '/api';
+// Allow overriding the API base at deploy time via NEXT_PUBLIC_API_BASE
+export const API_BASE = (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_BASE)
+    ? process.env.NEXT_PUBLIC_API_BASE.replace(/\/+$/,'')
+    : '/api';
 
 export async function fetchMetrics() {
     const res = await fetch(`${API_BASE}/v1/metrics`, { cache: 'no-store' });

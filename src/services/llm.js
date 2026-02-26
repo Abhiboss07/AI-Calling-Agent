@@ -80,12 +80,30 @@ const FALLBACK_RESPONSE = {
 };
 
 // ── Main generate function ──────────────────────────────────────────────────
-async function generateReply({ callState, script, lastTranscript, customerName, callSid, language }) {
+async function generateReply({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase }) {
   try {
     const langConfig = getLanguage(language || config.language?.default || 'en-IN');
 
     // Build language-aware system prompt
     let systemContent = buildSystemPrompt();
+
+    // If a knowledge base object is provided, weave its systemPrompt/content into the message
+    if (knowledgeBase) {
+      try {
+        // perform template replacements simple style
+        let kbPrompt = (knowledgeBase.systemPrompt || '').toString();
+        kbPrompt = kbPrompt.replace(/\{\{agent_name\}\}/g, knowledgeBase.agentName || config.agentName);
+        kbPrompt = kbPrompt.replace(/\{\{company_name\}\}/g, knowledgeBase.companyName || config.companyName);
+        kbPrompt = kbPrompt.replace(/\{\{knowledge_base\}\}/g, knowledgeBase.content || '');
+        // prefix the system content so that KB prompt has higher priority
+        if (kbPrompt.trim()) {
+          systemContent = `${kbPrompt}\n\n${systemContent}`;
+        }
+      } catch (e) {
+        logger.warn('Failed to apply knowledge base prompt template', e.message || e);
+      }
+    }
+
     if (language && language !== 'en-IN') {
       systemContent += `\n\nIMPORTANT LANGUAGE INSTRUCTION: The customer is speaking in ${langConfig.name}. You MUST respond in ${langConfig.name}. Use natural, conversational ${langConfig.name}. Keep the same JSON format but the "speak" field must be in ${langConfig.name}.`;
     }
@@ -107,6 +125,13 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       ...history,
       { role: 'user', content: userMsg }
     ];
+
+    // if no OpenAI key is configured, skip API call and return fallback quickly
+    if (!process.env.OPENAI_API_KEY) {
+      logger.warn('OpenAI API key missing; using fallback response');
+      metrics.incrementLlmRequest(false);
+      return { ...FALLBACK_RESPONSE };
+    }
 
     metrics.incrementLlmRequest(true);
 
