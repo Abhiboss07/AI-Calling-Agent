@@ -4,6 +4,7 @@ const metrics = require('./metrics');
 const costControl = require('./costControl');
 const config = require('../config');
 const { getLanguage } = require('../config/languages');
+const { WaveFile } = require('wavefile');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // TTS SERVICE — OpenAI Speech Synthesis
@@ -58,29 +59,22 @@ function pcmBufferToMulaw(pcmBuffer) {
   return mulaw;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// RESAMPLE: OpenAI TTS outputs 24kHz, Vobiz needs 8kHz
-// ══════════════════════════════════════════════════════════════════════════════
-// Simple 3:1 downsampling (24kHz → 8kHz) with averaging filter
+// Simple 3:1 downsampling (24kHz → 8kHz)
+// Instead of simple averaging, use wavefile's built-in resampler (better LPF)
 function resample24kTo8k(pcm24kBuffer) {
-  const numSamples24 = Math.floor(pcm24kBuffer.length / 2);
-  const numSamples8 = Math.floor(numSamples24 / 3);
-  const result = Buffer.alloc(numSamples8 * 2);
+  // 1. Convert Buffer to Int16Array
+  const samples = new Int16Array(pcm24kBuffer.buffer, pcm24kBuffer.byteOffset, pcm24kBuffer.length / 2);
 
-  for (let i = 0; i < numSamples8; i++) {
-    // Average 3 samples for anti-aliasing
-    const idx = i * 3;
-    let sum = 0;
-    let count = 0;
-    for (let j = 0; j < 3 && (idx + j) < numSamples24; j++) {
-      sum += pcm24kBuffer.readInt16LE((idx + j) * 2);
-      count++;
-    }
-    const sample = Math.round(sum / count);
-    result.writeInt16LE(Math.max(-32768, Math.min(32767, sample)), i * 2);
-  }
+  // 2. Initialize a wave file with the 24kHz data
+  const wav = new WaveFile();
+  wav.fromScratch(1, 24000, '16', samples);
 
-  return result;
+  // 3. Resample using cubic/sinc algorithm natively
+  wav.toSampleRate(8000, { method: 'sinc' });
+
+  // 4. Extract the resampled 8kHz audio back into a Buffer
+  const resampledSamples = wav.getSamples(false, Int16Array);
+  return Buffer.from(resampledSamples.buffer, resampledSamples.byteOffset, resampledSamples.byteLength);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
