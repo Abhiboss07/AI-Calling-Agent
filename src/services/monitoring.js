@@ -11,7 +11,7 @@ class MonitoringServer {
   constructor() {
     this.wss = null;
     this.clients = new Set();
-    this.port = config.monitoring?.port || 3001;
+    this.port = config.monitoring?.port || 3002; // Use different port
   }
 
   start() {
