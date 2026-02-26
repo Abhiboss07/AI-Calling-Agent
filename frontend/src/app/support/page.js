@@ -44,21 +44,26 @@ export default function SupportPage() {
           <div className="support-icon"><MessageSquare size={18} /></div>
           <h3>Live Chat</h3>
           <p>Chat with engineering support for deployment and runtime incidents.</p>
-          <button className="btn btn-primary">Start Chat</button>
+          <a
+            className="btn btn-primary"
+            href="mailto:support@estateagent.ai?subject=Live%20Support%20Request&body=Please%20share%20your%20issue%2C%20error%20logs%2C%20and%20project%20URL."
+          >
+            Start Chat
+          </a>
         </article>
 
         <article className="card support-card fade-in-up delay-2">
           <div className="support-icon"><Mail size={18} /></div>
           <h3>Email Support</h3>
           <p>Share logs and stack traces for deep-dive investigations.</p>
-          <button className="btn btn-outline">support@estateagent.ai</button>
+          <a className="btn btn-outline" href="mailto:support@estateagent.ai">support@estateagent.ai</a>
         </article>
 
         <article className="card support-card fade-in-up delay-3">
           <div className="support-icon"><Phone size={18} /></div>
           <h3>On-Call Line</h3>
           <p>For urgent production incidents requiring immediate callback.</p>
-          <button className="btn btn-outline">+91 80 4000 1122</button>
+          <a className="btn btn-outline" href="tel:+918040001122">+91 80 4000 1122</a>
         </article>
       </section>
 

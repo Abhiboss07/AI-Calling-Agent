@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
-import { Bell, Lock, Save, Shield, UserCircle2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Bell, Lock, Save, Shield, Upload, UserCircle2, X } from 'lucide-react';
 import { useAuth } from '../../components/AuthProvider';
 
 export default function ProfilePage() {
   const { user } = useAuth();
+  const fileRef = useRef(null);
   const [form, setForm] = useState({
     name: user?.name || 'Estate Agent',
     email: user?.email || 'admin@estateagent.ai',
@@ -17,18 +18,63 @@ export default function ProfilePage() {
     digest: true,
     darkShift: false
   });
+  const [profileImage, setProfileImage] = useState('');
   const [saved, setSaved] = useState(false);
 
+  useEffect(() => {
+    try {
+      const savedProfile = localStorage.getItem('ea_profile');
+      const savedPrefs = localStorage.getItem('ea_profile_prefs');
+      const savedImage = localStorage.getItem('ea_profile_image');
+      if (savedProfile) setForm((prev) => ({ ...prev, ...JSON.parse(savedProfile) }));
+      if (savedPrefs) setPrefs((prev) => ({ ...prev, ...JSON.parse(savedPrefs) }));
+      if (savedImage) setProfileImage(savedImage);
+    } catch {
+      // keep defaults
+    }
+  }, []);
+
   const onSave = () => {
+    localStorage.setItem('ea_profile', JSON.stringify(form));
+    localStorage.setItem('ea_profile_prefs', JSON.stringify(prefs));
+    if (profileImage) {
+      localStorage.setItem('ea_profile_image', profileImage);
+    }
+    window.dispatchEvent(new Event('ea-profile-updated'));
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
+  };
+
+  const onUploadImage = (event) => {
+    const file = event.target.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = typeof reader.result === 'string' ? reader.result : '';
+      if (!image) return;
+      setProfileImage(image);
+      localStorage.setItem('ea_profile_image', image);
+      window.dispatchEvent(new Event('ea-profile-updated'));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeImage = () => {
+    setProfileImage('');
+    localStorage.removeItem('ea_profile_image');
+    window.dispatchEvent(new Event('ea-profile-updated'));
   };
 
   return (
     <div className="profile-page">
       <section className="profile-hero fade-in-up">
         <div className="profile-avatar">
-          <UserCircle2 size={52} />
+          {profileImage ? (
+            <img src={profileImage} alt={form.name} className="profile-avatar-image" />
+          ) : (
+            <UserCircle2 size={52} />
+          )}
         </div>
         <div>
           <p className="section-label">ACCOUNT SETTINGS</p>
@@ -61,6 +107,25 @@ export default function ProfilePage() {
               <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
             </div>
           </div>
+
+          <div className="action-row" style={{ marginTop: 10 }}>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden-input"
+              onChange={onUploadImage}
+            />
+            <button className="btn btn-outline" onClick={() => fileRef.current?.click()}>
+              <Upload size={14} /> Upload Image
+            </button>
+            {profileImage && (
+              <button className="btn btn-outline" onClick={removeImage}>
+                <X size={14} /> Remove
+              </button>
+            )}
+          </div>
+
           <div className="action-row">
             <button className="btn btn-primary" onClick={onSave}><Save size={14} /> Save Changes</button>
             {saved && <span className="save-toast">Saved successfully</span>}
@@ -104,17 +169,17 @@ export default function ProfilePage() {
           <div className="security-item">
             <h4>Password</h4>
             <p>Last changed 21 days ago</p>
-            <button className="btn btn-outline">Rotate Password</button>
+            <button className="btn btn-outline" onClick={() => alert('Password rotation flow will be connected to backend auth settings.')}>Rotate Password</button>
           </div>
           <div className="security-item">
             <h4>Session Access</h4>
-            <p>2 active sessions • last login from Chrome</p>
-            <button className="btn btn-outline">Review Sessions</button>
+            <p>2 active sessions - last login from Chrome</p>
+            <button className="btn btn-outline" onClick={() => alert('Session review panel will be connected to active token/session APIs.')}>Review Sessions</button>
           </div>
           <div className="security-item">
             <h4>Two-Factor Auth</h4>
             <p>Authenticator app enabled</p>
-            <button className="btn btn-outline">Manage 2FA</button>
+            <button className="btn btn-outline" onClick={() => alert('2FA management flow can be enabled once backend endpoints are available.')}>Manage 2FA</button>
           </div>
         </div>
       </section>
