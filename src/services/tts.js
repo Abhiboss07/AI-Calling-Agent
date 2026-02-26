@@ -61,23 +61,65 @@ function pcmBufferToMulaw(pcmBuffer) {
 // ══════════════════════════════════════════════════════════════════════════════
 // RESAMPLE: OpenAI TTS outputs 24kHz, Vobiz needs 8kHz
 // ══════════════════════════════════════════════════════════════════════════════
-// Simple 3:1 downsampling (24kHz → 8kHz) with averaging filter
+// High-quality resampling with anti-aliasing low-pass filter + linear interpolation
+
+// Pre-computed low-pass FIR filter coefficients (cutoff ~3.5kHz for 24kHz input)
+// This prevents aliasing artifacts when downsampling to 8kHz (Nyquist = 4kHz)
+const LPF_TAPS = [
+  0.0078, 0.0156, 0.0312, 0.0547, 0.0781,
+  0.0938, 0.1016, 0.1016, 0.0938, 0.0781,
+  0.0547, 0.0312, 0.0156, 0.0078
+];
+const LPF_LEN = LPF_TAPS.length;
+
+function applyLowPassFilter(samples) {
+  const filtered = new Float32Array(samples.length);
+  const halfLen = Math.floor(LPF_LEN / 2);
+
+  for (let i = 0; i < samples.length; i++) {
+    let sum = 0;
+    for (let j = 0; j < LPF_LEN; j++) {
+      const idx = i - halfLen + j;
+      if (idx >= 0 && idx < samples.length) {
+        sum += samples[idx] * LPF_TAPS[j];
+      }
+    }
+    filtered[i] = sum;
+  }
+  return filtered;
+}
+
 function resample24kTo8k(pcm24kBuffer) {
   const numSamples24 = Math.floor(pcm24kBuffer.length / 2);
-  const numSamples8 = Math.floor(numSamples24 / 3);
+  if (numSamples24 === 0) return Buffer.alloc(0);
+
+  // Step 1: Convert to float array for processing
+  const samples24 = new Float32Array(numSamples24);
+  for (let i = 0; i < numSamples24; i++) {
+    samples24[i] = pcm24kBuffer.readInt16LE(i * 2);
+  }
+
+  // Step 2: Apply low-pass anti-aliasing filter
+  const filtered = applyLowPassFilter(samples24);
+
+  // Step 3: Linear interpolation resampling (24kHz → 8kHz = ratio 3:1)
+  const ratio = 3.0;
+  const numSamples8 = Math.floor(numSamples24 / ratio);
   const result = Buffer.alloc(numSamples8 * 2);
 
   for (let i = 0; i < numSamples8; i++) {
-    // Average 3 samples for anti-aliasing
-    const idx = i * 3;
-    let sum = 0;
-    let count = 0;
-    for (let j = 0; j < 3 && (idx + j) < numSamples24; j++) {
-      sum += pcm24kBuffer.readInt16LE((idx + j) * 2);
-      count++;
-    }
-    const sample = Math.round(sum / count);
-    result.writeInt16LE(Math.max(-32768, Math.min(32767, sample)), i * 2);
+    const srcPos = i * ratio;
+    const srcIdx = Math.floor(srcPos);
+    const frac = srcPos - srcIdx;
+
+    // Linear interpolation between two adjacent samples
+    const s0 = filtered[srcIdx] || 0;
+    const s1 = filtered[Math.min(srcIdx + 1, numSamples24 - 1)] || 0;
+    const interpolated = s0 + frac * (s1 - s0);
+
+    // Clamp and write
+    const sample = Math.round(Math.max(-32768, Math.min(32767, interpolated)));
+    result.writeInt16LE(sample, i * 2);
   }
 
   return result;
