@@ -1,8 +1,17 @@
 // Allow overriding the API base at deploy time via NEXT_PUBLIC_API_BASE
-export const API_BASE = (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_BASE)
-    ? process.env.NEXT_PUBLIC_API_BASE.replace(/\/+$/,'')
-    : '/api';
-
+// When using an external backend the value should include the host only (no
+// trailing slash); '/api' will be added automatically. If the variable already
+// contains '/api' the suffix is not duplicated.
+export const API_BASE = (() => {
+  let base = '/api';
+  if (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_BASE) {
+    base = process.env.NEXT_PUBLIC_API_BASE.replace(/\/+$/,'');
+    if (!base.match(/\/api(\/|$)/)) {
+      base = base + '/api';
+    }
+  }
+  return base;
+})();
 export async function fetchMetrics() {
     const res = await fetch(`${API_BASE}/v1/metrics`, { cache: 'no-store' });
     if (!res.ok) throw new Error('Failed to fetch metrics');
