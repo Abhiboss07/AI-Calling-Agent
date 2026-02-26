@@ -1,16 +1,16 @@
-const logger = require('../utils/logger');
-const stt = require('../services/stt');
-const llm = require('../services/llm');
-const tts = require('../services/tts');
-const vobizClient = require('../services/vobizClient');
-const Call = require('../models/call.model');
-const Lead = require('../models/lead.model');
-const Transcript = require('../models/transcript.model');
-const Recording = require('../models/recording.model');
-const metrics = require('../services/metrics');
-const costControl = require('../services/costControl');
-const storage = require('../services/storage');
-const { monitoringServer } = require('../services/monitoring');
+const logger = require('./utils/logger');
+const stt = require('./services/stt');
+const llm = require('./services/llm');
+const tts = require('./services/tts');
+const vobizClient = require('./services/vobizClient');
+const Call = require('./models/call.model');
+const Lead = require('./models/lead.model');
+const Transcript = require('./models/transcript.model');
+const Recording = require('./models/recording.model');
+const metrics = require('./services/metrics');
+const costControl = require('./services/costControl');
+const storage = require('./services/storage');
+const { monitoringServer } = require('./services/monitoring');
 const { getLanguage } = require('./config/languages');
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -110,7 +110,7 @@ function computeRms(pcmBuffer) {
   return Math.sqrt(sumSq / numSamples);
 }
 
-const VAD_THRESHOLD = config.pipeline.vadThreshold;
+const VAD_THRESHOLD = require('./config').pipeline.vadThreshold;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // PER-CALL SESSION STATE
@@ -121,7 +121,7 @@ class CallSession {
     this.callUuid = callUuid;    // Vobiz-specific alias
     this.callerNumber = callerNumber;
     this.streamSid = null;       // Vobiz stream ID
-    this.language = language || config.language?.default || 'en-IN';
+    this.language = language || require('./config').language?.default || 'en-IN';
 
     // Audio buffering
     this.audioChunks = [];
@@ -164,6 +164,7 @@ class CallSession {
 const sessions = new Map();
 
 // ── Tuning Constants ──────────────────────────────────────────────────────────
+const config = require('./config');
 const SPEECH_START_CHUNKS = config.pipeline.speechStartChunks;
 const SPEECH_END_CHUNKS = config.pipeline.speechEndChunks;
 const MIN_UTTERANCE_BYTES = config.pipeline.minUtteranceBytes;
