@@ -14,9 +14,10 @@ import {
 
 const Sidebar = () => {
     const pathname = usePathname();
+    const normalizedPath = pathname && pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
 
     // Hide sidebar on auth pages
-    if (['/login', '/signup', '/verify'].includes(pathname)) return null;
+    if (['/login', '/signup', '/verify'].includes(normalizedPath)) return null;
 
     const links = [
         { href: '/dashboard', label: 'Live Monitor', icon: Activity },

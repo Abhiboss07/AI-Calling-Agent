@@ -5,9 +5,10 @@ import { Search, Calendar, Wallet } from 'lucide-react';
 
 const TopBar = () => {
     const pathname = usePathname();
+    const normalizedPath = pathname && pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
 
     // Hide topbar on auth pages
-    if (['/login', '/signup', '/verify'].includes(pathname)) return null;
+    if (['/login', '/signup', '/verify'].includes(normalizedPath)) return null;
 
     const today = new Date();
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);

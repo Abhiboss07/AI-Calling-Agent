@@ -7,10 +7,15 @@ import { API_BASE } from '../lib/api';
 const AuthContext = createContext(null);
 
 const PUBLIC_ROUTES = ['/login', '/signup', '/verify'];
+const normalizePath = (path = '') => {
+    if (!path) return '/';
+    return path.length > 1 ? path.replace(/\/+$/, '') : path;
+};
 
 export function AuthProvider({ children }) {
     const router = useRouter();
     const pathname = usePathname();
+    const normalizedPath = normalizePath(pathname);
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [token, setToken] = useState(null);
@@ -31,10 +36,10 @@ export function AuthProvider({ children }) {
     }, []);
 
     useEffect(() => {
-        if (!loading && !user && !PUBLIC_ROUTES.includes(pathname)) {
+        if (!loading && !user && !PUBLIC_ROUTES.includes(normalizedPath)) {
             router.replace('/login');
         }
-    }, [loading, user, pathname, router]);
+    }, [loading, user, normalizedPath, router]);
 
     async function fetchUser(jwt) {
         try {
@@ -75,7 +80,7 @@ export function AuthProvider({ children }) {
         router.replace('/login');
     }
 
-    const isPublicRoute = PUBLIC_ROUTES.includes(pathname);
+    const isPublicRoute = PUBLIC_ROUTES.includes(normalizedPath);
 
     // Show nothing while checking auth (prevents flash)
     if (loading) {
