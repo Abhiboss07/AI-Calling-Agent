@@ -16,6 +16,59 @@ const UploadLog = require('../models/uploadLog.model');
 // CALLS
 // ──────────────────────────────────────────────────────────────────────────
 
+// Start a call (public test endpoint)
+router.post('/v1/calls/test-start', async (req, res) => {
+  try {
+    const { campaignId, phoneNumber, fromNumber, language, agentName, testMode } = req.body;
+    
+    if (!campaignId || !phoneNumber) return res.status(400).json({ ok: false, error: 'campaignId and phoneNumber required' });
+
+    // For testing, skip phone validation
+    const cleanPhone = phoneNumber.replace(/[^+\d]/g, '');
+    
+    console.log(' Test call initiated', { campaignId, phoneNumber, fromNumber, language, agentName, testMode });
+    
+    // Create call record directly (no Vobiz integration for test)
+    const call = await Call.create({
+      phoneNumber: cleanPhone,
+      callSid: `test-${Date.now()}`,
+      status: 'test-initiated',
+      direction: 'test',
+      language: language || 'en-IN',
+      startAt: new Date(),
+      metadata: { 
+        testMode: true,
+        agentName: agentName || 'Shubhi',
+        fromNumber: fromNumber || '+911234567890',
+        campaignId
+      }
+    });
+    
+    metrics.incrementCallsStarted();
+    
+    // Notify monitoring clients
+    const { monitoringServer } = require('../services/monitoring');
+    monitoringServer.notifyCallStarted({
+      callUuid: call.callSid,
+      phoneNumber: cleanPhone,
+      direction: 'test',
+      startTime: new Date()
+    });
+    
+    res.json({
+      ok: true,
+      callId: call._id,
+      callSid: call.callSid,
+      status: 'test-initiated',
+      message: 'Test call initiated successfully'
+    });
+    
+  } catch (error) {
+    logger.error('Test call initiation failed', error.message);
+    res.status(500).json({ ok: false, error: 'Failed to initiate test call' });
+  }
+});
+
 // Start a call
 router.post('/v1/calls/start', async (req, res) => {
   try {
