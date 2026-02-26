@@ -1,11 +1,15 @@
-// Allow overriding the API base at deploy time via NEXT_PUBLIC_API_BASE
+// Allow overriding the API base at deploy time via NEXT_PUBLIC_API_BASE.
+// For backward compatibility, NEXT_PUBLIC_API_URL is also supported.
 // When using an external backend the value should include the host only (no
 // trailing slash); '/api' will be added automatically. If the variable already
 // contains '/api' the suffix is not duplicated.
 export const API_BASE = (() => {
     let base = '/api';
-    if (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_BASE) {
-        base = process.env.NEXT_PUBLIC_API_BASE.replace(/\/+$/, '');
+    if (typeof process !== 'undefined') {
+        const configuredBase = process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_URL;
+        if (!configuredBase) return base;
+
+        base = configuredBase.replace(/\/+$/, '');
         if (!base.match(/\/api(\/|$)/)) {
             base = base + '/api';
         }
