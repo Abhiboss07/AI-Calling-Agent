@@ -19,7 +19,7 @@ const UploadLog = require('../models/uploadLog.model');
 // Start a call
 router.post('/v1/calls/start', async (req, res) => {
   try {
-    const { campaignId, phoneNumber, fromNumber, language } = req.body;
+    const { campaignId, phoneNumber, fromNumber, language, force } = req.body;
     if (!campaignId || !phoneNumber) return res.status(400).json({ ok: false, error: 'campaignId and phoneNumber required' });
 
     // FIX H1: Proper E.164 phone number validation
@@ -35,17 +35,26 @@ router.post('/v1/calls/start', async (req, res) => {
     }
 
     // FIX M6: Prevent duplicate simultaneous calls to the same number
-    const existingCall = await Call.findOne({
-      campaignId,
-      phoneNumber: cleanPhone,
-      status: { $in: ['queued', 'ringing', 'in-progress'] }
-    });
-    if (existingCall) {
-      return res.status(409).json({
-        ok: false,
-        error: 'Call already in progress for this number',
-        existingCallId: existingCall._id
+    if (!force) {
+      const existingCall = await Call.findOne({
+        campaignId,
+        phoneNumber: cleanPhone,
+        status: { $in: ['queued', 'ringing', 'in-progress'] }
       });
+      if (existingCall) {
+        return res.status(409).json({
+          ok: false,
+          error: 'Call already in progress for this number',
+          existingCallId: existingCall._id
+        });
+      }
+    } else {
+      // If forcing, automatically fail any stuck previous calls to this number
+      await Call.updateMany({
+        campaignId,
+        phoneNumber: cleanPhone,
+        status: { $in: ['queued', 'ringing', 'in-progress'] }
+      }, { $set: { status: 'failed' } });
     }
 
     const callLanguage = language || config.language?.default || 'en-IN';

@@ -6,6 +6,7 @@ import {
   Phone, IndianRupee, CheckCircle, PhoneCall, Hash,
   Copy, Eye, EyeOff, Zap, PhoneForwarded, ExternalLink
 } from 'lucide-react';
+import { getAuthHeaders } from '../lib/api';
 
 const API_BASE = '/api/v1';
 
@@ -21,8 +22,8 @@ export default function Dashboard() {
     async function loadData() {
       try {
         const [mRes, cRes] = await Promise.all([
-          fetch(`${API_BASE}/metrics`).catch(() => null),
-          fetch(`${API_BASE}/calls?perPage=5`).catch(() => null)
+          fetch(`${API_BASE}/metrics`, { headers: getAuthHeaders() }).catch(() => null),
+          fetch(`${API_BASE}/calls?perPage=5`, { headers: getAuthHeaders() }).catch(() => null)
         ]);
 
         if (!mRes && !cRes) {

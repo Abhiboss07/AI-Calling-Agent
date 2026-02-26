@@ -3,7 +3,7 @@ export const runtime = 'edge';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_BASE } from '../../lib/api';
+import { API_BASE, getAuthHeaders } from '../../lib/api';
 
 export default function TestCallPage() {
     const router = useRouter();
@@ -24,8 +24,8 @@ export default function TestCallPage() {
             console.debug('starting call', url, { campaignId, phone, fromNumber });
             const res = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ campaignId, phoneNumber: phone, fromNumber: fromNumber || undefined })
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                body: JSON.stringify({ campaignId, phoneNumber: phone, fromNumber: fromNumber || undefined, force: true })
             });
             const data = await res.json();
             if (!res.ok || !data.ok) {
