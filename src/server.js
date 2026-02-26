@@ -9,6 +9,7 @@ const apiRoutes = require('./routes/api');
 const { verifyToken } = require('./middleware/auth');
 const setupWs = require('./ws-media');
 const metrics = require('./services/metrics');
+const { startMonitoring, router: monitoringRoutes } = require('./services/monitoring');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // RATE LIMITER (in-memory — production: Redis via RATE_LIMIT_REDIS_URL)
@@ -77,7 +78,14 @@ async function start() {
   }
 
   const app = express();
-  expressWs(app);
+  const wsInstance = expressWs(app, {
+    wsOptions: {
+      verifyClient: (info, cb) => {
+        // Allow all WebSocket connections
+        cb(true);
+      }
+    }
+  });
 
   // Trust proxy (required behind ALB/nginx for correct req.ip, req.protocol)
   app.set('trust proxy', 1);
@@ -213,9 +221,13 @@ async function start() {
   app.use('/vobiz', vobizRoutes);
   app.use('/api/v1/auth', authRoutes);  // Public auth routes
   app.use('/api', verifyToken, apiRoutes);  // Protected API routes
+  app.use('/monitor', monitoringRoutes);  // Monitoring API routes
 
   // WebSocket for Vobiz Media Streams
   setupWs(app);
+  
+  // Start monitoring server for real-time updates
+  startMonitoring();
 
   // ── Global error handler ────────────────────────────────────────────────
   app.use((err, req, res, next) => {

@@ -8,7 +8,8 @@ import {
     FileText,
     Upload,
     Headphones,
-    User
+    User,
+    Activity
 } from 'lucide-react';
 
 const Sidebar = () => {
@@ -18,6 +19,7 @@ const Sidebar = () => {
     if (['/login', '/signup', '/verify'].includes(pathname)) return null;
 
     const links = [
+        { href: '/dashboard', label: 'Live Monitor', icon: Activity },
         { href: '/', label: 'Dashboard', icon: Home },
         { href: '/clients', label: 'Voice', icon: Phone },
         { href: '/csv', label: 'Management', icon: Upload },

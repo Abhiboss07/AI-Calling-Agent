@@ -1,9 +1,9 @@
 import { Inter } from "next/font/google";
-export const runtime = 'edge';
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
 import AuthProvider from "@/components/AuthProvider";
+import { WebSocketProvider } from "@/contexts/WebSocketContext";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -17,13 +17,15 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body className={inter.className}>
         <AuthProvider>
-          <div className="layout-container">
-            <Sidebar />
-            <div className="layout-body">
-              <TopBar />
-              <main>{children}</main>
+          <WebSocketProvider>
+            <div className="layout-container">
+              <Sidebar />
+              <div className="layout-body">
+                <TopBar />
+                <main>{children}</main>
+              </div>
             </div>
-          </div>
+          </WebSocketProvider>
         </AuthProvider>
       </body>
     </html>

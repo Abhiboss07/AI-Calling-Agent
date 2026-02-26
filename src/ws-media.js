@@ -1,15 +1,16 @@
-const logger = require('./utils/logger');
-const stt = require('./services/stt');
-const llm = require('./services/llm');
-const tts = require('./services/tts');
-const vobizClient = require('./services/vobizClient');
-const Call = require('./models/call.model');
-const Lead = require('./models/lead.model');
-const Transcript = require('./models/transcript.model');
-const config = require('./config');
-const metrics = require('./services/metrics');
-const costControl = require('./services/costControl');
-const { retry } = require('./utils/retry');
+const logger = require('../utils/logger');
+const stt = require('../services/stt');
+const llm = require('../services/llm');
+const tts = require('../services/tts');
+const vobizClient = require('../services/vobizClient');
+const Call = require('../models/call.model');
+const Lead = require('../models/lead.model');
+const Transcript = require('../models/transcript.model');
+const Recording = require('../models/recording.model');
+const metrics = require('../services/metrics');
+const costControl = require('../services/costControl');
+const storage = require('../services/storage');
+const { monitoringServer } = require('../services/monitoring');
 const { getLanguage } = require('./config/languages');
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -318,6 +319,14 @@ module.exports = function setupWs(app) {
           costControl.trackCall(callUuid);
 
           logger.log('📞 Stream started', { callUuid, callerNumber, streamSid, language });
+          
+          // Notify monitoring clients of new call
+          monitoringServer.notifyCallStarted({
+            callUuid,
+            phoneNumber: callerNumber,
+            direction: 'inbound',
+            startTime: new Date()
+          });
 
           // Max call duration safety
           session.maxDurationTimer = setTimeout(async () => {
@@ -485,7 +494,16 @@ async function deliverInitialGreeting(session, ws) {
       endMs: 2000,
       speaker: 'agent',
       text: greetingText,
-      confidence: 1
+      confidence: 1.0
+    });
+    
+    // Notify monitoring clients of transcript
+    monitoringServer.notifyTranscriptUpdate({
+      callUuid: session.callSid,
+      speaker: 'agent',
+      text: greetingText,
+      confidence: 1.0,
+      timestamp: new Date()
     });
 
     startSilenceTimer(session, ws);
@@ -561,6 +579,15 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
     text: sttResult.text,
     confidence: sttResult.confidence
   });
+  
+  // Notify monitoring clients of transcript
+  monitoringServer.notifyTranscriptUpdate({
+    callUuid: session.callSid,
+    speaker: 'customer',
+    text: sttResult.text,
+    confidence: sttResult.confidence,
+    timestamp: new Date()
+  });
 
   // ── 3. LLM — Generate reply (with language) ──────────────────────────
   const llmStart = Date.now();
@@ -594,6 +621,15 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
     speaker: 'agent',
     text: reply.speak || '(no response)',
     confidence: 1
+  });
+  
+  // Notify monitoring clients of transcript
+  monitoringServer.notifyTranscriptUpdate({
+    callUuid: session.callSid,
+    speaker: 'agent',
+    text: reply.speak || '(no response)',
+    confidence: 1,
+    timestamp: new Date()
   });
 
   // ── 4. TTS → Send through bidirectional stream ────────────────────────
@@ -724,6 +760,13 @@ async function endCallGracefully(session, ws, farewellText) {
     if (session.callSid) {
       await vobizClient.endCall(session.callSid).catch(e => logger.warn('End call API error', e.message));
     }
+    
+    // Notify monitoring clients of call ended
+    monitoringServer.notifyCallEnded({
+      callUuid: session.callSid,
+      endTime: new Date(),
+      duration: Date.now() - session.startTime
+    });
   } catch (err) {
     logger.error('Graceful end error', err.message);
   }
