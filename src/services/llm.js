@@ -7,7 +7,6 @@ const path = require('path');
 const config = require('../config');
 const { getLanguage } = require('../config/languages');
 
-// ── Load system prompt ──────────────────────────────────────────────────────
 let SYSTEM_PROMPT = '';
 try {
   const promptPath = config.systemPromptFile;
@@ -22,21 +21,19 @@ try {
 }
 
 if (!SYSTEM_PROMPT) {
-  SYSTEM_PROMPT = `You are a professional real estate AI phone agent for ${config.companyName}. 
+  SYSTEM_PROMPT = `You are a professional real estate AI phone agent for ${config.companyName}.
 Your name is ${config.agentName}. Keep responses under 25 words. Be natural and human-like.
 Always respond in JSON: {"speak":"...","action":"continue|collect|hangup|escalate|book_visit","nextStep":"...","data":{},"qualityScore":0,"reasoning":"..."}`;
 }
 
-// ── Inject dynamic variables into prompt ────────────────────────────────────
 function buildSystemPrompt() {
   return SYSTEM_PROMPT
     .replace(/\{\{company_name\}\}/g, config.companyName)
     .replace(/\{\{agent_name\}\}/g, config.agentName);
 }
 
-// ── Conversation history per call (in-memory, bounded) ──────────────────────
-const conversationHistory = new Map(); // callSid → [{role, content}]
-const MAX_HISTORY = config.llm?.maxHistory || 10; // Optimized: 10 turns is enough context
+const conversationHistory = new Map();
+const MAX_HISTORY = config.llm?.maxHistory || 10;
 const HISTORY_TTL_MS = config.llm?.historyTtlMs || (30 * 60 * 1000);
 
 function getHistory(callSid) {
@@ -49,7 +46,6 @@ function getHistory(callSid) {
 function addToHistory(callSid, role, content) {
   const h = getHistory(callSid);
   h.messages.push({ role, content });
-  // Trim to last MAX_HISTORY messages
   if (h.messages.length > MAX_HISTORY) {
     h.messages = h.messages.slice(-MAX_HISTORY);
   }
@@ -59,7 +55,6 @@ function clearHistory(callSid) {
   conversationHistory.delete(callSid);
 }
 
-// Periodic cleanup of stale conversations
 setInterval(() => {
   const now = Date.now();
   for (const [sid, h] of conversationHistory) {
@@ -69,7 +64,6 @@ setInterval(() => {
   }
 }, 60000);
 
-// ── Default fallback response ───────────────────────────────────────────────
 const FALLBACK_RESPONSE = {
   speak: 'I apologize, could you please repeat that?',
   action: 'continue',
@@ -79,23 +73,127 @@ const FALLBACK_RESPONSE = {
   reasoning: 'fallback'
 };
 
-// ── Main generate function ──────────────────────────────────────────────────
+function normalizeLanguageCode(language) {
+  if (!language) return config.language?.default || 'en-IN';
+  const raw = String(language).trim().toLowerCase();
+  if (raw === 'hinglish' || raw === 'hi-en' || raw === 'en-hi' || raw === 'hindi-english') {
+    return 'hinglish';
+  }
+  return language;
+}
+
+function extractJsonLikePayload(text) {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) return trimmed;
+
+  if (trimmed.startsWith('```')) {
+    const unfenced = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    if (unfenced.startsWith('{') && unfenced.endsWith('}')) return unfenced;
+  }
+
+  const start = trimmed.indexOf('{');
+  const end = trimmed.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) {
+    return trimmed.slice(start, end + 1);
+  }
+
+  return null;
+}
+
+function templateByStep(step, languageCode, customerName) {
+  const name = customerName || 'there';
+  const agent = config.agentName || 'Agent';
+  const company = config.companyName || 'our company';
+
+  if (step === 'greeting' || step === 'identify') {
+    if (languageCode === 'hi-IN') {
+      return `नमस्ते! मैं ${agent} ${company} से बोल रही हूँ। क्या मैं ${name} से बात कर रही हूँ?`;
+    }
+    if (languageCode === 'hinglish') {
+      return `Hi! Main ${agent} ${company} se bol rahi hoon. Kya main ${name} se baat kar rahi hoon?`;
+    }
+    return `Hi! This is ${agent} from ${company}. Am I speaking with ${name}?`;
+  }
+
+  if (step === 'warm-up') {
+    if (languageCode === 'hi-IN') return `बहुत अच्छा लगा ${name} से बात करके! आप खरीदना चाहते हैं, किराए पर लेना चाहते हैं, या निवेश करना चाहते हैं?`;
+    if (languageCode === 'hinglish') return `Great to speak with you, ${name}! Aap buy, rent, ya investment ke liye dekh rahe hain?`;
+    return `Great to speak with you, ${name}! Are you looking to buy, rent, or invest?`;
+  }
+
+  if (step === 'close' || step === 'summary') {
+    if (languageCode === 'hi-IN') {
+      return `धन्यवाद ${name}! आपसे बात करके अच्छा लगा। हमारी टीम जल्दी आपसे संपर्क करेगी।`;
+    }
+    if (languageCode === 'hinglish') {
+      return `Thank you ${name}! Aapse baat karke accha laga. Hamari team jaldi aapse contact karegi.`;
+    }
+    return `Thank you ${name}! It was great speaking with you. Our team will contact you shortly.`;
+  }
+
+  return '';
+}
+
+function isConversationEndSignal(text = '') {
+  return /(thank|thanks|dhanyavaad|धन्यवाद|bye|goodbye|not interested|that is all|bas itna|बस इतना|call me later)/i.test(String(text));
+}
+
+function enforceScriptFlow(parsed, context) {
+  const safe = {
+    ...FALLBACK_RESPONSE,
+    ...parsed,
+    data: parsed?.data && typeof parsed.data === 'object' ? parsed.data : {}
+  };
+
+  const step = context?.step || '';
+  const languageCode = context?.languageCode || 'en-IN';
+  const scripted = templateByStep(step, languageCode, context?.customerName);
+
+  if (step === 'greeting' || step === 'identify') {
+    safe.speak = scripted || safe.speak;
+    safe.action = 'collect';
+    safe.nextStep = 'identify';
+    safe.reasoning = 'scripted_greeting';
+  }
+
+  if (step === 'warm-up') {
+    safe.speak = scripted || safe.speak;
+    safe.action = 'collect';
+    safe.nextStep = 'purpose';
+    safe.reasoning = 'scripted_intro';
+  }
+
+  if (step === 'close' || step === 'summary' || context?.endSignal) {
+    safe.speak = scripted || safe.speak;
+    safe.action = 'hangup';
+    safe.nextStep = 'close';
+    safe.reasoning = 'scripted_close';
+  }
+
+  if (safe.speak && safe.speak.length > 150) {
+    safe.speak = safe.speak.substring(0, 150);
+  }
+
+  return safe;
+}
+
 async function generateReply({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase }) {
   try {
-    const langConfig = getLanguage(language || config.language?.default || 'en-IN');
+    const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
+    const langConfig = getLanguage(languageCode);
+    const step = callState?.step || '';
+    const endSignal = isConversationEndSignal(lastTranscript || '');
 
-    // Build language-aware system prompt
     let systemContent = buildSystemPrompt();
 
-    // If a knowledge base object is provided, weave its systemPrompt/content into the message
     if (knowledgeBase) {
       try {
-        // perform template replacements simple style
         let kbPrompt = (knowledgeBase.systemPrompt || '').toString();
         kbPrompt = kbPrompt.replace(/\{\{agent_name\}\}/g, knowledgeBase.agentName || config.agentName);
         kbPrompt = kbPrompt.replace(/\{\{company_name\}\}/g, knowledgeBase.companyName || config.companyName);
         kbPrompt = kbPrompt.replace(/\{\{knowledge_base\}\}/g, knowledgeBase.content || '');
-        // prefix the system content so that KB prompt has higher priority
         if (kbPrompt.trim()) {
           systemContent = `${kbPrompt}\n\n${systemContent}`;
         }
@@ -104,11 +202,12 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       }
     }
 
-    if (language && language !== 'en-IN') {
-      systemContent += `\n\nIMPORTANT LANGUAGE INSTRUCTION: The customer is speaking in ${langConfig.name}. You MUST respond in ${langConfig.name}. Use natural, conversational ${langConfig.name}. Keep the same JSON format but the "speak" field must be in ${langConfig.name}.`;
+    if (languageCode === 'hinglish') {
+      systemContent += '\n\nIMPORTANT LANGUAGE INSTRUCTION: Respond in natural Hinglish (Hindi-English mix) in Roman script. Keep JSON response format.';
+    } else if (languageCode && languageCode !== 'en-IN') {
+      systemContent += `\n\nIMPORTANT LANGUAGE INSTRUCTION: The customer is speaking in ${langConfig.name}. You MUST respond in ${langConfig.name}. Keep JSON response format.`;
     }
 
-    // Build user message with context
     const userMsg = [
       `CUSTOMER NAME: ${customerName || 'unknown'}`,
       `LATEST: "${lastTranscript || '(silence)'}"`,
@@ -117,7 +216,6 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       'Generate the next agent response in the required JSON format.'
     ].join('\n');
 
-    // Build full message array with history
     const systemMsg = { role: 'system', content: systemContent };
     const history = callSid ? getHistory(callSid).messages : [];
     const messages = [
@@ -126,7 +224,6 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       { role: 'user', content: userMsg }
     ];
 
-    // if no OpenAI key is configured, skip API call and return fallback quickly
     if (!process.env.OPENAI_API_KEY) {
       logger.warn('OpenAI API key missing; using fallback response');
       metrics.incrementLlmRequest(false);
@@ -142,43 +239,37 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
 
     const assistant = resp.choices?.[0]?.message?.content || '';
 
-    // Track cost — separate input/output for accurate pricing
     if (callSid && resp.usage) {
       costControl.addTokenUsage(callSid, resp.usage.prompt_tokens || 0, resp.usage.completion_tokens || 0);
     }
 
-    // Store in conversation history
     if (callSid) {
       addToHistory(callSid, 'user', userMsg);
       addToHistory(callSid, 'assistant', assistant);
     }
 
-    // Parse JSON — handle markdown-wrapped JSON (```json ... ```)
     let parsed;
     try {
-      let jsonStr = assistant.trim();
-      // Strip markdown code fences if present
-      if (jsonStr.startsWith('```')) {
-        jsonStr = jsonStr.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
-      }
-      parsed = JSON.parse(jsonStr);
+      const jsonLike = extractJsonLikePayload(assistant);
+      if (!jsonLike) throw new Error('No JSON payload found');
+      parsed = JSON.parse(jsonLike);
     } catch (e) {
       logger.warn('LLM returned non-JSON, using fallback', assistant.substring(0, 100));
-      // Try to extract speak text from non-JSON response
       const speakText = assistant.replace(/[{}"]/g, '').trim();
       parsed = { ...FALLBACK_RESPONSE, speak: speakText.length > 5 ? speakText.substring(0, 150) : FALLBACK_RESPONSE.speak };
     }
 
-    // Enforce max response length for TTS (shorter = cheaper + faster)
-    if (parsed.speak && parsed.speak.length > 150) {
-      parsed.speak = parsed.speak.substring(0, 150);
-    }
-
-    return parsed;
+    return enforceScriptFlow(parsed, { step, languageCode, customerName, endSignal });
   } catch (err) {
     logger.error('LLM error', err.message || err);
     metrics.incrementLlmRequest(false);
-    return { ...FALLBACK_RESPONSE, speak: (getLanguage(language)?.farewell) || 'Thank you for your time. We will call you back. Goodbye.', action: 'hangup', nextStep: 'close' };
+    const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
+    return {
+      ...FALLBACK_RESPONSE,
+      speak: (getLanguage(languageCode)?.farewell) || 'Thank you for your time. We will call you back. Goodbye.',
+      action: 'hangup',
+      nextStep: 'close'
+    };
   }
 }
 

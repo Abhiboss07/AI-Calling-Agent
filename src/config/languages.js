@@ -13,6 +13,15 @@ const LANGUAGES = {
         farewell: 'Thank you for calling. Goodbye!',
         fallbackSpeak: 'I apologize, could you please repeat that?'
     },
+    'hinglish': {
+        name: 'Hinglish',
+        whisperCode: 'en',
+        ttsVoice: 'alloy',
+        greeting: 'Hi! Main aaj aapki kaise help kar sakti hoon?',
+        silencePrompt: 'Hello, aap line par hain? Main help ke liye yahin hoon.',
+        farewell: 'Thank you ji! Aapse baat karke accha laga. Goodbye!',
+        fallbackSpeak: 'Sorry, kya aap please dobara bol sakte hain?'
+    },
     'hi-IN': {
         name: 'Hindi',
         whisperCode: 'hi',
