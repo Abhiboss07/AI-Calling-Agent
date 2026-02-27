@@ -77,6 +77,49 @@ function isWithinBudget(callSid) {
   return getEstimatedCost(callSid) < PER_CALL_BUDGET_RS;
 }
 
+function getSnapshot() {
+  const activeCalls = [];
+  let activeEstimatedCost = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalSttMinutes = 0;
+  let totalTtsChars = 0;
+
+  for (const [callSid, entry] of costTracker) {
+    const estimatedCost = getEstimatedCost(callSid);
+    activeEstimatedCost += estimatedCost;
+    totalInputTokens += entry.inputTokens || 0;
+    totalOutputTokens += entry.outputTokens || 0;
+    totalSttMinutes += entry.sttMinutes || 0;
+    totalTtsChars += entry.ttsChars || 0;
+
+    activeCalls.push({
+      callSid,
+      startedAt: entry.startedAt,
+      estimatedCost
+    });
+  }
+
+  const sorted = activeCalls.sort((a, b) => a.startedAt - b.startedAt);
+  const burnRatePerMin = sorted.reduce((sum, c) => {
+    const ageMin = Math.max(1 / 60, (Date.now() - c.startedAt) / 60000);
+    return sum + (c.estimatedCost / ageMin);
+  }, 0);
+
+  return {
+    activeCalls: sorted,
+    activeCallsCount: sorted.length,
+    activeEstimatedCost,
+    burnRatePerMin,
+    usage: {
+      inputTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
+      sttMinutes: totalSttMinutes,
+      ttsChars: totalTtsChars
+    }
+  };
+}
+
 function endCallTracking(callSid) {
   const entry = costTracker.get(callSid);
   if (!entry) return 0;
@@ -129,5 +172,5 @@ setInterval(() => {
 module.exports = {
   trackCall, addTokenUsage, addSttUsage, addTtsUsage,
   getEstimatedCost, isWithinBudget, endCallTracking,
-  PER_CALL_BUDGET_RS
+  PER_CALL_BUDGET_RS, getSnapshot
 };

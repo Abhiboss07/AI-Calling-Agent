@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useReducer, useEffect, useRef, useCallback } from 'react';
+import { API_BASE } from '../lib/api';
 
 // Real-time WebSocket context for live call monitoring
 const WebSocketContext = createContext();
@@ -38,6 +39,12 @@ const initialState = {
 // Reducer for real-time state updates
 function wsReducer(state, action) {
   switch (action.type) {
+    case WS_ACTIONS.CONNECTING:
+      return {
+        ...state,
+        connecting: true,
+        error: null
+      };
     case WS_ACTIONS.CONNECT:
       return {
         ...state,
@@ -153,18 +160,41 @@ export function WebSocketProvider({ children }) {
   const [state, dispatch] = useReducer(wsReducer, initialState);
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
+  const pingIntervalRef = useRef(null);
   const reconnectAttempts = useRef(0);
-  const maxReconnectAttempts = 5;
+  const maxReconnectAttempts = 50;
+
+  const resolveWsUrl = useCallback(() => {
+    const configured = process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_URL || '';
+    const base = configured || API_BASE || '/api';
+    const normalized = base.replace(/\/+$/, '');
+    const withoutApiSuffix = normalized.replace(/\/api(\/v\d+)?$/i, '');
+
+    if (withoutApiSuffix.startsWith('http://')) {
+      return `${withoutApiSuffix.replace(/^http:\/\//, 'ws://')}/monitor`;
+    }
+    if (withoutApiSuffix.startsWith('https://')) {
+      return `${withoutApiSuffix.replace(/^https:\/\//, 'wss://')}/monitor`;
+    }
+
+    if (typeof window !== 'undefined') {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      return `${protocol}//${host}/monitor`;
+    }
+    return 'ws://localhost:3000/monitor';
+  }, []);
 
   // Connect to WebSocket
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (wsRef.current &&
+      (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       return;
     }
 
     dispatch({ type: WS_ACTIONS.CONNECTING });
     
-    const wsUrl = `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws') || 'ws://localhost:3000'}/monitor`;
+    const wsUrl = resolveWsUrl();
     
     try {
       const ws = new WebSocket(wsUrl);
@@ -177,6 +207,14 @@ export function WebSocketProvider({ children }) {
         
         // Request initial state
         ws.send(JSON.stringify({ type: 'get_state' }));
+
+        // Keep connection warm behind proxies and detect stale links.
+        if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 15000);
       };
 
       ws.onmessage = (event) => {
@@ -234,6 +272,8 @@ export function WebSocketProvider({ children }) {
                 }
               });
               break;
+            case 'pong':
+              break;
             
             default:
               console.log('Unknown WebSocket message:', data);
@@ -246,6 +286,10 @@ export function WebSocketProvider({ children }) {
       ws.onclose = (event) => {
         console.log('WebSocket disconnected:', event.code, event.reason);
         dispatch({ type: WS_ACTIONS.DISCONNECT });
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = null;
+        }
         
         // Attempt to reconnect
         if (reconnectAttempts.current < maxReconnectAttempts) {
@@ -273,12 +317,16 @@ export function WebSocketProvider({ children }) {
         payload: `Failed to connect: ${error.message}` 
       });
     }
-  }, []);
+  }, [resolveWsUrl]);
 
   // Disconnect WebSocket
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
+    }
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = null;
     }
     
     if (wsRef.current) {

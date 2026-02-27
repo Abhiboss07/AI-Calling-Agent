@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  BadgeIndianRupee,
   CheckCircle2,
   Clock4,
   Phone,
@@ -33,11 +34,16 @@ function formatRelative(startTime) {
 }
 
 export default function DashboardPage() {
-  const { connected, calls, activeCall, metrics, transcripts } = useWebSocket();
+  const { connected, connecting, calls, activeCall, metrics, transcripts } = useWebSocket();
   const [stats, setStats] = useState({
     todayCalls: 0,
     avgDuration: 0,
     conversionRate: 0
+  });
+  const [finance, setFinance] = useState({
+    vobiz: { walletAvailable: null, walletAfterActive: null, currency: 'INR', totalTelephonyCost: 0 },
+    openai: { totalEstimatedCost: 0, activeEstimatedCost: 0, burnRatePerMin: 0, usage: {} },
+    totals: { allTimeEstimatedCost: 0, activeCallsCount: 0 }
   });
 
   useEffect(() => {
@@ -64,15 +70,43 @@ export default function DashboardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+    const fetchFinance = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/v1/finance`, {
+          headers: getAuthHeaders(),
+          cache: 'no-store'
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (mounted && data?.ok) setFinance(data);
+      } catch {
+        // keep prior snapshot
+      }
+    };
+    fetchFinance();
+    const id = setInterval(fetchFinance, 12000);
+    return () => {
+      mounted = false;
+      clearInterval(id);
+    };
+  }, []);
+
   const recentCalls = useMemo(() => [...calls].reverse().slice(0, 7), [calls]);
   const activeTranscript = activeCall ? (transcripts[activeCall.id] || []).slice(-8) : [];
 
   const systemChecks = [
-    { label: 'WebSocket Channel', healthy: connected },
+    { label: 'WebSocket Channel', healthy: connected || connecting },
     { label: 'Call Pipeline', healthy: true },
     { label: 'Database', healthy: true },
     { label: 'Speech Services', healthy: true }
   ];
+
+  const formatCurrency = (value) => {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
+    return `Rs ${Number(value).toFixed(2)}`;
+  };
 
   return (
     <div className="realtime-page">
@@ -84,7 +118,7 @@ export default function DashboardPage() {
         </div>
         <div className={`realtime-connection ${connected ? 'online' : 'offline'}`}>
           <span className="dot" />
-          {connected ? 'Live Connected' : 'Disconnected'}
+          {connected ? 'Live Connected' : (connecting ? 'Reconnecting' : 'Disconnected')}
         </div>
       </section>
 
@@ -123,6 +157,24 @@ export default function DashboardPage() {
           </div>
           <div className="stat-card-value">{stats.conversionRate || 0}%</div>
           <div className="stat-card-change"><span className="change-dash">Trend</span> qualification rate</div>
+        </article>
+
+        <article className="stat-card fade-in-up delay-4">
+          <div className="stat-card-header">
+            <span className="stat-card-title">Vobiz Wallet</span>
+            <div className="stat-card-icon blue"><BadgeIndianRupee size={18} /></div>
+          </div>
+          <div className="stat-card-value">{formatCurrency(finance.vobiz.walletAfterActive ?? finance.vobiz.walletAvailable)}</div>
+          <div className="stat-card-change"><span className="change-dash">Live</span> after active deduction</div>
+        </article>
+
+        <article className="stat-card fade-in-up delay-4">
+          <div className="stat-card-header">
+            <span className="stat-card-title">OpenAI Active Spend</span>
+            <div className="stat-card-icon purple"><Activity size={18} /></div>
+          </div>
+          <div className="stat-card-value">{formatCurrency(finance.openai.activeEstimatedCost)}</div>
+          <div className="stat-card-change"><span className="change-dash">Burn</span> {formatCurrency(finance.openai.burnRatePerMin)}/min</div>
         </article>
       </section>
 
@@ -195,6 +247,35 @@ export default function DashboardPage() {
             ))}
           </div>
         </article>
+      </section>
+
+      <section className="card fade-in-up delay-3">
+        <div className="panel-head">
+          <h3>Cost Tracking (Real-Time)</h3>
+          <span className="badge">{finance.totals.activeCallsCount || 0} active tracked</span>
+        </div>
+        <div className="status-stack">
+          <div className="status-row">
+            <span>Vobiz Wallet Available</span>
+            <strong>{formatCurrency(finance.vobiz.walletAvailable)}</strong>
+          </div>
+          <div className="status-row">
+            <span>Vobiz Telephony Spend (all-time estimate)</span>
+            <strong>{formatCurrency(finance.vobiz.totalTelephonyCost)}</strong>
+          </div>
+          <div className="status-row">
+            <span>OpenAI Spend (all-time estimate)</span>
+            <strong>{formatCurrency(finance.openai.totalEstimatedCost)}</strong>
+          </div>
+          <div className="status-row">
+            <span>OpenAI Token Usage (active calls)</span>
+            <strong>{Number(finance.openai.usage?.inputTokens || 0)} in / {Number(finance.openai.usage?.outputTokens || 0)} out</strong>
+          </div>
+          <div className="status-row">
+            <span>Total Estimated Spend (all-time)</span>
+            <strong>{formatCurrency(finance.totals.allTimeEstimatedCost)}</strong>
+          </div>
+        </div>
       </section>
 
       <section className="card fade-in-up delay-3">

@@ -327,6 +327,93 @@ router.get('/v1/metrics', async (req, res) => {
   }
 });
 
+router.get('/v1/stats', async (req, res) => {
+  try {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const [todayCalls, todayCompletedCalls, avgDurationAgg] = await Promise.all([
+      Call.countDocuments({ createdAt: { $gte: startOfDay } }),
+      Call.countDocuments({ createdAt: { $gte: startOfDay }, status: 'completed' }),
+      Call.aggregate([
+        { $match: { durationSec: { $gt: 0 } } },
+        { $group: { _id: null, avgDuration: { $avg: '$durationSec' } } }
+      ])
+    ]);
+
+    const conversionRate = todayCalls > 0
+      ? Math.round((todayCompletedCalls / Math.max(1, todayCalls)) * 100)
+      : 0;
+
+    res.json({
+      todayCalls,
+      avgDuration: Math.round(avgDurationAgg[0]?.avgDuration || 0),
+      conversionRate
+    });
+  } catch (err) {
+    logger.error('Stats error', err.message);
+    res.status(500).json({ ok: false, error: 'Failed to load stats' });
+  }
+});
+
+router.get('/v1/finance', async (req, res) => {
+  try {
+    const [wallet, costSnapshot, callAgg] = await Promise.all([
+      vobizClient.getWalletSummary().catch((err) => {
+        logger.warn('Vobiz wallet fetch failed', err.message);
+        return { ok: false, available: null, currency: 'INR', raw: null };
+      }),
+      Promise.resolve(costControl.getSnapshot()),
+      Call.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalEstimatedCost: { $sum: { $ifNull: ['$estimatedCost', 0] } },
+            totalVobizCost: { $sum: { $ifNull: ['$costBreakdown.vobiz', 0] } },
+            totalOpenAICost: {
+              $sum: {
+                $add: [
+                  { $ifNull: ['$costBreakdown.whisper', 0] },
+                  { $ifNull: ['$costBreakdown.gpt', 0] },
+                  { $ifNull: ['$costBreakdown.tts', 0] }
+                ]
+              }
+            }
+          }
+        }
+      ])
+    ]);
+
+    const agg = callAgg[0] || {};
+    const walletAvailable = Number.isFinite(wallet.available) ? wallet.available : null;
+    const walletAfterActive = walletAvailable === null ? null : Math.max(0, walletAvailable - costSnapshot.activeEstimatedCost);
+
+    res.json({
+      ok: true,
+      vobiz: {
+        walletAvailable,
+        walletAfterActive,
+        currency: wallet.currency || 'INR',
+        totalTelephonyCost: Number(agg.totalVobizCost || 0)
+      },
+      openai: {
+        totalEstimatedCost: Number(agg.totalOpenAICost || 0),
+        activeEstimatedCost: Number(costSnapshot.activeEstimatedCost || 0),
+        burnRatePerMin: Number(costSnapshot.burnRatePerMin || 0),
+        usage: costSnapshot.usage
+      },
+      totals: {
+        allTimeEstimatedCost: Number(agg.totalEstimatedCost || 0),
+        activeCallsCount: costSnapshot.activeCallsCount || 0
+      },
+      activeCalls: costSnapshot.activeCalls
+    });
+  } catch (err) {
+    logger.error('Finance endpoint error', err.message);
+    res.status(500).json({ ok: false, error: 'Failed to load finance data' });
+  }
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 // UPLOADS
 // ──────────────────────────────────────────────────────────────────────────

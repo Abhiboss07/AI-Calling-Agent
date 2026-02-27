@@ -227,8 +227,8 @@ async function start() {
   // WebSocket for Vobiz Media Streams
   setupWs(app);
   
-  // Start monitoring server for real-time updates
-  startMonitoring();
+  // Start monitoring WebSocket endpoint for real-time updates
+  startMonitoring(app);
 
   // ── Global error handler ────────────────────────────────────────────────
   app.use((err, req, res, next) => {

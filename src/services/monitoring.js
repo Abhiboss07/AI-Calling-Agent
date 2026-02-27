@@ -11,52 +11,62 @@ class MonitoringServer {
   constructor() {
     this.wss = null;
     this.clients = new Set();
-    this.port = config.monitoring?.port || 3002; // Use different port
+    this.port = config.monitoring?.port || 3002;
+    this.started = false;
   }
 
-  start() {
-    const server = http.createServer();
-    this.wss = new WebSocket.Server({ server });
+  handleConnection(ws) {
+    logger.log('Monitoring client connected');
+    this.clients.add(ws);
 
-    this.wss.on('connection', (ws, req) => {
-      logger.log('🔌 Monitoring client connected');
-      this.clients.add(ws);
-
-      // Send initial state
-      this.sendToClient(ws, {
-        type: 'state',
-        payload: {
-          totalCalls: metrics.getMetrics().totalCalls,
-          activeCalls: metrics.getMetrics().activeCalls
-        }
-      });
-
-      ws.on('message', async (data) => {
-        try {
-          const message = JSON.parse(data.toString());
-          await this.handleMessage(ws, message);
-        } catch (error) {
-          logger.error('Monitoring message error:', error.message);
-        }
-      });
-
-      ws.on('close', () => {
-        logger.log('🔌 Monitoring client disconnected');
-        this.clients.delete(ws);
-      });
-
-      ws.on('error', (error) => {
-        logger.error('Monitoring WebSocket error:', error.message);
-        this.clients.delete(ws);
-      });
+    const callMetrics = metrics.getMetrics();
+    this.sendToClient(ws, {
+      type: 'state',
+      payload: {
+        totalCalls: callMetrics.callsStarted || 0,
+        activeCalls: callMetrics.activeCalls || 0
+      }
     });
 
-    server.listen(this.port, () => {
-      logger.log(`🔌 Monitoring server listening on port ${this.port}`);
+    ws.on('message', async (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        await this.handleMessage(ws, message);
+      } catch (error) {
+        logger.error('Monitoring message error:', error.message);
+      }
     });
 
-    // Set up event listeners for real-time updates
+    ws.on('close', () => {
+      logger.log('Monitoring client disconnected');
+      this.clients.delete(ws);
+    });
+
+    ws.on('error', (error) => {
+      logger.error('Monitoring WebSocket error:', error.message);
+      this.clients.delete(ws);
+    });
+  }
+
+  start(app) {
+    if (this.started) return;
+
+    // Preferred mode: reuse main express-ws server and expose /monitor publicly.
+    if (app && typeof app.ws === 'function') {
+      app.ws('/monitor', (ws) => this.handleConnection(ws));
+      logger.log('Monitoring WebSocket attached at /monitor');
+    } else {
+      // Fallback mode for local standalone usage
+      const server = http.createServer();
+      this.wss = new WebSocket.Server({ server });
+      this.wss.on('connection', (ws) => this.handleConnection(ws));
+      server.listen(this.port, () => {
+        logger.log(`Monitoring server listening on port ${this.port}`);
+      });
+    }
+
     this.setupEventListeners();
+    this.started = true;
   }
 
   async handleMessage(ws, message) {
@@ -66,10 +76,13 @@ class MonitoringServer {
         this.sendToClient(ws, {
           type: 'state',
           payload: {
-            totalCalls: callMetrics.totalCalls,
+            totalCalls: callMetrics.callsStarted,
             activeCalls: callMetrics.activeCalls
           }
         });
+        break;
+      case 'ping':
+        this.sendToClient(ws, { type: 'pong', payload: { ts: Date.now() } });
         break;
 
       case 'subscribe_call':
@@ -211,6 +224,7 @@ router.get('/metrics', async (req, res) => {
       ok: true,
       metrics: {
         ...callMetrics,
+        totalCalls: callMetrics.callsStarted || 0,
         activeCalls: activeCalls.length,
         recentCalls: activeCalls.map(call => ({
           id: call.callSid,
@@ -252,8 +266,8 @@ router.get('/transcript/:callUuid', async (req, res) => {
 });
 
 // Start monitoring server
-function startMonitoring() {
-  monitoringServer.start();
+function startMonitoring(app) {
+  monitoringServer.start(app);
 }
 
 // Export monitoring server instance and router

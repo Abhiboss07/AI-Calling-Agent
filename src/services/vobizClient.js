@@ -28,6 +28,18 @@ function getAccountUrl() {
     return `${BASE_URL}/Account/${config.vobiz.authId}`;
 }
 
+function parsePossibleNumber(...values) {
+    for (const value of values) {
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (typeof value === 'string') {
+            const cleaned = value.replace(/[^0-9.-]/g, '');
+            const parsed = Number(cleaned);
+            if (Number.isFinite(parsed)) return parsed;
+        }
+    }
+    return null;
+}
+
 function ensureClient() {
     if (!isConfigured) {
         throw new Error('Vobiz client not configured. Set VOBIZ_AUTH_ID and VOBIZ_AUTH_TOKEN.');
@@ -87,4 +99,54 @@ async function endCall(callUuid) {
     }
 }
 
-module.exports = { makeOutboundCall, endCall, ensureClient };
+async function getWalletSummary() {
+    ensureClient();
+    const headers = getHeaders();
+
+    const candidates = [
+        `${getAccountUrl()}/`,
+        `${getAccountUrl()}/Balance/`,
+        `${getAccountUrl()}/Wallet/`
+    ];
+
+    let payload = null;
+    for (const url of candidates) {
+        try {
+            const resp = await axios.get(url, { headers, timeout: 6000 });
+            payload = resp.data;
+            if (payload) break;
+        } catch (err) {
+            if (err.response?.status === 404) continue;
+            throw err;
+        }
+    }
+
+    if (!payload) {
+        return { ok: false, available: null, currency: 'INR', raw: null };
+    }
+
+    const available = parsePossibleNumber(
+        payload.balance,
+        payload.available_balance,
+        payload.wallet_balance,
+        payload.credits_remaining,
+        payload.credit,
+        payload.amount
+    );
+
+    const spent = parsePossibleNumber(
+        payload.spent,
+        payload.total_spent,
+        payload.debit_used
+    );
+
+    return {
+        ok: true,
+        available,
+        spent,
+        currency: payload.currency || 'INR',
+        raw: payload
+    };
+}
+
+module.exports = { makeOutboundCall, endCall, ensureClient, getWalletSummary };
