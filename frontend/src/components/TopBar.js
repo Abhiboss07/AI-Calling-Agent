@@ -15,8 +15,7 @@ const TopBar = () => {
     const [profileImage, setProfileImage] = useState('');
     const [storedProfile, setStoredProfile] = useState(null);
 
-    // Hide topbar on auth pages
-    if (['/login', '/signup', '/verify'].includes(normalizedPath)) return null;
+    const isAuthPage = ['/login', '/signup', '/verify'].includes(normalizedPath);
 
     useEffect(() => {
         const loadProfile = () => {
@@ -63,6 +62,9 @@ const TopBar = () => {
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     const formatDate = (d) =>
         d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+    // Hide topbar on auth pages
+    if (isAuthPage) return null;
 
     return (
         <div className="topbar">
