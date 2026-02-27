@@ -584,6 +584,9 @@ async function deliverInitialGreeting(session, ws) {
       timestamp: new Date()
     });
 
+    // Move to identify step after greeting is delivered.
+    session.callState.step = 'identify';
+
     startSilenceTimer(session, ws);
 
   } catch (err) {

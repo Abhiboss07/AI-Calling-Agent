@@ -309,7 +309,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
 
     const fastReply = deterministicTurnReply(step, languageCode, customerName, lastTranscript);
     if (fastReply) {
-      return enforceScriptFlow(fastReply, { step, languageCode, customerName, endSignal, lastTranscript });
+      return fastReply;
     }
 
     let systemContent = buildSystemPrompt();
