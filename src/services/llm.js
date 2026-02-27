@@ -185,8 +185,23 @@ function isMeaningfulUtterance(text = '') {
   return words.length >= 2;
 }
 
+function normalizeHeardText(text = '') {
+  const t = String(text || '').trim().toLowerCase();
+  // Common Whisper confusion on phone lines: "news" vs "yes"
+  if (t === 'news' || t === 'news.') return 'yes';
+  return t;
+}
+
+function classifyPurposeIntent(text = '') {
+  const t = normalizeHeardText(text);
+  if (/\b(buy|purchase|looking to buy|own home|kharid|kharidna)\b/i.test(t)) return 'buy';
+  if (/\b(rent|rental|lease|kiraye|rent pe)\b/i.test(t)) return 'rent';
+  if (/\b(invest|investment|investor|returns)\b/i.test(t)) return 'invest';
+  return '';
+}
+
 function deterministicTurnReply(step, languageCode, customerName, transcript) {
-  const safeTranscript = String(transcript || '').trim();
+  const safeTranscript = normalizeHeardText(transcript);
   const greeting = templateByStep('greeting', languageCode, customerName);
   const warmup = templateByStep('warm-up', languageCode, customerName);
 
@@ -225,6 +240,47 @@ function deterministicTurnReply(step, languageCode, customerName, transcript) {
       action: 'collect',
       nextStep: 'purpose',
       reasoning: 'deterministic_warmup'
+    };
+  }
+
+  if (step === 'purpose') {
+    const intent = classifyPurposeIntent(safeTranscript);
+    if (intent === 'buy') {
+      return {
+        ...FALLBACK_RESPONSE,
+        speak: 'Great. Are you looking for an apartment, villa, or plot?',
+        action: 'collect',
+        nextStep: 'property_type',
+        data: { intent: 'buy' },
+        reasoning: 'deterministic_purpose_buy'
+      };
+    }
+    if (intent === 'rent') {
+      return {
+        ...FALLBACK_RESPONSE,
+        speak: 'Understood. Which area and budget range are you considering for rent?',
+        action: 'collect',
+        nextStep: 'location_budget',
+        data: { intent: 'rent' },
+        reasoning: 'deterministic_purpose_rent'
+      };
+    }
+    if (intent === 'invest') {
+      return {
+        ...FALLBACK_RESPONSE,
+        speak: 'Nice. Are you looking for short-term returns or long-term appreciation?',
+        action: 'collect',
+        nextStep: 'investment_timeline',
+        data: { intent: 'invest' },
+        reasoning: 'deterministic_purpose_invest'
+      };
+    }
+    return {
+      ...FALLBACK_RESPONSE,
+      speak: 'I heard you. Are you looking to buy, rent, or invest?',
+      action: 'collect',
+      nextStep: 'purpose',
+      reasoning: 'deterministic_purpose_reask'
     };
   }
 
@@ -295,6 +351,13 @@ function enforceScriptFlow(parsed, context) {
 
   if (safe.speak && safe.speak.length > 150) {
     safe.speak = safe.speak.substring(0, 150);
+  }
+
+  // Do not allow response to jump backward to identify once call has progressed.
+  if ((step === 'purpose' || step === 'property_type' || step === 'location_budget' || step === 'investment_timeline')
+    && safe.nextStep === 'identify') {
+    safe.nextStep = step;
+    safe.reasoning = 'prevent_step_regression';
   }
 
   return safe;
