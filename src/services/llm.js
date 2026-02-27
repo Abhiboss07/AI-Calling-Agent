@@ -185,6 +185,52 @@ function isMeaningfulUtterance(text = '') {
   return words.length >= 2;
 }
 
+function deterministicTurnReply(step, languageCode, customerName, transcript) {
+  const safeTranscript = String(transcript || '').trim();
+  const greeting = templateByStep('greeting', languageCode, customerName);
+  const warmup = templateByStep('warm-up', languageCode, customerName);
+
+  if (step === 'greeting' || step === 'identify') {
+    if (isNegativeIdentity(safeTranscript)) {
+      return {
+        ...FALLBACK_RESPONSE,
+        speak: 'Thanks for letting me know. Sorry for the disturbance. Goodbye.',
+        action: 'hangup',
+        nextStep: 'close',
+        reasoning: 'deterministic_wrong_number'
+      };
+    }
+    if (isAffirmativeIdentity(safeTranscript) || isMeaningfulUtterance(safeTranscript)) {
+      return {
+        ...FALLBACK_RESPONSE,
+        speak: warmup,
+        action: 'collect',
+        nextStep: 'purpose',
+        reasoning: 'deterministic_progress_to_purpose'
+      };
+    }
+    return {
+      ...FALLBACK_RESPONSE,
+      speak: greeting,
+      action: 'collect',
+      nextStep: 'identify',
+      reasoning: 'deterministic_reask_identity'
+    };
+  }
+
+  if (step === 'warm-up') {
+    return {
+      ...FALLBACK_RESPONSE,
+      speak: warmup,
+      action: 'collect',
+      nextStep: 'purpose',
+      reasoning: 'deterministic_warmup'
+    };
+  }
+
+  return null;
+}
+
 function enforceScriptFlow(parsed, context) {
   const safe = {
     ...FALLBACK_RESPONSE,
@@ -260,6 +306,11 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
     const langConfig = getLanguage(languageCode);
     const step = callState?.step || '';
     const endSignal = isConversationEndSignal(lastTranscript || '');
+
+    const fastReply = deterministicTurnReply(step, languageCode, customerName, lastTranscript);
+    if (fastReply) {
+      return enforceScriptFlow(fastReply, { step, languageCode, customerName, endSignal, lastTranscript });
+    }
 
     let systemContent = buildSystemPrompt();
 

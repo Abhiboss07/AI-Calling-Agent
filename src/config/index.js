@@ -56,13 +56,13 @@ module.exports = {
 
   // ── Pipeline tuning constants (M2: centralized, configurable via env) ─────
   pipeline: {
-    vadThreshold: Number(process.env.VAD_THRESHOLD) || 0.009,
-    speechStartChunks: Number(process.env.SPEECH_START_CHUNKS) || 2,
+    vadThreshold: Number(process.env.VAD_THRESHOLD) || 0.007,
+    speechStartChunks: Number(process.env.SPEECH_START_CHUNKS) || 1,
     speechEndChunks: Number(process.env.SPEECH_END_CHUNKS) || 8,
     bargeInMinPlaybackMs: Number(process.env.BARGE_IN_MIN_PLAYBACK_MS) || 1500,
     bargeInRequiredChunks: Number(process.env.BARGE_IN_REQUIRED_CHUNKS) || 10,
     bargeInRmsMultiplier: Number(process.env.BARGE_IN_RMS_MULTIPLIER) || 2.5,
-    minUtteranceBytes: Number(process.env.MIN_UTTERANCE_BYTES) || 4800,
+    minUtteranceBytes: Number(process.env.MIN_UTTERANCE_BYTES) || 2400,
     maxBufferBytes: Number(process.env.MAX_BUFFER_BYTES) || 320000,
     silencePromptMs: Number(process.env.SILENCE_PROMPT_MS) || 7000,
     playbackChunkSize: Number(process.env.PLAYBACK_CHUNK_SIZE) || 160,
