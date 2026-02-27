@@ -141,13 +141,13 @@ function templateByStep(step, languageCode, customerName) {
     if (languageCode === 'hinglish') {
       return `Hi! Main ${agent} ${company} se bol rahi hoon. Kya main ${name} se baat kar rahi hoon?`;
     }
-    return `Hi! This is ${agent} from ${company}. Am I speaking with ${name}?`;
+    return `Hi, ${agent} from ${company}. Is this ${name}?`;
   }
 
   if (step === 'warm-up') {
     if (languageCode === 'hi-IN') return `बहुत अच्छा लगा ${name} से बात करके! आप खरीदना चाहते हैं, किराए पर लेना चाहते हैं, या निवेश करना चाहते हैं?`;
     if (languageCode === 'hinglish') return `Great to speak with you, ${name}! Aap buy, rent, ya investment ke liye dekh rahe hain?`;
-    return `Great to speak with you, ${name}! Are you looking to buy, rent, or invest?`;
+    return `Great. Are you looking to buy, rent, or invest?`;
   }
 
   if (step === 'close' || step === 'summary') {
@@ -179,6 +179,10 @@ function isWhoAreYou(text = '') {
   return /\b(who are you|kaun ho|kon ho|koun hai|who is this|aap kaun)\b/i.test(String(text));
 }
 
+function isAudioCheck(text = '') {
+  return /\b(can you hear me|are you there|hello|sun pa rahe|aawaz aa rahi|voice check)\b/i.test(String(text));
+}
+
 function isMeaningfulUtterance(text = '') {
   const cleaned = String(text).replace(/[^\w\s]/g, ' ').trim();
   const words = cleaned.split(/\s+/).filter(Boolean);
@@ -206,6 +210,15 @@ function deterministicTurnReply(step, languageCode, customerName, transcript) {
   const warmup = templateByStep('warm-up', languageCode, customerName);
 
   if (step === 'greeting' || step === 'identify') {
+    if (isAudioCheck(safeTranscript)) {
+      return {
+        ...FALLBACK_RESPONSE,
+        speak: 'Yes, I can hear you. Are you looking to buy, rent, or invest?',
+        action: 'collect',
+        nextStep: 'purpose',
+        reasoning: 'deterministic_audio_check'
+      };
+    }
     if (isNegativeIdentity(safeTranscript)) {
       return {
         ...FALLBACK_RESPONSE,
@@ -244,6 +257,15 @@ function deterministicTurnReply(step, languageCode, customerName, transcript) {
   }
 
   if (step === 'purpose') {
+    if (isAudioCheck(safeTranscript)) {
+      return {
+        ...FALLBACK_RESPONSE,
+        speak: 'Yes, I can hear you. Please tell me: buy, rent, or invest?',
+        action: 'collect',
+        nextStep: 'purpose',
+        reasoning: 'deterministic_audio_check_purpose'
+      };
+    }
     const intent = classifyPurposeIntent(safeTranscript);
     if (intent === 'buy') {
       return {
