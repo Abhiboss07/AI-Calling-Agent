@@ -801,6 +801,8 @@ function startSilenceTimer(session, ws) {
   clearTimeout(session.silenceTimer);
 
   session.silenceTimer = setTimeout(async () => {
+    if (ws.readyState !== 1) return;
+
     // Don't count silence while pipeline work or playback is still active.
     if (session._ended || session.isSpeaking || session.isProcessing || session.isPlaying) {
       startSilenceTimer(session, ws);
@@ -886,6 +888,7 @@ async function cleanupSession(session, ws, pingInterval) {
   clearInterval(pingInterval);
 
   if (!session) return;
+  session._ended = true;
 
   clearTimeout(session.silenceTimer);
   clearTimeout(session.maxDurationTimer);

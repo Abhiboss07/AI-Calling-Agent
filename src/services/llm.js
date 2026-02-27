@@ -115,6 +115,20 @@ function parseAgentJson(text) {
   }
 }
 
+function parseAgentFieldsLoose(text) {
+  const raw = String(text || '');
+  const speak = (raw.match(/"speak"\s*:\s*"([^"]*)"/i)?.[1] || '').trim();
+  const action = (raw.match(/"action"\s*:\s*"([^"]*)"/i)?.[1] || '').trim();
+  const nextStep = (raw.match(/"nextStep"\s*:\s*"([^"]*)"/i)?.[1] || '').trim();
+  if (!speak && !action && !nextStep) return null;
+  return {
+    ...FALLBACK_RESPONSE,
+    ...(speak ? { speak } : {}),
+    ...(action ? { action } : {}),
+    ...(nextStep ? { nextStep } : {})
+  };
+}
+
 function templateByStep(step, languageCode, customerName) {
   const name = customerName || 'there';
   const agent = config.agentName || 'Agent';
@@ -165,6 +179,12 @@ function isWhoAreYou(text = '') {
   return /\b(who are you|kaun ho|kon ho|koun hai|who is this|aap kaun)\b/i.test(String(text));
 }
 
+function isMeaningfulUtterance(text = '') {
+  const cleaned = String(text).replace(/[^\w\s]/g, ' ').trim();
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  return words.length >= 2;
+}
+
 function enforceScriptFlow(parsed, context) {
   const safe = {
     ...FALLBACK_RESPONSE,
@@ -190,6 +210,11 @@ function enforceScriptFlow(parsed, context) {
       safe.action = 'collect';
       safe.nextStep = 'purpose';
       safe.reasoning = 'identity_confirmed';
+    } else if (isMeaningfulUtterance(transcript) && !isNegativeIdentity(transcript)) {
+      safe.speak = templateByStep('warm-up', languageCode, context?.customerName) || safe.speak;
+      safe.action = 'collect';
+      safe.nextStep = 'purpose';
+      safe.reasoning = 'identity_inferred_from_utterance';
     } else if (isNegativeIdentity(transcript)) {
       safe.speak = 'Thanks for letting me know. Sorry for the disturbance. Goodbye.';
       safe.action = 'hangup';
@@ -303,9 +328,15 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
     try {
       parsed = parseAgentJson(assistant);
     } catch (e) {
-      logger.warn('LLM returned non-JSON, using fallback', assistant.substring(0, 100));
-      const speakText = assistant.replace(/[{}"]/g, '').trim();
-      parsed = { ...FALLBACK_RESPONSE, speak: speakText.length > 5 ? speakText.substring(0, 150) : FALLBACK_RESPONSE.speak };
+      const loose = parseAgentFieldsLoose(assistant);
+      if (loose) {
+        logger.warn('LLM JSON parse failed, using loose field extraction');
+        parsed = loose;
+      } else {
+        logger.warn('LLM returned non-JSON, using fallback', assistant.substring(0, 100));
+        const speakText = assistant.replace(/[{}"]/g, '').trim();
+        parsed = { ...FALLBACK_RESPONSE, speak: speakText.length > 5 ? speakText.substring(0, 150) : FALLBACK_RESPONSE.speak };
+      }
     }
 
     return enforceScriptFlow(parsed, { step, languageCode, customerName, endSignal, lastTranscript });
