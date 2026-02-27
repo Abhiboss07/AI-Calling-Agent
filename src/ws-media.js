@@ -153,6 +153,8 @@ class CallSession {
 
     // Playback state
     this.isPlaying = false;
+    this.playbackStartedAt = 0;
+    this.interruptVoiceChunks = 0;
 
     // Guards
     this._finalized = false;
@@ -167,6 +169,9 @@ const sessions = new Map();
 const config = require('./config');
 const SPEECH_START_CHUNKS = config.pipeline.speechStartChunks;
 const SPEECH_END_CHUNKS = config.pipeline.speechEndChunks;
+const BARGE_IN_MIN_PLAYBACK_MS = config.pipeline.bargeInMinPlaybackMs;
+const BARGE_IN_REQUIRED_CHUNKS = config.pipeline.bargeInRequiredChunks;
+const BARGE_IN_RMS_MULTIPLIER = config.pipeline.bargeInRmsMultiplier;
 const MIN_UTTERANCE_BYTES = config.pipeline.minUtteranceBytes;
 const MAX_BUFFER_BYTES = config.pipeline.maxBufferBytes;
 const SILENCE_PROMPT_MS = config.pipeline.silencePromptMs;
@@ -189,6 +194,8 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
   if (!session.streamSid || ws.readyState !== 1) return;
 
   session.isPlaying = true;
+  session.playbackStartedAt = Date.now();
+  session.interruptVoiceChunks = 0;
   // Use a separate playback counter so we don't invalidate pipeline checks
   session._playbackId = (session._playbackId || 0) + 1;
   const playbackId = session._playbackId;
@@ -247,6 +254,8 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
   } catch (e) { /* ignore */ }
 
   session.isPlaying = false;
+  session.playbackStartedAt = 0;
+  session.interruptVoiceChunks = 0;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -336,7 +345,7 @@ module.exports = function setupWs(app) {
           const rms = computeRms(pcmChunk);
           const hasVoice = rms > VAD_THRESHOLD;
 
-          processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice);
+          processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice, rms);
           return;
         }
 
@@ -406,7 +415,7 @@ module.exports = function setupWs(app) {
           const rms = computeRms(pcmChunk);
           const hasVoice = rms > VAD_THRESHOLD;
 
-          processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice);
+          processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice, rms);
           return;
         }
 
@@ -468,7 +477,7 @@ module.exports = function setupWs(app) {
 // ══════════════════════════════════════════════════════════════════════════════
 // PROCESS AUDIO CHUNK — Shared logic for both binary and JSON media
 // ══════════════════════════════════════════════════════════════════════════════
-function processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice) {
+function processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice, rms = 0) {
   if (hasVoice) {
     session.speechChunkCount++;
     session.silentChunkCount = 0;
@@ -476,14 +485,28 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice) {
 
     // If agent is currently playing audio and user starts speaking → interrupt
     if (session.isPlaying) {
-      logger.log('🔇 User interrupted agent playback', session.callSid);
+      const playbackMs = Date.now() - (session.playbackStartedAt || Date.now());
+      const strongSpeech = rms >= (VAD_THRESHOLD * BARGE_IN_RMS_MULTIPLIER);
+
+      if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && strongSpeech) {
+        session.interruptVoiceChunks++;
+      } else {
+        session.interruptVoiceChunks = 0;
+      }
+
+      if (session.interruptVoiceChunks < BARGE_IN_REQUIRED_CHUNKS) {
+        return;
+      }
+
+      logger.log('User interrupted agent playback', session.callSid, { playbackMs, rms });
       try {
         ws.send(JSON.stringify({ event: 'clearAudio' }));
       } catch (e) { /* ignore */ }
       session.isPlaying = false;
+      session.playbackStartedAt = 0;
+      session.interruptVoiceChunks = 0;
       metrics.incrementInterrupt();
     }
-
     if (!session.isSpeaking && session.speechChunkCount >= SPEECH_START_CHUNKS) {
       session.isSpeaking = true;
       session.speechStartedAt = Date.now();
@@ -507,6 +530,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice) {
   } else {
     session.silentChunkCount++;
     session.speechChunkCount = 0;
+    session.interruptVoiceChunks = 0;
 
     if (session.isSpeaking && session.silentChunkCount >= SPEECH_END_CHUNKS) {
       session.isSpeaking = false;

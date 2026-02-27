@@ -59,6 +59,9 @@ module.exports = {
     vadThreshold: Number(process.env.VAD_THRESHOLD) || 0.008,
     speechStartChunks: Number(process.env.SPEECH_START_CHUNKS) || 3,
     speechEndChunks: Number(process.env.SPEECH_END_CHUNKS) || 12,
+    bargeInMinPlaybackMs: Number(process.env.BARGE_IN_MIN_PLAYBACK_MS) || 1000,
+    bargeInRequiredChunks: Number(process.env.BARGE_IN_REQUIRED_CHUNKS) || 6,
+    bargeInRmsMultiplier: Number(process.env.BARGE_IN_RMS_MULTIPLIER) || 1.8,
     minUtteranceBytes: Number(process.env.MIN_UTTERANCE_BYTES) || 6400,
     maxBufferBytes: Number(process.env.MAX_BUFFER_BYTES) || 320000,
     silencePromptMs: Number(process.env.SILENCE_PROMPT_MS) || 10000,
@@ -73,6 +76,7 @@ module.exports = {
   },
 
   tts: {
+    model: process.env.TTS_MODEL || 'tts-1',
     cacheMaxEntries: Number(process.env.TTS_CACHE_MAX_ENTRIES) || 100,
     cacheMaxBytes: Number(process.env.TTS_CACHE_MAX_BYTES) || 3 * 1024 * 1024 // 3MB
   },

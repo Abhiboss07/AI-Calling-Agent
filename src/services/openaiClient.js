@@ -84,7 +84,7 @@ async function ttsSynthesize(text, voice = 'alloy', format = 'mp3') {
   if (!config.openaiApiKey) throw new Error('OPENAI_API_KEY missing');
 
   const body = {
-    model: 'tts-1-hd',  // FIX C1: was 'gpt-4o-mini-tts' (invalid model)
+    model: config.tts?.model || 'tts-1',
     voice,
     input: text,
     response_format: format === 'pcm' ? 'pcm' : 'mp3'
