@@ -215,7 +215,9 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
 
     const msg = JSON.stringify({
       event: 'playAudio',
+      sampleRate: 8000,
       media: {
+        sampleRate: 8000,
         contentType: 'audio/x-mulaw;rate=8000',
         payload: chunk.toString('base64')
       }
