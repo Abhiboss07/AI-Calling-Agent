@@ -202,10 +202,7 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
   session._playbackId = (session._playbackId || 0) + 1;
   const playbackId = session._playbackId;
 
-  // Clear any previously queued audio first
-  try {
-    ws.send(JSON.stringify({ event: 'clearAudio' }));
-  } catch (e) { /* ignore */ }
+  // Do not clear by default. Clearing before every play can clip/delay prompts.
 
   // Send in real-time 20ms chunks (160 bytes of µ-law at 8kHz).
   // Vobiz playback is more stable when we pace media rather than burst-sending.
@@ -496,18 +493,18 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, hasVoice, rms = 0)
         session.interruptVoiceChunks = 0;
       }
 
-      if (session.interruptVoiceChunks < BARGE_IN_REQUIRED_CHUNKS) {
-        return;
+      // Keep buffering caller speech even before we decide to interrupt playback.
+      // This avoids dropping user words that start during the agent intro.
+      if (session.interruptVoiceChunks >= BARGE_IN_REQUIRED_CHUNKS) {
+        logger.log('User interrupted agent playback', session.callSid, { playbackMs, rms });
+        try {
+          ws.send(JSON.stringify({ event: 'clearAudio' }));
+        } catch (e) { /* ignore */ }
+        session.isPlaying = false;
+        session.playbackStartedAt = 0;
+        session.interruptVoiceChunks = 0;
+        metrics.incrementInterrupt();
       }
-
-      logger.log('User interrupted agent playback', session.callSid, { playbackMs, rms });
-      try {
-        ws.send(JSON.stringify({ event: 'clearAudio' }));
-      } catch (e) { /* ignore */ }
-      session.isPlaying = false;
-      session.playbackStartedAt = 0;
-      session.interruptVoiceChunks = 0;
-      metrics.incrementInterrupt();
     }
     if (!session.isSpeaking && session.speechChunkCount >= SPEECH_START_CHUNKS) {
       session.isSpeaking = true;

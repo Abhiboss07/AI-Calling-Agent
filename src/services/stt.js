@@ -38,8 +38,11 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') 
     const startMs = Date.now();
     metrics.incrementSttRequest(true);
 
-    // Extract Whisper language code (e.g., 'en' from 'en-IN')
-    const whisperLang = language ? language.split('-')[0] : 'en';
+    // Let Whisper auto-detect for English/Hinglish calls for better mixed-language capture.
+    const langCode = (language || '').toLowerCase();
+    const whisperLang = (langCode && !langCode.startsWith('en') && langCode !== 'hinglish')
+      ? language.split('-')[0]
+      : undefined;
     const resp = await openai.transcribeAudio(buffer, mime, whisperLang);
     const latencyMs = Date.now() - startMs;
     const text = (resp.text || '').trim();
