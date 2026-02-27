@@ -40,12 +40,17 @@ setInterval(() => {
 // ══════════════════════════════════════════════════════════════════════════════
 function validateVobizSignature(req, res, next) {
     if (config.nodeEnv !== 'production') return next();
+    const enforceSignature = String(process.env.VOBIZ_ENFORCE_SIGNATURE || 'false').toLowerCase() === 'true';
 
     // Vobiz signs webhooks — verify if signature header is present
     const signature = req.headers['x-vobiz-signature'] || req.headers['x-vobiz-signature-v2'];
     if (!signature) {
-        logger.warn('REJECTED: Missing Vobiz signature', req.originalUrl);
-        return res.status(403).send('Forbidden');
+        if (enforceSignature) {
+            logger.warn('REJECTED: Missing Vobiz signature', req.originalUrl);
+            return res.status(403).send('Forbidden');
+        }
+        logger.warn('Vobiz signature missing; accepting unsigned webhook', req.originalUrl);
+        return next();
     }
 
     // HMAC-SHA256 verification using auth token
@@ -57,12 +62,20 @@ function validateVobizSignature(req, res, next) {
             .digest('base64');
 
         if (signature !== expectedSig) {
-            logger.warn('REJECTED: Invalid Vobiz signature', req.originalUrl);
-            return res.status(403).send('Forbidden');
+            if (enforceSignature) {
+                logger.warn('REJECTED: Invalid Vobiz signature', req.originalUrl);
+                return res.status(403).send('Forbidden');
+            }
+            logger.warn('Vobiz signature mismatch; accepting because VOBIZ_ENFORCE_SIGNATURE=false', req.originalUrl);
+            return next();
         }
     } catch (err) {
-        logger.warn('Signature verification error', err.message);
-        return res.status(403).send('Forbidden');
+        if (enforceSignature) {
+            logger.warn('Signature verification error', err.message);
+            return res.status(403).send('Forbidden');
+        }
+        logger.warn('Signature verification failed; accepting because VOBIZ_ENFORCE_SIGNATURE=false', err.message);
+        return next();
     }
 
     next();
