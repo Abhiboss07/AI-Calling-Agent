@@ -61,6 +61,9 @@ async function chatCompletion(messages, model = 'gpt-4o-mini', opts = {}) {
     temperature: opts.temperature ?? 0.3,
     max_tokens: opts.max_tokens ?? 200
   };
+  if (opts.response_format) {
+    body.response_format = opts.response_format;
+  }
 
   return llmBreaker.exec(async () => {
     const fn = async () => {

@@ -102,6 +102,19 @@ function extractJsonLikePayload(text) {
   return null;
 }
 
+function parseAgentJson(text) {
+  const jsonLike = extractJsonLikePayload(text);
+  if (!jsonLike) throw new Error('No JSON payload found');
+  try {
+    return JSON.parse(jsonLike);
+  } catch (_) {
+    if (jsonLike.startsWith('{') && !jsonLike.endsWith('}')) {
+      return JSON.parse(`${jsonLike}}`);
+    }
+    throw _;
+  }
+}
+
 function templateByStep(step, languageCode, customerName) {
   const name = customerName || 'there';
   const agent = config.agentName || 'Agent';
@@ -271,7 +284,8 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
 
     const resp = await openai.chatCompletion(messages, 'gpt-4o-mini', {
       temperature: 0.2,
-      max_tokens: 90
+      max_tokens: 120,
+      response_format: { type: 'json_object' }
     });
 
     const assistant = resp.choices?.[0]?.message?.content || '';
@@ -287,9 +301,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
 
     let parsed;
     try {
-      const jsonLike = extractJsonLikePayload(assistant);
-      if (!jsonLike) throw new Error('No JSON payload found');
-      parsed = JSON.parse(jsonLike);
+      parsed = parseAgentJson(assistant);
     } catch (e) {
       logger.warn('LLM returned non-JSON, using fallback', assistant.substring(0, 100));
       const speakText = assistant.replace(/[{}"]/g, '').trim();
