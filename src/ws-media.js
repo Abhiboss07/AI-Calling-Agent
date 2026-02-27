@@ -257,6 +257,39 @@ module.exports = function setupWs(app) {
     const queryCallerNumber = req.query?.callerNumber || '';
     const queryLanguage = req.query?.language || config.language?.default || 'en-IN';
 
+    const initializeSession = (fields = {}) => {
+      const callUuid = fields.callUuid || queryCallUuid;
+      const callerNumber = fields.callerNumber || queryCallerNumber;
+      const streamSid = fields.streamSid || `stream_${Date.now()}`;
+      const language = fields.language || queryLanguage;
+
+      if (!callUuid) return null;
+      if (session) return session;
+
+      session = new CallSession(callUuid, callerNumber, language);
+      session.streamSid = streamSid;
+      sessions.set(callUuid, session);
+      costControl.trackCall(callUuid);
+
+      logger.log('Stream started', { callUuid, callerNumber, streamSid, language, mode: fields.mode || 'normal' });
+
+      monitoringServer.notifyCallStarted({
+        callUuid,
+        phoneNumber: callerNumber,
+        direction: 'inbound',
+        startTime: new Date()
+      });
+
+      session.maxDurationTimer = setTimeout(async () => {
+        const langConfig = getLanguage(session.language);
+        logger.warn('Max call duration reached', callUuid);
+        await endCallGracefully(session, ws, langConfig.farewell);
+      }, MAX_CALL_MS);
+
+      deliverInitialGreeting(session, ws);
+      return session;
+    };
+
     // ── WebSocket Heartbeat (detect stale connections) ─────────────────────
     pingInterval = setInterval(() => {
       if (ws.readyState === ws.OPEN) {
@@ -282,6 +315,15 @@ module.exports = function setupWs(app) {
         // Vobiz sends binary audio data and text JSON control messages
         if (Buffer.isBuffer(msgStr)) {
           // Binary frame = raw µ-law audio from caller
+          if (!session) {
+            initializeSession({
+              callUuid: queryCallUuid,
+              callerNumber: queryCallerNumber,
+              streamSid: `stream_${Date.now()}`,
+              language: queryLanguage,
+              mode: 'binary-fallback'
+            });
+          }
           if (!session) return;
 
           const mulawBytes = msgStr;
@@ -302,49 +344,56 @@ module.exports = function setupWs(app) {
         }
 
         // ── START event — initialize session ────────────────────────────
-        if (msg.event === 'start') {
-          const callUuid = msg.start?.callSid || msg.start?.callUuid || queryCallUuid;
-          const callerNumber = msg.start?.customParameters?.callerNumber || queryCallerNumber;
-          const streamSid = msg.streamSid || msg.start?.streamId || `stream_${Date.now()}`;
-          const language = msg.start?.customParameters?.language || queryLanguage;
+        const isStartEvent = msg.event === 'start' || msg.event === 'streamStart' || msg.event === 'startCall';
+        if (isStartEvent) {
+          const callUuid = msg.start?.callSid
+            || msg.start?.callUuid
+            || msg.start?.call_id
+            || msg.start?.call_uuid
+            || msg.callSid
+            || msg.callUuid
+            || msg.call_id
+            || msg.call_uuid
+            || queryCallUuid;
+          const callerNumber = msg.start?.customParameters?.callerNumber
+            || msg.start?.customParameters?.from
+            || msg.start?.callerNumber
+            || msg.start?.from
+            || msg.from
+            || queryCallerNumber;
+          const streamSid = msg.streamSid
+            || msg.start?.streamSid
+            || msg.start?.streamId
+            || msg.stream_id
+            || `stream_${Date.now()}`;
+          const language = msg.start?.customParameters?.language
+            || msg.start?.language
+            || msg.language
+            || queryLanguage;
 
-          if (!callUuid) {
-            logger.error('WS start event missing required fields', { callUuid, streamSid });
+          const created = initializeSession({ callUuid, callerNumber, streamSid, language, mode: 'start-event' });
+          if (!created) {
+            logger.error('WS start event missing required fields', { callUuid, streamSid, event: msg.event });
             ws.close(1003, 'Missing required parameters');
-            return;
           }
-
-          session = new CallSession(callUuid, callerNumber, language);
-          session.streamSid = streamSid;
-          sessions.set(callUuid, session);
-          costControl.trackCall(callUuid);
-
-          logger.log('📞 Stream started', { callUuid, callerNumber, streamSid, language });
-          
-          // Notify monitoring clients of new call
-          monitoringServer.notifyCallStarted({
-            callUuid,
-            phoneNumber: callerNumber,
-            direction: 'inbound',
-            startTime: new Date()
-          });
-
-          // Max call duration safety
-          session.maxDurationTimer = setTimeout(async () => {
-            const langConfig = getLanguage(session.language);
-            logger.warn('⏰ Max call duration reached', callUuid);
-            await endCallGracefully(session, ws, langConfig.farewell);
-          }, MAX_CALL_MS);
-
-          // Deliver the initial greeting via the bidirectional stream
-          deliverInitialGreeting(session, ws);
-
           return;
         }
 
         // ── MEDIA event — JSON-wrapped audio chunks ─────────────────────
-        if (msg.event === 'media' && session) {
-          const payload = msg.media?.payload;
+        const isMediaEvent = msg.event === 'media' || msg.event === 'audio' || msg.event === 'mediaEvent';
+        if (isMediaEvent) {
+          if (!session) {
+            initializeSession({
+              callUuid: msg.callSid || msg.callUuid || msg.call_id || msg.call_uuid || queryCallUuid,
+              callerNumber: msg.from || queryCallerNumber,
+              streamSid: msg.streamSid || msg.stream_id || `stream_${Date.now()}`,
+              language: msg.language || queryLanguage,
+              mode: 'media-fallback'
+            });
+          }
+          if (!session) return;
+
+          const payload = msg.media?.payload || msg.payload;
           if (!payload) return;
 
           const mulawBytes = Buffer.from(payload, 'base64');

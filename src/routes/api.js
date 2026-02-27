@@ -12,6 +12,16 @@ const costControl = require('../services/costControl');
 const storage = require('../services/storage');
 const UploadLog = require('../models/uploadLog.model');
 
+function getPublicBaseUrl(req) {
+  const configured = (config.baseUrl || '').trim();
+  const isConfiguredUsable = configured && !/localhost|127\.0\.0\.1/i.test(configured);
+  if (isConfiguredUsable) return configured.replace(/\/$/, '');
+
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const host = req.headers['x-forwarded-host'] || req.get('host');
+  return `${proto}://${host}`.replace(/\/$/, '');
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // CALLS
 // ──────────────────────────────────────────────────────────────────────────
@@ -111,8 +121,9 @@ router.post('/v1/calls/start', async (req, res) => {
     }
 
     const callLanguage = language || config.language?.default || 'en-IN';
-    const answerUrl = `${config.baseUrl}/vobiz/answer?language=${encodeURIComponent(callLanguage)}`;
-    const hangupUrl = `${config.baseUrl}/vobiz/hangup`;
+    const publicBaseUrl = getPublicBaseUrl(req);
+    const answerUrl = `${publicBaseUrl}/vobiz/answer?language=${encodeURIComponent(callLanguage)}`;
+    const hangupUrl = `${publicBaseUrl}/vobiz/hangup`;
     const vbCall = await vobizClient.makeOutboundCall(cleanPhone, fromNumber || undefined, answerUrl, hangupUrl);
     const call = await Call.create({
       campaignId,

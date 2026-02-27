@@ -74,6 +74,16 @@ function xmlEscape(str) {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
+function getPublicBaseUrl(req) {
+    const configured = (config.baseUrl || '').trim();
+    const isConfiguredUsable = configured && !/localhost|127\.0\.0\.1/i.test(configured);
+    if (isConfiguredUsable) return configured.replace(/\/$/, '');
+
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    return `${proto}://${host}`.replace(/\/$/, '');
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // ANSWER URL WEBHOOK — THE CRITICAL ENTRY POINT
 // ══════════════════════════════════════════════════════════════════════════════
@@ -122,8 +132,9 @@ router.post('/answer', webhookRateLimit(60000, 100), validateVobizSignature, asy
     // ── Build Vobiz XML — respond within 10 seconds ──────────────────────────
     // ARCHITECTURE: <Stream bidirectional="true" keepCallAlive="true"> keeps the
     // call alive. Audio is sent back through the same WebSocket.
-    const statusUrl = `${config.baseUrl}/vobiz/stream-status`;
-    const streamUrl = `${config.baseUrl.replace(/^http/, 'ws')}/stream`;
+    const publicBaseUrl = getPublicBaseUrl(req);
+    const statusUrl = `${publicBaseUrl}/vobiz/stream-status`;
+    const streamUrl = `${publicBaseUrl.replace(/^http/i, 'ws')}/stream`;
 
     const xml = [
         '<?xml version="1.0" encoding="UTF-8"?>',
