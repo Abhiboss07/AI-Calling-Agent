@@ -140,6 +140,18 @@ function isConversationEndSignal(text = '') {
   return /(thank|thanks|dhanyavaad|धन्यवाद|bye|goodbye|not interested|that is all|bas itna|बस इतना|call me later)/i.test(String(text));
 }
 
+function isAffirmativeIdentity(text = '') {
+  return /^(yes|yeah|yep|haan|han|ji|speaking|this is me|i am|myself)\b/i.test(String(text).trim());
+}
+
+function isNegativeIdentity(text = '') {
+  return /\b(no|wrong number|not .*speaking|nahi|nahin|galat number)\b/i.test(String(text));
+}
+
+function isWhoAreYou(text = '') {
+  return /\b(who are you|kaun ho|kon ho|koun hai|who is this|aap kaun)\b/i.test(String(text));
+}
+
 function enforceScriptFlow(parsed, context) {
   const safe = {
     ...FALLBACK_RESPONSE,
@@ -150,12 +162,37 @@ function enforceScriptFlow(parsed, context) {
   const step = context?.step || '';
   const languageCode = context?.languageCode || 'en-IN';
   const scripted = templateByStep(step, languageCode, context?.customerName);
+  const transcript = String(context?.lastTranscript || '').trim();
 
-  if (step === 'greeting' || step === 'identify') {
+  if (step === 'greeting') {
     safe.speak = scripted || safe.speak;
     safe.action = 'collect';
     safe.nextStep = 'identify';
     safe.reasoning = 'scripted_greeting';
+  }
+
+  if (step === 'identify') {
+    if (isAffirmativeIdentity(transcript)) {
+      safe.speak = templateByStep('warm-up', languageCode, context?.customerName) || safe.speak;
+      safe.action = 'collect';
+      safe.nextStep = 'purpose';
+      safe.reasoning = 'identity_confirmed';
+    } else if (isNegativeIdentity(transcript)) {
+      safe.speak = 'Thanks for letting me know. Sorry for the disturbance. Goodbye.';
+      safe.action = 'hangup';
+      safe.nextStep = 'close';
+      safe.reasoning = 'wrong_number';
+    } else if (isWhoAreYou(transcript)) {
+      safe.speak = templateByStep('greeting', languageCode, context?.customerName) || safe.speak;
+      safe.action = 'collect';
+      safe.nextStep = 'identify';
+      safe.reasoning = 'identity_clarification';
+    } else {
+      safe.speak = templateByStep('greeting', languageCode, context?.customerName) || safe.speak;
+      safe.action = 'collect';
+      safe.nextStep = 'identify';
+      safe.reasoning = 'identity_reask';
+    }
   }
 
   if (step === 'warm-up') {
@@ -259,7 +296,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       parsed = { ...FALLBACK_RESPONSE, speak: speakText.length > 5 ? speakText.substring(0, 150) : FALLBACK_RESPONSE.speak };
     }
 
-    return enforceScriptFlow(parsed, { step, languageCode, customerName, endSignal });
+    return enforceScriptFlow(parsed, { step, languageCode, customerName, endSignal, lastTranscript });
   } catch (err) {
     logger.error('LLM error', err.message || err);
     metrics.incrementLlmRequest(false);

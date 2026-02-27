@@ -133,6 +133,7 @@ class CallSession {
     this.isProcessing = false;
     this.currentPipelineId = 0;
     this.lastPipelineId = 0;
+    this.pendingPcmChunks = [];
 
     // Conversation state
     this.callState = { step: 'greeting', turnCount: 0, silenceCount: 0 };
@@ -596,16 +597,8 @@ async function deliverInitialGreeting(session, ws) {
 // ══════════════════════════════════════════════════════════════════════════════
 // TRIGGER PROCESSING (speech → STT → LLM → TTS → play through stream)
 // ══════════════════════════════════════════════════════════════════════════════
-function triggerProcessing(session, ws) {
-  const pcmChunks = session.pcmBuffer.slice();
+function startPipeline(session, ws, pcmChunks) {
   const pipelineId = ++session.lastPipelineId;
-  clearBuffers(session);
-
-  if (session.isProcessing) {
-    logger.log('🔄 Superseding previous pipeline', session.callSid, { old: session.currentPipelineId, new: pipelineId });
-    metrics.incrementInterrupt();
-  }
-
   session.isProcessing = true;
   session.currentPipelineId = pipelineId;
 
@@ -615,7 +608,31 @@ function triggerProcessing(session, ws) {
       if (session.currentPipelineId === pipelineId && session.isProcessing) {
         session.isProcessing = false;
       }
+
+      if (!session.isProcessing && session.pendingPcmChunks.length > 0 && ws.readyState === 1) {
+        const pendingChunks = session.pendingPcmChunks.slice();
+        session.pendingPcmChunks = [];
+        const pendingBytes = pendingChunks.reduce((sum, c) => sum + c.length, 0);
+        if (pendingBytes >= MIN_UTTERANCE_BYTES) {
+          startPipeline(session, ws, pendingChunks);
+        }
+      }
     });
+}
+
+function triggerProcessing(session, ws) {
+  const pcmChunks = session.pcmBuffer.slice();
+  clearBuffers(session);
+
+  if (!pcmChunks.length) return;
+
+  if (session.isProcessing) {
+    session.pendingPcmChunks.push(...pcmChunks);
+    logger.debug('Queued utterance while processing', session.callSid, { chunks: session.pendingPcmChunks.length });
+    return;
+  }
+
+  startPipeline(session, ws, pcmChunks);
 }
 
 function clearBuffers(session) {

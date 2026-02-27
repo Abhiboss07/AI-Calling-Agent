@@ -50,8 +50,10 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') 
     // Filter noise-only transcriptions
     // Whisper sometimes returns short fragments for silence/noise.
     // We allow common greetings and confirmation words so the agent responds.
-    const NOISE_PATTERNS = /^[.\s…]+$|^(thank you\.?|thanks\.?|bye\.?|hmm\.?|uh+\.?|um+\.?)$/i;
-    if (!text || text.length < 2 || NOISE_PATTERNS.test(text)) {
+    const NOISE_PATTERNS = /^[.\s...]+$|^(thank you\.?|thanks\.?|bye\.?|hmm\.?|uh+\.?|um+\.?)$/i;
+    const ALLOWED_SHORT = /^(yes|no|hi|hello|haan|han|ji|hmm|who)\b/i;
+    const isTooShortLikelyNoise = text.length < 4 && !ALLOWED_SHORT.test(text);
+    if (!text || text.length < 2 || NOISE_PATTERNS.test(text) || isTooShortLikelyNoise) {
       logger.debug(`STT: noise filtered "${text}" (${latencyMs}ms)`);
       return { text: '', confidence: 0, empty: true };
     }
