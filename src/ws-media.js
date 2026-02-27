@@ -12,6 +12,7 @@ const costControl = require('./services/costControl');
 const storage = require('./services/storage');
 const { monitoringServer } = require('./services/monitoring');
 const { getLanguage } = require('./config/languages');
+const { retry } = require('./utils/retry');
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MULAW ↔ PCM CONVERSION (Vobiz streams µ-law 8kHz, Whisper needs PCM/WAV)
@@ -786,6 +787,12 @@ function startSilenceTimer(session, ws) {
   clearTimeout(session.silenceTimer);
 
   session.silenceTimer = setTimeout(async () => {
+    // Don't count silence while pipeline work or playback is still active.
+    if (session._ended || session.isSpeaking || session.isProcessing || session.isPlaying) {
+      startSilenceTimer(session, ws);
+      return;
+    }
+
     session.callState.silenceCount++;
     const langConfig = getLanguage(session.language);
 
