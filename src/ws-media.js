@@ -198,10 +198,9 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
     ws.send(JSON.stringify({ event: 'clearAudio' }));
   } catch (e) { /* ignore */ }
 
-  // Send in 20ms chunks (160 bytes of µ-law at 8kHz)
-  // Batch 10 chunks at a time (200ms of audio) then yield to event loop
+  // Send in real-time 20ms chunks (160 bytes of µ-law at 8kHz).
+  // Vobiz playback is more stable when we pace media rather than burst-sending.
   const totalChunks = Math.ceil(mulawBuffer.length / PLAYBACK_CHUNK_SIZE);
-  const BATCH_SIZE = 10;
 
   for (let i = 0; i < totalChunks; i++) {
     if (ws.readyState !== 1 || !session.isPlaying || session._playbackId !== playbackId) {
@@ -215,9 +214,11 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
 
     const msg = JSON.stringify({
       event: 'playAudio',
+      streamSid: session.streamSid,
       contentType: 'audio/x-mulaw',
       sampleRate: 8000,
       media: {
+        streamSid: session.streamSid,
         contentType: 'audio/x-mulaw',
         sampleRate: 8000,
         payload: chunk.toString('base64')
@@ -231,8 +232,9 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
       break;
     }
 
-    if ((i + 1) % BATCH_SIZE === 0 && i + 1 < totalChunks) {
-      await new Promise(r => setImmediate(r));
+    // Pace at ~20ms/frame unless overridden via env config.
+    if (i + 1 < totalChunks) {
+      await new Promise(r => setTimeout(r, PLAYBACK_CHUNK_INTERVAL_MS));
     }
   }
 
