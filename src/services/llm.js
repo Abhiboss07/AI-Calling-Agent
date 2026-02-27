@@ -270,8 +270,8 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
     metrics.incrementLlmRequest(true);
 
     const resp = await openai.chatCompletion(messages, 'gpt-4o-mini', {
-      temperature: 0.3,
-      max_tokens: 150
+      temperature: 0.2,
+      max_tokens: 90
     });
 
     const assistant = resp.choices?.[0]?.message?.content || '';

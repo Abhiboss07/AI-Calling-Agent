@@ -51,7 +51,7 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') 
     // Whisper sometimes returns short fragments for silence/noise.
     // We allow common greetings and confirmation words so the agent responds.
     const NOISE_PATTERNS = /^[.\s...]+$|^(thank you\.?|thanks\.?|bye\.?|hmm\.?|uh+\.?|um+\.?)$/i;
-    const ALLOWED_SHORT = /^(yes|no|hi|hello|haan|han|ji|hmm|who)\b/i;
+    const ALLOWED_SHORT = /^(yes|no|hi|hello|haan|han|ji|hmm|who|you|ok|okay)\b/i;
     const isTooShortLikelyNoise = text.length < 4 && !ALLOWED_SHORT.test(text);
     if (!text || text.length < 2 || NOISE_PATTERNS.test(text) || isTooShortLikelyNoise) {
       logger.debug(`STT: noise filtered "${text}" (${latencyMs}ms)`);
