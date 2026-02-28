@@ -888,9 +888,8 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   });
 
   // Check for cancellation before LLM
-  if (abortSignal.aborted || pipelineId !== session.lastPipelineId ||
-    session.userSpeakingWhileProcessing) {
-    logger.debug('Skipping LLM due to cancellation or overlap', session.callSid);
+  if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
+    logger.debug('Skipping LLM due to cancellation', session.callSid);
     return;
   }
 
@@ -925,13 +924,6 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   for await (const chunk of replyStream) {
     if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
 
-    // Check for overlap continuously
-    const overlapDetected = session.userSpeakingWhileProcessing && session.pendingPcmChunks.length > MIN_UTTERANCE_BYTES * 0.5;
-    if (overlapDetected) {
-      logger.log('Skipping playback due to user overlap', session.callSid);
-      return;
-    }
-
     if (chunk.type === 'sentence') {
       let sentence = chunk.text;
 
@@ -953,10 +945,10 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
       (async () => {
         try {
           for await (const mulawChunk of ttsStream) {
-            if (abortSignal.aborted || pipelineId !== session.lastPipelineId || session.userSpeakingWhileProcessing) return;
+            if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
             await sendAudioThroughStream(session, ws, mulawChunk, { skipPacing: false, fastStart: isFirstSentence });
           }
-        } catch (e) { /* ignore stream dropped errors */ }
+        } catch (e) { logger.error('TTS streaming playback error', e.message); }
       })();
 
       isFirstSentence = false;

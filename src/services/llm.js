@@ -492,13 +492,15 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
         reasoning: 'deterministic_inbound_assist'
       };
       yield { type: 'sentence', text: resp.speak };
-      return resp;
+      yield resp;
+      return;
     }
 
     const fastReply = deterministicTurnReply(step, languageCode, lastTranscript, direction);
     if (fastReply) {
       yield { type: 'sentence', text: fastReply.speak };
-      return fastReply;
+      yield fastReply;
+      return;
     }
 
     let systemContent = buildSystemPrompt();
@@ -549,9 +551,10 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
       { role: 'user', content: userMsg }
     ];
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (!config.openaiApiKey) {
       yield { type: 'sentence', text: FALLBACK_RESPONSE.speak };
-      return { ...FALLBACK_RESPONSE };
+      yield { ...FALLBACK_RESPONSE };
+      return;
     }
 
     metrics.incrementLlmRequest(true);
