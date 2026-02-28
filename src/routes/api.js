@@ -429,15 +429,6 @@ router.get('/v1/wallet', async (req, res) => {
     const sevenDaysAgo = new Date(today);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    // Get Vobiz wallet balance
-    let walletBalance = 0.44; // Default fallback
-    try {
-      const balanceInfo = await vobizClient.getBalance?.() || { balance: 0.44 };
-      walletBalance = balanceInfo.balance || 0.44;
-    } catch (e) {
-      logger.warn('Vobiz balance fetch failed, using cached', e.message);
-    }
-
     // Aggregate call data for today
     const [todayStats, yesterdayStats, weekStats, categoryStats, recentTransactions] = await Promise.all([
       // Today's stats
@@ -498,6 +489,10 @@ router.get('/v1/wallet', async (req, res) => {
     const todayData = todayStats[0] || { totalCalls: 0, totalDuration: 0, connectedCalls: 0 };
     const yesterdayData = yesterdayStats[0] || { totalSpend: 0 };
     const todaySpend = (todayData.totalDuration || 0) * 0.025;
+    
+    // Calculate wallet balance (estimated from call costs)
+    const estimatedSpend = todaySpend + (todayData.totalCalls || 0) * 0.02;
+    const walletBalance = Math.max(0, 10 - estimatedSpend); // Assume ₹10 base, subtract spend
     
     // Build daily breakdown
     const dailyBreakdown = weekStats.map(day => ({
