@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Search, Calendar, Wallet, ChevronDown, LogOut, LifeBuoy, User } from 'lucide-react';
 import { useAuth } from './AuthProvider';
+import { API_BASE, getAuthHeaders } from '../lib/api';
 
 const TopBar = () => {
     const { user, logout } = useAuth();
@@ -14,6 +15,7 @@ const TopBar = () => {
     const [menuOpen, setMenuOpen] = useState(false);
     const [profileImage, setProfileImage] = useState('');
     const [storedProfile, setStoredProfile] = useState(null);
+    const [walletBalance, setWalletBalance] = useState(0);
 
     const isAuthPage = ['/login', '/signup', '/verify'].includes(normalizedPath);
 
@@ -42,6 +44,37 @@ const TopBar = () => {
         return () => {
             window.removeEventListener('ea-profile-updated', loadProfile);
             document.removeEventListener('mousedown', handleOutside);
+        };
+    }, []);
+
+    // Fetch wallet balance
+    useEffect(() => {
+        let mounted = true;
+        
+        const fetchWallet = async () => {
+            try {
+                const res = await fetch(`${API_BASE}/v1/wallet`, {
+                    headers: getAuthHeaders(),
+                    cache: 'no-store'
+                });
+                
+                if (!res.ok) return;
+                
+                const data = await res.json();
+                if (mounted && data?.ok && data?.data) {
+                    setWalletBalance(data.data.currentBalance || 0);
+                }
+            } catch {
+                // Silently fail - keep previous balance
+            }
+        };
+
+        fetchWallet();
+        const id = setInterval(fetchWallet, 30000); // Refresh every 30s
+        
+        return () => {
+            mounted = false;
+            clearInterval(id);
         };
     }, []);
 
@@ -81,9 +114,9 @@ const TopBar = () => {
                     <span>{formatDate(startOfMonth)} - {formatDate(today)}</span>
                 </div>
 
-                <div className="topbar-wallet">
+                <div className="topbar-wallet" onClick={() => router.push('/wallet')} style={{ cursor: 'pointer' }}>
                     <Wallet size={14} />
-                    <span>₹25</span>
+                    <span>₹{walletBalance.toFixed(2)}</span>
                 </div>
 
                 <div className="topbar-user" ref={menuRef}>

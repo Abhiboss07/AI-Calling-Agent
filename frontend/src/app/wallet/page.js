@@ -215,7 +215,7 @@ export default function WalletPage() {
           <div className="spend-change">
             <span className={`change-badge ${isSpendReduced ? 'positive' : 'negative'}`}>
               {isSpendReduced ? <ArrowDownRight size={14} /> : <ArrowUpRight size={14} />}
-              {Math.abs(spendChange)}%
+              {Math.abs(walletData.spendChange)}%
             </span>
             <span className="change-text">vs previous period</span>
           </div>
@@ -239,7 +239,7 @@ export default function WalletPage() {
               <p className="analytics-value">₹{walletData.totalSpend.toFixed(0)}</p>
               <p className="analytics-label">Total Spend</p>
               <span className={`analytics-change ${isSpendReduced ? 'positive' : 'negative'}`}>
-                {isSpendReduced ? '↓' : '↑'} {Math.abs(spendChange)}% vs prev period
+                {isSpendReduced ? '↓' : '↑'} {Math.abs(walletData.spendChange)}% vs prev period
               </span>
             </div>
           </div>
