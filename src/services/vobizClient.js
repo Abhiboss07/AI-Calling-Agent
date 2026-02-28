@@ -67,7 +67,7 @@ async function makeOutboundCall(to, from, answerUrl, hangupUrl) {
         hangup_url: hangupUrl,
         hangup_method: 'POST',
         ring_timeout: 30,
-        machine_detection: 'true'
+        machine_detection: 'false'
     }, { headers: getHeaders() });
 
     const data = resp.data;

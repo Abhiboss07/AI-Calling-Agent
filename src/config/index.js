@@ -89,7 +89,7 @@ module.exports = {
     model: process.env.TTS_MODEL || 'tts-1',
     cacheMaxEntries: envNumber('TTS_CACHE_MAX_ENTRIES', 100),
     cacheMaxBytes: envNumber('TTS_CACHE_MAX_BYTES', 3 * 1024 * 1024),
-    resampleMode: process.env.TTS_RESAMPLE_MODE || 'fast'
+    resampleMode: process.env.TTS_RESAMPLE_MODE || 'sinc'
   },
 
   budget: {

@@ -423,10 +423,10 @@ async function deliverInstantGreeting(session, ws) {
   // Calculate duration
   const greetingDurationMs = Math.max(800, Math.round((mulawBuffer.length / 8000) * 1000));
   
-  // Send audio immediately - use fast start for greeting
+  // Send audio immediately - use moderate pacing for clean playback
   const completed = await sendAudioThroughStream(session, ws, mulawBuffer, { 
-    fastStart: true, 
-    skipPacing: true  // Send greeting as fast as possible
+    fastStart: true
+    // Let pacing happen naturally at 10ms per chunk for clean audio
   });
   
   // Record transcript
