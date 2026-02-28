@@ -780,6 +780,12 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
           durationMs: speechDuration,
           bytes: session.totalPcmBytes
         });
+        // CRITICAL: Reset speech state BEFORE calling triggerProcessing
+        // Without this, every subsequent 20ms chunk re-triggers processing
+        // (since speechStartedAt is still in the past) and cancels the running STT
+        session.isSpeaking = false;
+        session.speechStartedAt = 0;
+        session.speechChunkCount = 0;
         triggerProcessing(session, ws);
         return;
       }
@@ -787,6 +793,10 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       // Buffer overflow protection
       if (session.totalPcmBytes > MAX_BUFFER_BYTES) {
         logger.warn('Buffer overflow, forcing processing', session.callSid);
+        // Reset speech state to prevent re-triggering
+        session.isSpeaking = false;
+        session.speechStartedAt = 0;
+        session.speechChunkCount = 0;
         triggerProcessing(session, ws);
       }
     }
