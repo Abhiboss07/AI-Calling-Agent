@@ -115,8 +115,8 @@ const MIN_UTTERANCE_BYTES = config.pipeline.minUtteranceBytes;
 const MAX_BUFFER_BYTES = config.pipeline.maxBufferBytes;
 const SILENCE_PROMPT_MS = config.pipeline.silencePromptMs;
 const MAX_CALL_MS = config.callMaxMinutes * 60 * 1000;
-const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize;
-const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs;
+const PLAYBACK_CHUNK_SIZE = 640; // Increased chunk size for faster playback
+const PLAYBACK_CHUNK_INTERVAL_MS = 0; // Reduced interval for faster pacing
 const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
 
 // Session management
@@ -265,8 +265,10 @@ class EnhancedCallSession {
 // STREAMING AUDIO PLAYBACK WITH INTERRUPT
 // ═════════════════════════════════════════════════════════════════════════════
 
-async function sendAudioThroughStream(session, ws, mulawBuffer) {
+async function sendAudioThroughStream(session, ws, mulawBuffer, options = {}) {
   if (!session.streamSid || ws.readyState !== 1) return false;
+  
+  const { fastStart = false, skipPacing = false } = options;
   
   session.isPlaying = true;
   session.playbackStartedAt = Date.now();
@@ -274,7 +276,9 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
   session._playbackId = (session._playbackId || 0) + 1;
   const playbackId = session._playbackId;
   
-  const totalChunks = Math.ceil(mulawBuffer.length / PLAYBACK_CHUNK_SIZE);
+  // For fast start, use larger initial chunks
+  const chunkSize = fastStart ? Math.min(640, mulawBuffer.length) : PLAYBACK_CHUNK_SIZE;
+  const totalChunks = Math.ceil(mulawBuffer.length / chunkSize);
   let chunksSent = 0;
   
   for (let i = 0; i < totalChunks; i++) {
@@ -311,8 +315,8 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
       return false; // Playback was interrupted
     }
     
-    const start = i * PLAYBACK_CHUNK_SIZE;
-    const end = Math.min(start + PLAYBACK_CHUNK_SIZE, mulawBuffer.length);
+    const start = i * chunkSize;
+    const end = Math.min(start + chunkSize, mulawBuffer.length);
     const chunk = mulawBuffer.slice(start, end);
     
     const msg = JSON.stringify({
@@ -336,9 +340,13 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
       break;
     }
     
-    // Pace at ~20ms/frame
-    if (i + 1 < totalChunks) {
-      await new Promise(r => setTimeout(r, PLAYBACK_CHUNK_INTERVAL_MS));
+    // Pace at ~real-time, but allow fast start for greeting
+    // Skip pacing entirely if requested (for greeting)
+    if (!skipPacing && i + 1 < totalChunks) {
+      const pacingDelay = fastStart && i < 5 
+        ? Math.max(5, PLAYBACK_CHUNK_INTERVAL_MS / 2)  // Faster at start
+        : PLAYBACK_CHUNK_INTERVAL_MS;
+      await new Promise(r => setTimeout(r, pacingDelay));
     }
   }
   
@@ -415,8 +423,11 @@ async function deliverInstantGreeting(session, ws) {
   // Calculate duration
   const greetingDurationMs = Math.max(800, Math.round((mulawBuffer.length / 8000) * 1000));
   
-  // Send audio immediately
-  const completed = await sendAudioThroughStream(session, ws, mulawBuffer);
+  // Send audio immediately - use fast start for greeting
+  const completed = await sendAudioThroughStream(session, ws, mulawBuffer, { 
+    fastStart: true, 
+    skipPacing: true  // Send greeting as fast as possible
+  });
   
   // Record transcript
   session.transcriptEntries.push({
