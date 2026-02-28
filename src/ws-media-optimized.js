@@ -643,7 +643,10 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   }
 
   const dynamicThreshold = Math.max(VAD_THRESHOLD * 0.6, (session.noiseFloorRms || floor) * 2.2);
-  const hasVoice = rms >= dynamicThreshold;
+  // If the agent is talking, we require a much louder signal to consider it "voice" 
+  // to avoid background hums buffering and triggering STT pipelines.
+  const currentThreshold = session.isPlaying ? Math.max(0.02, dynamicThreshold * 2.5) : dynamicThreshold;
+  const hasVoice = rms >= currentThreshold;
 
   if (hasVoice) {
     session.speechChunkCount++;
@@ -673,10 +676,12 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     // BARGE-IN DETECTION
     if (session.isPlaying) {
       const playbackMs = Date.now() - session.playbackStartedAt;
-      const strongSpeech = rms >= (dynamicThreshold * BARGE_IN_RMS_MULTIPLIER);
 
-      if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS &&
-        (strongSpeech || session.speechChunkCount >= (SPEECH_START_CHUNKS + 1))) {
+      // Require a significantly louder signal to interrupt playback (barge-in)
+      const bargeInThreshold = Math.max(0.025, dynamicThreshold * 3.0);
+      const strongSpeech = rms >= bargeInThreshold;
+
+      if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && strongSpeech) {
         session.interruptVoiceChunks++;
       } else {
         session.interruptVoiceChunks = 0;
