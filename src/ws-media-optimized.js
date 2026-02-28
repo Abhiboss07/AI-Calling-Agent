@@ -271,10 +271,20 @@ class EnhancedCallSession {
 // ═════════════════════════════════════════════════════════════════════════════
 
 async function sendAudioThroughStream(session, ws, mulawBuffer, options = {}) {
-  if (!session.streamSid || ws.readyState !== 1) return false;
+  enqueueAudio(session, ws, mulawBuffer);
+  return true;
+}
 
-  const { fastStart = false, skipPacing = false } = options;
+function enqueueAudio(session, ws, mulawBuffer) {
+  if (!session || ws.readyState !== 1) return;
+  session.playbackQueue.push(mulawBuffer);
+  if (!session.playbackLoopRunning) {
+    runPlaybackLoop(session, ws).catch(e => logger.error('Playback loop error', e.message));
+  }
+}
 
+async function runPlaybackLoop(session, ws) {
+  session.playbackLoopRunning = true;
   session.isPlaying = true;
   session.playbackStartedAt = Date.now();
   session.interruptVoiceChunks = 0;
@@ -316,8 +326,7 @@ async function sendAudioThroughStream(session, ws, mulawBuffer, options = {}) {
     }
   } finally {
     session.playbackLoopRunning = false;
-    // We only send a checkpoint if the queue is fully drained (meaning the segment is completely done playing).
-    // The LLM/TTS generation might just be done, or we might have been interrupted.
+    // We only send a checkpoint if the queue is fully drained
     if (!session.isPlaying || (session.playbackQueue.length === 0 && session.audioResidue.length === 0)) {
       session.isPlaying = false;
       session.playbackStartedAt = 0;
@@ -327,12 +336,6 @@ async function sendAudioThroughStream(session, ws, mulawBuffer, options = {}) {
       } catch (e) { /* ignore */ }
     }
   }
-}
-
-// Alias for old usage, backwards compatible to just enqueue
-async function sendAudioThroughStream(session, ws, mulawBuffer) {
-  enqueueAudio(session, ws, mulawBuffer);
-  return true; // We don't block anymore!
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
