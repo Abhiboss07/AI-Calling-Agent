@@ -967,7 +967,9 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
   if (reply.nextStep) session.callState.step = reply.nextStep;
   updateLeadData(session, reply);
 
-  const overlapDetected = session.userSpeakingWhileProcessing || session.pendingPcmChunks.length > 0 || session.isSpeaking;
+  // Relax overlap detection. Only drop if we received a significant chunk
+  // of NEW meaningful speech while processing, rather than just tiny noise chunks.
+  const overlapDetected = session.userSpeakingWhileProcessing && session.pendingPcmChunks.length > MIN_UTTERANCE_BYTES * 0.5;
   if (overlapDetected) {
     logger.log('Skipping stale reply due to overlapping user speech', {
       callSid: session.callSid,
@@ -996,7 +998,7 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
       return;
     }
 
-    if (session.userSpeakingWhileProcessing || session.pendingPcmChunks.length > 0 || session.isSpeaking) {
+    if (overlapDetected) {
       logger.log('Skipping playback after TTS because user started speaking', session.callSid);
       return;
     }
