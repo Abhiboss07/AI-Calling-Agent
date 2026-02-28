@@ -558,7 +558,8 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
 
     const stream = await openai.chatCompletionStream(messages, 'gpt-4o-mini', {
       temperature: 0.25,
-      max_tokens: 140
+      max_tokens: 140,
+      response_format: { type: 'json_object' }
     });
 
     let fullJson = '';
@@ -649,7 +650,7 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
       }
     }
 
-    return enforceScriptFlow(parsed, {
+    const finalResponse = enforceScriptFlow(parsed, {
       step,
       languageCode,
       customerName,
@@ -657,18 +658,22 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
       lastTranscript,
       callDirection: direction
     });
+    yield finalResponse;
+    return;
   } catch (err) {
     logger.error('LLM stream error', err.message || err);
     metrics.incrementLlmRequest(false);
     const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
     const farewell = (getLanguage(languageCode)?.farewell) || 'Thank you for your time. We will call you back. Goodbye.';
     yield { type: 'sentence', text: farewell };
-    return {
+    const errorResp = {
       ...FALLBACK_RESPONSE,
       speak: farewell,
       action: 'hangup',
       nextStep: 'close'
     };
+    yield errorResp;
+    return;
   }
 }
 
