@@ -118,6 +118,8 @@ const MAX_CALL_MS = config.callMaxMinutes * 60 * 1000;
 const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize || 160;
 const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs || 20;
 const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
+const ECHO_COOLDOWN_MS = 500;  // Discard audio for 500ms after playback ends
+const MAX_SPEECH_DURATION_MS = 8000; // Force processing after 8s of continuous speech
 
 // Session management
 const sessions = new Map();
@@ -233,6 +235,9 @@ class EnhancedCallSession {
     this._finalized = false;
     this._lastPong = Date.now();
 
+    // Echo cool-down: discard audio for a brief period after playback ends
+    this._echoCooldownUntil = 0;
+
     // Timers
     this.silenceTimer = null;
     this.maxDurationTimer = null;
@@ -338,6 +343,9 @@ async function runPlaybackLoop(session, ws) {
       session.isPlaying = false;
       session.playbackStartedAt = 0;
       session.interruptVoiceChunks = 0;
+      // Start echo cool-down: discard audio for ECHO_COOLDOWN_MS after playback ends
+      session._echoCooldownUntil = Date.now() + ECHO_COOLDOWN_MS;
+      logger.debug('Playback ended, echo cool-down started', { callSid: session.callSid, cooldownMs: ECHO_COOLDOWN_MS });
       try {
         ws.send(JSON.stringify({ event: 'checkpoint', name: `speech_${Date.now()}` }));
       } catch (e) { /* ignore */ }
@@ -643,6 +651,16 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     );
   }
 
+  // ECHO COOL-DOWN: discard audio for a brief period after playback ends
+  // This prevents residual echo from being classified as user speech
+  if (session._echoCooldownUntil && Date.now() < session._echoCooldownUntil) {
+    return; // Silently discard
+  }
+  if (session._echoCooldownUntil && Date.now() >= session._echoCooldownUntil) {
+    session._echoCooldownUntil = 0; // Cool-down expired
+    logger.debug('Echo cool-down ended, mic active', { callSid: session.callSid });
+  }
+
   // Update noise floor
   const floor = session.noiseFloorRms || (VAD_THRESHOLD * 0.6);
   if (rms > 0 && rms < (VAD_THRESHOLD * 1.2)) {
@@ -752,6 +770,19 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session.audioChunks.push(mulawBytes);
       session.pcmBuffer.push(pcmChunk);
       session.totalPcmBytes += pcmChunk.length;
+
+      // Max speech duration: force processing after MAX_SPEECH_DURATION_MS
+      // This prevents endless buffering when echo/noise keeps VAD active
+      const speechDuration = Date.now() - session.speechStartedAt;
+      if (speechDuration >= MAX_SPEECH_DURATION_MS) {
+        logger.log('Max speech duration reached, forcing processing', {
+          callSid: session.callSid,
+          durationMs: speechDuration,
+          bytes: session.totalPcmBytes
+        });
+        triggerProcessing(session, ws);
+        return;
+      }
 
       // Buffer overflow protection
       if (session.totalPcmBytes > MAX_BUFFER_BYTES) {
@@ -873,6 +904,14 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   // 1. STT
   const pcmData = Buffer.concat(pcmChunks);
   const wavBuffer = buildWavBuffer(pcmData);
+  const audioDurationSec = Math.max(0, pcmData.length - 44) / 16000;
+
+  logger.debug('STT input', {
+    callSid: session.callSid,
+    pcmBytes: pcmData.length,
+    audioDuration: `${audioDurationSec.toFixed(1)}s`,
+    timeSinceCallStart: `${((Date.now() - session.startTime) / 1000).toFixed(1)}s`
+  });
 
   const sttStart = Date.now();
   let sttResult = await stt.transcribe(wavBuffer, session.callSid, 'audio/wav', session.language);

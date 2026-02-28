@@ -65,6 +65,20 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') 
       return { text: '', confidence: 0, empty: true };
     }
 
+    // Filter known Whisper hallucination phrases (produced on noise/silence input)
+    const WHISPER_HALLUCINATIONS = new Set([
+      'blooper', 'bloopers', 'you', 'bye', 'the end', 'thanks for watching',
+      'thank you for watching', 'subscribe', 'like and subscribe',
+      'please subscribe', 'subtitles by', 'amara.org', 'transcribed by',
+      'music', 'applause', 'laughter', 'silence', 'inaudible',
+      'foreign', 'sigh', 'cough', 'hmm', 'mhm', 'uh', 'um'
+    ]);
+    const lowerText = text.toLowerCase().trim();
+    if (WHISPER_HALLUCINATIONS.has(lowerText)) {
+      logger.debug(`STT: hallucination filtered "${text}" (${latencyMs}ms)`);
+      return { text: '', confidence: 0, empty: true };
+    }
+
     logger.debug(`STT: "${text}" (${latencyMs}ms, ${durationSec.toFixed(1)}s audio)`);
 
     return {
