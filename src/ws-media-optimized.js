@@ -581,8 +581,8 @@ module.exports = function setupWs(app) {
           const sess = initializeSession({ callUuid, callerNumber, streamSid, language, direction });
           
           // Explicitly try to deliver greeting after stream is established
-          if (sess && sess._greetingPending && streamSid) {
-            logger.log('Stream established, delivering pending greeting', { callSid: callUuid, streamSid });
+          if (sess && streamSid) {
+            logger.log('Stream established, delivering greeting', { callSid: callUuid, streamSid });
             deliverInstantGreeting(sess, ws).catch(e => 
               logger.warn('Greeting delivery failed after stream start', e.message)
             );
