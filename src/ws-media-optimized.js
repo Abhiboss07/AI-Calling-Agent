@@ -239,7 +239,10 @@ class EnhancedCallSession {
     // Echo cool-down: discard audio for a brief period after playback ends
     this._echoCooldownUntil = 0;
     // Noise calibration: after cool-down, sample audio to learn noise floor
-    this._noiseCalibrationRemaining = 0;
+    this._noiseCalibrationRemaining = NOISE_CALIBRATION_CHUNKS; // Also calibrate at call start
+
+    // RMS logging
+    this._rmsLogCounter = 0;
 
     // Timers
     this.silenceTimer = null;
@@ -674,11 +677,14 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     // Aggressively track noise floor during calibration (fast convergence)
     session.noiseFloorRms = (session.noiseFloorRms * 0.8) + (rms * 0.2);
     if (session._noiseCalibrationRemaining === 0) {
-      logger.debug('Noise calibration complete', {
+      const calibratedThreshold = Math.max(VAD_THRESHOLD, session.noiseFloorRms * 2.5);
+      logger.log('Noise calibration complete', {
         callSid: session.callSid,
         noiseFloor: session.noiseFloorRms.toFixed(4),
-        dynamicThreshold: (session.noiseFloorRms * 2.5).toFixed(4)
+        dynamicThreshold: calibratedThreshold.toFixed(4)
       });
+      // Restart silence timer from NOW (not from greeting delivery)
+      startSilenceTimer(session, ws);
     }
     return; // Don't process audio during calibration
   }
@@ -698,6 +704,20 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // We completely deafen the microphone while the agent speaks by setting an impossible threshold.
   const currentThreshold = session.isPlaying ? 999.0 : dynamicThreshold;
   const hasVoice = rms >= currentThreshold;
+
+  // Periodic RMS logging (every 250 chunks = ~5 seconds)
+  session._rmsLogCounter = (session._rmsLogCounter || 0) + 1;
+  if (session._rmsLogCounter % 250 === 0) {
+    logger.debug('Audio levels', {
+      callSid: session.callSid,
+      rms: rms.toFixed(4),
+      noiseFloor: (session.noiseFloorRms || 0).toFixed(4),
+      threshold: currentThreshold.toFixed(4),
+      hasVoice,
+      isSpeaking: session.isSpeaking,
+      isPlaying: session.isPlaying
+    });
+  }
 
   if (hasVoice) {
     session.speechChunkCount++;
@@ -773,7 +793,12 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session.isSpeaking = true;
       session.speechStartedAt = Date.now();
       session.fsm.transition('user_speaking');
-      logger.debug('Speech started', session.callSid);
+      logger.log('Speech started', {
+        callSid: session.callSid,
+        rms: rms.toFixed(4),
+        threshold: currentThreshold.toFixed(4),
+        timeSinceCallStart: `${((Date.now() - session.startTime) / 1000).toFixed(1)}s`
+      });
 
       clearTimeout(session.silenceTimer);
 
