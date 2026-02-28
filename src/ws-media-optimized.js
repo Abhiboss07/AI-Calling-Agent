@@ -1084,8 +1084,10 @@ function startSilenceTimer(session, ws) {
   session.silenceTimer = setTimeout(async () => {
     if (ws.readyState !== 1 || session._ended) return;
 
-    // Don't count silence while active
-    if (session.isSpeaking || session.isProcessing || session.isPlaying) {
+    // Don't count silence while active, in cool-down, or calibrating noise floor
+    if (session.isSpeaking || session.isProcessing || session.isPlaying ||
+      (session._echoCooldownUntil && Date.now() < session._echoCooldownUntil) ||
+      session._noiseCalibrationRemaining > 0) {
       startSilenceTimer(session, ws);
       return;
     }
