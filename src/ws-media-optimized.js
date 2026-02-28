@@ -118,8 +118,9 @@ const MAX_CALL_MS = config.callMaxMinutes * 60 * 1000;
 const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize || 160;
 const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs || 20;
 const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
-const ECHO_COOLDOWN_MS = 500;  // Discard audio for 500ms after playback ends
+const ECHO_COOLDOWN_MS = 1500;  // Discard audio for 1500ms after playback ends (Vobiz has no AEC)
 const MAX_SPEECH_DURATION_MS = 8000; // Force processing after 8s of continuous speech
+const NOISE_CALIBRATION_CHUNKS = 25; // ~500ms of audio to calibrate noise floor after cool-down
 
 // Session management
 const sessions = new Map();
@@ -237,6 +238,8 @@ class EnhancedCallSession {
 
     // Echo cool-down: discard audio for a brief period after playback ends
     this._echoCooldownUntil = 0;
+    // Noise calibration: after cool-down, sample audio to learn noise floor
+    this._noiseCalibrationRemaining = 0;
 
     // Timers
     this.silenceTimer = null;
@@ -658,16 +661,36 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   }
   if (session._echoCooldownUntil && Date.now() >= session._echoCooldownUntil) {
     session._echoCooldownUntil = 0; // Cool-down expired
-    logger.debug('Echo cool-down ended, mic active', { callSid: session.callSid });
+    // Start noise calibration phase: sample audio to learn the real noise floor
+    session._noiseCalibrationRemaining = NOISE_CALIBRATION_CHUNKS;
+    session.noiseFloorRms = rms; // Seed with first chunk
+    logger.debug('Echo cool-down ended, starting noise calibration', { callSid: session.callSid, initialRms: rms.toFixed(4) });
   }
 
-  // Update noise floor
+  // NOISE CALIBRATION PHASE: learn ambient noise level before enabling speech detection
+  // Without this, the first chunk after cool-down triggers false speech detection
+  if (session._noiseCalibrationRemaining > 0) {
+    session._noiseCalibrationRemaining--;
+    // Aggressively track noise floor during calibration (fast convergence)
+    session.noiseFloorRms = (session.noiseFloorRms * 0.8) + (rms * 0.2);
+    if (session._noiseCalibrationRemaining === 0) {
+      logger.debug('Noise calibration complete', {
+        callSid: session.callSid,
+        noiseFloor: session.noiseFloorRms.toFixed(4),
+        dynamicThreshold: (session.noiseFloorRms * 2.5).toFixed(4)
+      });
+    }
+    return; // Don't process audio during calibration
+  }
+
+  // Update noise floor (adaptive, uses wider window than before)
   const floor = session.noiseFloorRms || (VAD_THRESHOLD * 0.6);
-  if (rms > 0 && rms < (VAD_THRESHOLD * 1.2)) {
-    session.noiseFloorRms = (floor * 0.95) + (rms * 0.05);
+  if (rms > 0 && rms < (VAD_THRESHOLD * 5)) {
+    session.noiseFloorRms = (floor * 0.97) + (rms * 0.03);
   }
 
-  const dynamicThreshold = Math.max(VAD_THRESHOLD * 0.6, (session.noiseFloorRms || floor) * 2.2);
+  // Dynamic threshold: must be significantly above noise floor to count as speech
+  const dynamicThreshold = Math.max(VAD_THRESHOLD, (session.noiseFloorRms || floor) * 2.5);
 
   // STRICT HALF-DUPLEX ECHO SUPPRESSION:
   // Because Vobiz lacks Acoustic Echo Cancellation (AEC), the agent's playback 
