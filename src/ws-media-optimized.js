@@ -122,6 +122,7 @@ const ECHO_COOLDOWN_MS = 1500;  // Discard audio for 1500ms after playback ends 
 const MAX_SPEECH_DURATION_MS = 8000; // Force processing after 8s of continuous speech
 const NOISE_CALIBRATION_CHUNKS = 25; // ~500ms of audio to calibrate noise floor after cool-down
 const VOICE_MARGIN = 0.08; // Voice must exceed noise floor by this ADDITIVE margin
+const PRE_SPEECH_CHUNKS = config.pipeline.preSpeechChunks || 6;
 
 // Session management
 const sessions = new Map();
