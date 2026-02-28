@@ -332,7 +332,11 @@ async function runPlaybackLoop(session, ws) {
       session.playbackStartedAt = 0;
       session.interruptVoiceChunks = 0;
       try {
-        ws.send(JSON.stringify({ event: 'checkpoint', name: `speech_${Date.now()}` }));
+        ws.send(JSON.stringify({
+          event: 'mark',
+          streamSid: session.streamSid,
+          mark: { name: `speech_${Date.now()}` }
+        }));
       } catch (e) { /* ignore */ }
     }
   }
@@ -701,7 +705,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
 
         // Stop playback
         try {
-          ws.send(JSON.stringify({ event: 'clearAudio' }));
+          ws.send(JSON.stringify({ event: 'clear', streamSid: session.streamSid }));
         } catch (e) { /* ignore */ }
 
         session.isPlaying = false;
@@ -819,7 +823,7 @@ function triggerProcessing(session, ws) {
   // Cancel any playing audio
   if (session.isPlaying) {
     try {
-      ws.send(JSON.stringify({ event: 'clearAudio' }));
+      ws.send(JSON.stringify({ event: 'clear', streamSid: session.streamSid }));
     } catch (e) { /* ignore */ }
     session.isPlaying = false;
   }
