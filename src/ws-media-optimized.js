@@ -709,13 +709,21 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   }
 
   // NOISE CALIBRATION PHASE: learn ambient noise level before enabling speech detection
-  // Without this, the first chunk after cool-down triggers false speech detection
+  // Reject high-RMS samples as echo residue — real ambient noise is below 0.15
   if (session._noiseCalibrationRemaining > 0) {
-    session._noiseCalibrationRemaining--;
-    // Aggressively track noise floor during calibration (fast convergence)
-    session.noiseFloorRms = (session.noiseFloorRms * 0.8) + (rms * 0.2);
+    if (rms < 0.15) {
+      // Good sample — this is real ambient noise
+      session._noiseCalibrationRemaining--;
+      session.noiseFloorRms = (session.noiseFloorRms * 0.7) + (rms * 0.3);
+    } else {
+      // Echo residue still present — extend cool-down
+      session._echoCooldownUntil = Date.now() + 200; // Wait 200ms more
+      session._noiseCalibrationRemaining = NOISE_CALIBRATION_CHUNKS; // Reset calibration
+      session.noiseFloorRms = VAD_THRESHOLD; // Reset to default
+      return;
+    }
     if (session._noiseCalibrationRemaining === 0) {
-      const calibratedThreshold = Math.max(VAD_THRESHOLD, Math.min(session.noiseFloorRms * 2.5, VAD_THRESHOLD * 8));
+      const calibratedThreshold = Math.max(VAD_THRESHOLD, session.noiseFloorRms * 1.5);
       logger.log('Noise calibration complete', {
         callSid: session.callSid,
         noiseFloor: session.noiseFloorRms.toFixed(4),
@@ -727,15 +735,15 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     return; // Don't process audio during calibration
   }
 
-  // Update noise floor (adaptive, uses wider window than before)
+  // Update noise floor (adaptive, only from quiet samples)
   const floor = session.noiseFloorRms || (VAD_THRESHOLD * 0.6);
-  if (rms > 0 && rms < (VAD_THRESHOLD * 5)) {
+  if (rms > 0 && rms < 0.15) {
     session.noiseFloorRms = (floor * 0.97) + (rms * 0.03);
   }
 
-  // Dynamic threshold: must be above noise floor but CAPPED to remain reachable
-  // Cap at VAD_THRESHOLD * 8 (~0.096) so real speech (RMS ~0.03-0.15) can always trigger
-  const dynamicThreshold = Math.max(VAD_THRESHOLD, Math.min((session.noiseFloorRms || floor) * 2.5, VAD_THRESHOLD * 8));
+  // Dynamic threshold: above noise floor so silence detection works
+  // Cap at 0.3 — above this everything is noise and speech detection is meaningless
+  const dynamicThreshold = Math.min(Math.max(VAD_THRESHOLD, (session.noiseFloorRms || floor) * 1.5), 0.3);
 
   const hasVoice = rms >= dynamicThreshold;
 
@@ -858,7 +866,12 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // Speech end detection
   if (session.isSpeaking && session.silentChunkCount >= SPEECH_END_CHUNKS) {
     session.isSpeaking = false;
-    logger.debug('Speech ended', session.callSid, session.totalPcmBytes, 'bytes');
+    logger.log('Speech ended (silence detected)', {
+      callSid: session.callSid,
+      bytes: session.totalPcmBytes,
+      silentChunks: session.silentChunkCount,
+      durationMs: Date.now() - session.speechStartedAt
+    });
 
     const effectiveMinBytes = Math.max(800, Math.floor(MIN_UTTERANCE_BYTES * 0.6));
     if (session.totalPcmBytes >= effectiveMinBytes) {
@@ -895,11 +908,10 @@ function triggerProcessing(session, ws) {
 
   if (!pcmChunks.length) return;
 
-  // Cancel any ongoing operations
+  // If already processing, DON'T cancel — queue the new audio instead
   if (session.isProcessing) {
-    session.cancelOngoingOperations();
     session.pendingPcmChunks.push(...pcmChunks);
-    logger.debug('Queued utterance after cancellation', session.callSid);
+    logger.debug('Queued utterance (pipeline busy)', session.callSid);
     return;
   }
 
@@ -955,7 +967,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   const wavBuffer = buildWavBuffer(pcmData);
   const audioDurationSec = Math.max(0, pcmData.length - 44) / 16000;
 
-  logger.debug('STT input', {
+  logger.log('STT input', {
     callSid: session.callSid,
     pcmBytes: pcmData.length,
     audioDuration: `${audioDurationSec.toFixed(1)}s`,
