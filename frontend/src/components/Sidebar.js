@@ -9,7 +9,8 @@ import {
     Upload,
     Headphones,
     User,
-    Activity
+    Activity,
+    Wallet
 } from 'lucide-react';
 
 const Sidebar = () => {
@@ -22,6 +23,7 @@ const Sidebar = () => {
     const links = [
         { href: '/dashboard', label: 'Live Monitor', icon: Activity },
         { href: '/', label: 'Dashboard', icon: Home },
+        { href: '/wallet', label: 'Wallet', icon: Wallet },
         { href: '/clients', label: 'Voice', icon: Phone },
         { href: '/csv', label: 'Management', icon: Upload },
         { href: '/knowledge-bases', label: 'Knowledge Base', icon: FileText },
