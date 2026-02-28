@@ -643,9 +643,12 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   }
 
   const dynamicThreshold = Math.max(VAD_THRESHOLD * 0.6, (session.noiseFloorRms || floor) * 2.2);
-  // If the agent is talking, we require a much louder signal to consider it "voice" 
-  // to avoid background hums buffering and triggering STT pipelines.
-  const currentThreshold = session.isPlaying ? Math.max(0.02, dynamicThreshold * 2.5) : dynamicThreshold;
+
+  // STRICT HALF-DUPLEX ECHO SUPPRESSION:
+  // Because Vobiz lacks Acoustic Echo Cancellation (AEC), the agent's playback 
+  // bleeds back into the microphone at very high volume levels (RMS 0.25+). 
+  // We completely deafen the microphone while the agent speaks by setting an impossible threshold.
+  const currentThreshold = session.isPlaying ? 999.0 : dynamicThreshold;
   const hasVoice = rms >= currentThreshold;
 
   if (hasVoice) {
