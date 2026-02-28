@@ -659,11 +659,40 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     );
   }
 
-  // ── STRICT HALF-DUPLEX: suppress ALL audio processing during playback ──
-  // Vobiz has no AEC, so the greeting/TTS echo comes back at full volume
-  // (RMS 0.5-0.9). We must skip everything — including calibration — during playback.
+  // ── BARGE-IN DETECTION (must be checked BEFORE suppressing audio during playback) ──
   if (session.isPlaying) {
-    return; // Completely deaf while agent speaks
+    const playbackMs = Date.now() - session.playbackStartedAt;
+    const bargeInThreshold = Math.max(0.04, (session.noiseFloorRms || VAD_THRESHOLD) * 3.5);
+    const strongSpeech = rms >= bargeInThreshold;
+
+    if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && strongSpeech) {
+      session.interruptVoiceChunks++;
+    } else {
+      session.interruptVoiceChunks = 0;
+    }
+
+    // Barge-in: 12 continuous loud chunks (~240ms)
+    if (session.interruptVoiceChunks >= 12) {
+      logger.log('BARGE-IN: Stopping playback', {
+        callSid: session.callSid,
+        playbackMs,
+        rms: rms.toFixed(4),
+        chunks: session.interruptVoiceChunks
+      });
+      try { ws.send(JSON.stringify({ event: 'clearAudio' })); } catch (e) { /* ignore */ }
+      session.isPlaying = false;
+      session.playbackStartedAt = 0;
+      session.interruptVoiceChunks = 0;
+      session.playbackQueue = [];
+      session.audioResidue = Buffer.alloc(0);
+      session.cancelOngoingOperations();
+      session.fsm.handleInterrupt();
+      metrics.incrementInterrupt();
+      // Start echo cool-down after barge-in
+      session._echoCooldownUntil = Date.now() + ECHO_COOLDOWN_MS;
+    } else {
+      return; // Still playing, suppress audio
+    }
   }
 
   // ECHO COOL-DOWN: discard audio for a brief period after playback ends
@@ -748,49 +777,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session.userSpeakingWhileProcessing = true;
     }
 
-    // BARGE-IN DETECTION
-    if (session.isPlaying) {
-      const playbackMs = Date.now() - session.playbackStartedAt;
-
-      // Require a significantly louder signal to interrupt playback (barge-in)
-      const bargeInThreshold = Math.max(0.04, dynamicThreshold * 3.5);
-      const strongSpeech = rms >= bargeInThreshold;
-
-      if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && strongSpeech) {
-        session.interruptVoiceChunks++;
-      } else {
-        session.interruptVoiceChunks = 0;
-      }
-
-      // Immediate interrupt on strong speech (requires 12 continuous chunks ~ 240ms of loud noise)
-      if (session.interruptVoiceChunks >= 12) {
-        logger.log('BARGE-IN: Stopping playback', {
-          callSid: session.callSid,
-          playbackMs,
-          rms,
-          chunks: session.interruptVoiceChunks
-        });
-
-        // Stop playback
-        try {
-          ws.send(JSON.stringify({ event: 'clearAudio' }));
-        } catch (e) { /* ignore */ }
-
-        session.isPlaying = false;
-        session.playbackStartedAt = 0;
-        session.interruptVoiceChunks = 0;
-        session.playbackQueue = [];
-        session.audioResidue = Buffer.alloc(0);
-
-        // Cancel ongoing pipeline
-        session.cancelOngoingOperations();
-
-        // Update FSM
-        session.fsm.handleInterrupt();
-
-        metrics.incrementInterrupt();
-      }
-    }
+    // BARGE-IN is now handled at the top of processAudioChunk
 
     // Speech start detection
     if (!session.isSpeaking && session.speechChunkCount >= SPEECH_START_CHUNKS) {
@@ -800,7 +787,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       logger.log('Speech started', {
         callSid: session.callSid,
         rms: rms.toFixed(4),
-        threshold: currentThreshold.toFixed(4),
+        threshold: dynamicThreshold.toFixed(4),
         timeSinceCallStart: `${((Date.now() - session.startTime) / 1000).toFixed(1)}s`
       });
 
