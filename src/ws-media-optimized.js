@@ -366,6 +366,7 @@ async function deliverInstantGreeting(session, ws) {
   if (!session || session._greetingStarted || session._ended) return;
   if (!session.streamSid || ws.readyState !== 1) {
     session._greetingPending = true;
+    logger.debug('Greeting pending - waiting for stream', { callSid: session.callSid, hasStreamSid: !!session.streamSid, wsState: ws.readyState });
     return;
   }
   
@@ -577,7 +578,15 @@ module.exports = function setupWs(app) {
           const language = msg.start?.customParameters?.language || queryLanguage;
           const direction = msg.start?.customParameters?.direction || queryDirection;
           
-          initializeSession({ callUuid, callerNumber, streamSid, language, direction });
+          const sess = initializeSession({ callUuid, callerNumber, streamSid, language, direction });
+          
+          // Explicitly try to deliver greeting after stream is established
+          if (sess && sess._greetingPending && streamSid) {
+            logger.log('Stream established, delivering pending greeting', { callSid: callUuid, streamSid });
+            deliverInstantGreeting(sess, ws).catch(e => 
+              logger.warn('Greeting delivery failed after stream start', e.message)
+            );
+          }
           return;
         }
         
