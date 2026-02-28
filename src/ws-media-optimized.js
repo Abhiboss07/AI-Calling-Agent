@@ -72,7 +72,7 @@ function buildWavBuffer(pcmData) {
 function pcmBufferToMulaw(pcmBuffer) {
   const numSamples = Math.floor(pcmBuffer.length / 2);
   const mulaw = Buffer.alloc(numSamples);
-  
+
   for (let i = 0; i < numSamples; i++) {
     let sample = pcmBuffer.readInt16LE(i * 2);
     if (sample > MULAW_CLIP) sample = MULAW_CLIP;
@@ -89,7 +89,7 @@ function pcmBufferToMulaw(pcmBuffer) {
     const mantissa = (sample >> (exponent + 3)) & 0x0F;
     mulaw[i] = ~(sign | (exponent << 4) | mantissa) & 0xFF;
   }
-  
+
   return mulaw;
 }
 
@@ -115,8 +115,8 @@ const MIN_UTTERANCE_BYTES = config.pipeline.minUtteranceBytes;
 const MAX_BUFFER_BYTES = config.pipeline.maxBufferBytes;
 const SILENCE_PROMPT_MS = config.pipeline.silencePromptMs;
 const MAX_CALL_MS = config.callMaxMinutes * 60 * 1000;
-const PLAYBACK_CHUNK_SIZE = 640; // Increased chunk size for faster playback
-const PLAYBACK_CHUNK_INTERVAL_MS = 0; // Reduced interval for faster pacing
+const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize || 160;
+const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs || 20;
 const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
 
 // Session management
@@ -133,7 +133,7 @@ let _prewarmInitialized = false;
 async function prewarmCriticalGreetings() {
   if (_prewarmInitialized) return;
   _prewarmInitialized = true;
-  
+
   const phrases = [
     { lang: 'en-IN', dir: 'outbound', text: `Hello, this is ${config.agentName} from ${config.companyName}. Is this a good time to talk?` },
     { lang: 'en-IN', dir: 'inbound', text: `Hello, thank you for calling ${config.companyName}. How may I assist you today?` },
@@ -142,7 +142,7 @@ async function prewarmCriticalGreetings() {
     { lang: 'hi-IN', dir: 'outbound', text: `नमस्ते, मैं ${config.companyName} से ${config.agentName} बोल रही हूँ। क्या अभी बात करने का सही समय है?` },
     { lang: 'hi-IN', dir: 'inbound', text: `नमस्ते, ${config.companyName} में कॉल करने के लिए धन्यवाद। मैं आपकी कैसे मदद कर सकती हूँ?` }
   ];
-  
+
   // Pre-generate all greetings in parallel
   const promises = phrases.map(async ({ lang, dir, text }) => {
     try {
@@ -160,7 +160,7 @@ async function prewarmCriticalGreetings() {
       logger.warn('Failed to prewarm greeting', { lang, dir, error: e.message });
     }
   });
-  
+
   await Promise.allSettled(promises);
 }
 
@@ -179,13 +179,13 @@ class EnhancedCallSession {
     this.streamSid = null;
     this.language = this.normalizeLanguageCode(language);
     this.direction = direction;
-    
+
     // Initialize FSM
     this.fsm = new ConversationFSM(callUuid, direction, this.language, {
       companyName: config.companyName,
       agentName: config.agentName
     });
-    
+
     // Audio buffering
     this.audioChunks = [];
     this.pcmBuffer = [];
@@ -194,7 +194,7 @@ class EnhancedCallSession {
     this.preSpeechPcm = [];
     this.preSpeechBytes = 0;
     this.noiseFloorRms = VAD_THRESHOLD * 0.6;
-    
+
     // State management
     this.isProcessing = false;
     this.isSpeaking = false;
@@ -203,46 +203,46 @@ class EnhancedCallSession {
     this.lastPipelineId = 0;
     this.pendingPcmChunks = [];
     this.userSpeakingWhileProcessing = false;
-    
+
     // Barge-in tracking
     this.playbackStartedAt = 0;
     this.interruptVoiceChunks = 0;
     this.speechChunkCount = 0;
     this.silentChunkCount = 0;
     this.speechStartedAt = 0;
-    
+
     // Pipeline cancellation
     this.abortController = null;
     this.currentLLMPromise = null;
     this.currentTTSPromise = null;
-    
+
     // Timing
     this.startTime = Date.now();
     this.lastVoiceActivityAt = Date.now();
     this.lastActivity = Date.now();
-    
+
     // Flags
     this._greetingStarted = false;
     this._greetingPending = false;
     this._ended = false;
     this._finalized = false;
     this._lastPong = Date.now();
-    
+
     // Timers
     this.silenceTimer = null;
     this.maxDurationTimer = null;
-    
+
     // Transcript
     this.transcriptEntries = [];
   }
-  
+
   normalizeLanguageCode(language) {
     if (!language) return config.language?.default || 'en-IN';
     const raw = String(language).trim().toLowerCase();
     if (raw === 'hinglish' || raw === 'hi-en' || raw === 'en-hi') return 'hinglish';
     return language;
   }
-  
+
   // Cancel any ongoing pipeline operations
   cancelOngoingOperations() {
     if (this.abortController) {
@@ -254,7 +254,7 @@ class EnhancedCallSession {
     this.currentLLMPromise = null;
     this.currentTTSPromise = null;
   }
-  
+
   // Check if pipeline result is still valid
   isPipelineValid(pipelineId) {
     return pipelineId === this.lastPipelineId && !this._ended;
@@ -267,58 +267,58 @@ class EnhancedCallSession {
 
 async function sendAudioThroughStream(session, ws, mulawBuffer, options = {}) {
   if (!session.streamSid || ws.readyState !== 1) return false;
-  
+
   const { fastStart = false, skipPacing = false } = options;
-  
+
   session.isPlaying = true;
   session.playbackStartedAt = Date.now();
   session.interruptVoiceChunks = 0;
   session._playbackId = (session._playbackId || 0) + 1;
   const playbackId = session._playbackId;
-  
+
   // For fast start, use larger initial chunks
   const chunkSize = fastStart ? Math.min(640, mulawBuffer.length) : PLAYBACK_CHUNK_SIZE;
   const totalChunks = Math.ceil(mulawBuffer.length / chunkSize);
   let chunksSent = 0;
-  
+
   for (let i = 0; i < totalChunks; i++) {
     // Check for interruption
     if (ws.readyState !== 1 || !session.isPlaying || session._playbackId !== playbackId) {
-      logger.debug('Playback interrupted', { 
-        callSid: session.callSid, 
-        chunk: i, 
+      logger.debug('Playback interrupted', {
+        callSid: session.callSid,
+        chunk: i,
         total: totalChunks,
         reason: session._playbackId !== playbackId ? 'new_playback' : 'state_change'
       });
       break;
     }
-    
+
     // Check for barge-in
     if (session.interruptVoiceChunks >= BARGE_IN_REQUIRED_CHUNKS) {
-      logger.log('Barge-in detected during playback', { 
-        callSid: session.callSid, 
-        chunks: session.interruptVoiceChunks 
+      logger.log('Barge-in detected during playback', {
+        callSid: session.callSid,
+        chunks: session.interruptVoiceChunks
       });
-      
+
       // Send clear audio command
       try {
         ws.send(JSON.stringify({ event: 'clearAudio' }));
       } catch (e) { /* ignore */ }
-      
+
       session.isPlaying = false;
       session.fsm.handleInterrupt();
       metrics.incrementInterrupt();
-      
+
       // Cancel ongoing operations
       session.cancelOngoingOperations();
-      
+
       return false; // Playback was interrupted
     }
-    
+
     const start = i * chunkSize;
     const end = Math.min(start + chunkSize, mulawBuffer.length);
     const chunk = mulawBuffer.slice(start, end);
-    
+
     const msg = JSON.stringify({
       event: 'playAudio',
       streamSid: session.streamSid,
@@ -331,7 +331,7 @@ async function sendAudioThroughStream(session, ws, mulawBuffer, options = {}) {
         payload: chunk.toString('base64')
       }
     });
-    
+
     try {
       ws.send(msg);
       chunksSent++;
@@ -339,17 +339,22 @@ async function sendAudioThroughStream(session, ws, mulawBuffer, options = {}) {
       logger.warn('Stream send error', err.message);
       break;
     }
-    
+
     // Pace at ~real-time, but allow fast start for greeting
-    // Skip pacing entirely if requested (for greeting)
     if (!skipPacing && i + 1 < totalChunks) {
-      const pacingDelay = fastStart && i < 5 
-        ? Math.max(5, PLAYBACK_CHUNK_INTERVAL_MS / 2)  // Faster at start
-        : PLAYBACK_CHUNK_INTERVAL_MS;
-      await new Promise(r => setTimeout(r, pacingDelay));
+      // Drift-compensated pacing
+      let interval = PLAYBACK_CHUNK_INTERVAL_MS;
+      if (fastStart && i < 5) interval = Math.max(5, interval / 2); // Faster at start
+
+      const expectedTime = session.playbackStartedAt + (i + 1) * interval;
+      const delay = expectedTime - Date.now();
+
+      if (delay > 0) {
+        await new Promise(r => setTimeout(r, delay));
+      }
     }
   }
-  
+
   // Send checkpoint
   try {
     ws.send(JSON.stringify({
@@ -357,12 +362,12 @@ async function sendAudioThroughStream(session, ws, mulawBuffer, options = {}) {
       name: `speech_${Date.now()}`
     }));
   } catch (e) { /* ignore */ }
-  
+
   const completed = chunksSent === totalChunks;
   session.isPlaying = false;
   session.playbackStartedAt = 0;
   session.interruptVoiceChunks = 0;
-  
+
   return completed;
 }
 
@@ -377,33 +382,33 @@ async function deliverInstantGreeting(session, ws) {
     logger.debug('Greeting pending - waiting for stream', { callSid: session.callSid, hasStreamSid: !!session.streamSid, wsState: ws.readyState });
     return;
   }
-  
+
   session._greetingStarted = true;
   session._greetingPending = false;
-  
+
   const cacheKey = `${session.language}:${session.direction}`;
   const cached = greetingCache.get(cacheKey);
-  
+
   let greetingText;
   let mulawBuffer;
-  
+
   if (cached?.buffer) {
     // Use prewarmed greeting
     greetingText = cached.text;
     mulawBuffer = cached.buffer;
-    logger.log('Using prewarmed greeting', { 
-      callSid: session.callSid, 
+    logger.log('Using prewarmed greeting', {
+      callSid: session.callSid,
       lang: session.language,
-      size: mulawBuffer.length 
+      size: mulawBuffer.length
     });
   } else {
     // Fallback: generate on-the-fly (should rarely happen)
     greetingText = session.fsm.getIntroText();
-    logger.log('Generating greeting on-the-fly', { 
+    logger.log('Generating greeting on-the-fly', {
       callSid: session.callSid,
-      lang: session.language 
+      lang: session.language
     });
-    
+
     try {
       const ttsResult = await tts.synthesizeRaw(greetingText, session.callSid, session.language);
       if (!ttsResult?.mulawBuffer) {
@@ -416,19 +421,19 @@ async function deliverInstantGreeting(session, ws) {
       return;
     }
   }
-  
+
   // Transition FSM to INTRODUCING
   session.fsm.transition('call_answered');
-  
+
   // Calculate duration
   const greetingDurationMs = Math.max(800, Math.round((mulawBuffer.length / 8000) * 1000));
-  
+
   // Send audio immediately - use moderate pacing for clean playback
-  const completed = await sendAudioThroughStream(session, ws, mulawBuffer, { 
+  const completed = await sendAudioThroughStream(session, ws, mulawBuffer, {
     fastStart: true
     // Let pacing happen naturally at 10ms per chunk for clean audio
   });
-  
+
   // Record transcript
   session.transcriptEntries.push({
     startMs: 0,
@@ -437,19 +442,19 @@ async function deliverInstantGreeting(session, ws) {
     text: greetingText,
     confidence: 1.0
   });
-  
+
   // Transition based on completion
   if (completed) {
     session.fsm.transition('intro_complete');
   }
-  
+
   // Start silence timer
   startSilenceTimer(session, ws);
-  
-  logger.log('Greeting delivered', { 
-    callSid: session.callSid, 
+
+  logger.log('Greeting delivered', {
+    callSid: session.callSid,
     duration: greetingDurationMs,
-    completed 
+    completed
   });
 }
 
@@ -461,12 +466,12 @@ module.exports = function setupWs(app) {
   app.ws('/stream', function (ws, req) {
     let session = null;
     let pingInterval = null;
-    
+
     const queryCallUuid = req.query?.callUuid;
     const queryCallerNumber = req.query?.callerNumber || '';
     const queryLanguage = req.query?.language || config.language?.default || 'en-IN';
     const queryDirection = req.query?.direction === 'outbound' ? 'outbound' : 'inbound';
-    
+
     // Initialize session
     const initializeSession = (fields = {}) => {
       const callUuid = fields.callUuid || queryCallUuid;
@@ -474,9 +479,9 @@ module.exports = function setupWs(app) {
       const streamSid = fields.streamSid || null;
       const language = fields.language || queryLanguage;
       const direction = fields.direction || queryDirection;
-      
+
       if (!callUuid) return null;
-      
+
       if (session) {
         // Update existing session
         if (streamSid && session.streamSid !== streamSid) {
@@ -487,23 +492,23 @@ module.exports = function setupWs(app) {
         }
         session.language = language || session.language;
         session.direction = direction || session.direction;
-        
+
         // Try to deliver greeting if pending
         if (session._greetingPending && session.streamSid) {
-          deliverInstantGreeting(session, ws).catch(e => 
+          deliverInstantGreeting(session, ws).catch(e =>
             logger.warn('Greeting delivery failed', e.message)
           );
         }
-        
+
         return session;
       }
-      
+
       // Create new session
       session = new EnhancedCallSession(callUuid, callerNumber, language, direction);
       session.streamSid = streamSid;
       sessions.set(callUuid, session);
       costControl.trackCall(callUuid);
-      
+
       logger.log('Call session started', {
         callUuid,
         callerNumber,
@@ -511,21 +516,21 @@ module.exports = function setupWs(app) {
         language,
         direction
       });
-      
+
       // Set max duration timer
       session.maxDurationTimer = setTimeout(async () => {
         logger.warn('Max call duration reached', callUuid);
         await endCallGracefully(session, ws, getLanguage(session.language).farewell);
       }, MAX_CALL_MS);
-      
+
       // Attempt immediate greeting delivery
-      deliverInstantGreeting(session, ws).catch(e => 
+      deliverInstantGreeting(session, ws).catch(e =>
         logger.warn('Initial greeting failed', e.message)
       );
-      
+
       return session;
     };
-    
+
     // Pre-initialize if callUuid is in query
     if (queryCallUuid) {
       initializeSession({
@@ -535,7 +540,7 @@ module.exports = function setupWs(app) {
         direction: queryDirection
       });
     }
-    
+
     // Heartbeat
     pingInterval = setInterval(() => {
       if (ws.readyState === ws.OPEN) {
@@ -550,11 +555,11 @@ module.exports = function setupWs(app) {
         clearInterval(pingInterval);
       }
     }, 15000);
-    
+
     ws.on('pong', () => {
       if (session) session._lastPong = Date.now();
     });
-    
+
     // Message handler
     ws.on('message', async (msgStr) => {
       try {
@@ -562,29 +567,29 @@ module.exports = function setupWs(app) {
         if (Buffer.isBuffer(msgStr)) {
           initializeSession({ mode: 'binary' });
           if (!session) return;
-          
+
           const mulawBytes = msgStr;
           const pcmChunk = mulawToPcm16(mulawBytes);
           const rms = computeRms(pcmChunk);
-          
+
           processAudioChunk(session, ws, mulawBytes, pcmChunk, rms);
           return;
         }
-        
+
         const msg = JSON.parse(msgStr);
-        
+
         // Connected event
         if (msg.event === 'connected') {
           logger.log('WS connected', msg.protocol);
           return;
         }
-        
+
         // Start event
         if (msg.event === 'start' || msg.event === 'streamStart') {
           const callUuid = msg.start?.callSid || msg.start?.callUuid || queryCallUuid;
-          const callerNumber = msg.start?.customParameters?.callerNumber || 
-                              msg.start?.customParameters?.from || 
-                              msg.start?.from || queryCallerNumber;
+          const callerNumber = msg.start?.customParameters?.callerNumber ||
+            msg.start?.customParameters?.from ||
+            msg.start?.from || queryCallerNumber;
           const streamSid = msg.streamSid
             || msg.start?.streamSid
             || msg.start?.streamId
@@ -592,59 +597,59 @@ module.exports = function setupWs(app) {
             || `stream_${Date.now()}`;
           const language = msg.start?.customParameters?.language || queryLanguage;
           const direction = msg.start?.customParameters?.direction || queryDirection;
-          
+
           const sess = initializeSession({ callUuid, callerNumber, streamSid, language, direction });
-          
+
           // Explicitly try to deliver greeting after stream is established
           if (sess && streamSid) {
             logger.log('Stream established, delivering greeting', { callSid: callUuid, streamSid });
-            deliverInstantGreeting(sess, ws).catch(e => 
+            deliverInstantGreeting(sess, ws).catch(e =>
               logger.warn('Greeting delivery failed after stream start', e.message)
             );
           }
           return;
         }
-        
+
         // Media event
         if (msg.event === 'media' || msg.event === 'audio') {
           const callUuid = msg.callSid || msg.callUuid || queryCallUuid;
           const payload = msg.media?.payload || msg.payload;
           if (!payload) return;
-          
+
           initializeSession({ callUuid, mode: 'media' });
           if (!session) return;
-          
+
           const mulawBytes = Buffer.from(payload, 'base64');
           const pcmChunk = mulawToPcm16(mulawBytes);
           const rms = computeRms(pcmChunk);
-          
+
           processAudioChunk(session, ws, mulawBytes, pcmChunk, rms);
           return;
         }
-        
+
         // Stop event
         if (msg.event === 'stop') {
           logger.log('Stream stop received', session?.callSid);
           await cleanupSession(session, ws, pingInterval);
           return;
         }
-        
+
         // Checkpoint
         if (msg.event === 'checkpoint' || msg.event === 'mark') {
           logger.debug('Audio checkpoint reached', msg.name);
         }
-        
+
       } catch (err) {
         logger.error('WS message handler error', err.message);
         metrics.incrementWsError();
       }
     });
-    
+
     ws.on('close', async (code, reason) => {
       logger.log('WS closed', { callSid: session?.callSid, code, reason: reason?.toString() });
       await cleanupSession(session, ws, pingInterval);
     });
-    
+
     ws.on('error', (err) => {
       logger.error('WS error', session?.callSid, err.message);
       metrics.incrementWsError();
@@ -659,31 +664,31 @@ module.exports = function setupWs(app) {
 function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // Try to deliver pending greeting
   if (session._greetingPending && session.streamSid) {
-    deliverInstantGreeting(session, ws).catch(e => 
+    deliverInstantGreeting(session, ws).catch(e =>
       logger.warn('Greeting delivery failed', e.message)
     );
   }
-  
+
   // Update noise floor
   const floor = session.noiseFloorRms || (VAD_THRESHOLD * 0.6);
   if (rms > 0 && rms < (VAD_THRESHOLD * 1.2)) {
     session.noiseFloorRms = (floor * 0.95) + (rms * 0.05);
   }
-  
+
   const dynamicThreshold = Math.max(VAD_THRESHOLD * 0.6, (session.noiseFloorRms || floor) * 2.2);
   const hasVoice = rms >= dynamicThreshold;
-  
+
   if (hasVoice) {
     session.speechChunkCount++;
     session.silentChunkCount = 0;
     session.lastVoiceActivityAt = Date.now();
-    
+
     let bufferedInPreSpeech = false;
     if (!session.isSpeaking) {
       session.preSpeechMulaw.push(mulawBytes);
       session.preSpeechPcm.push(pcmChunk);
       session.preSpeechBytes += pcmChunk.length;
-      
+
       // Trim pre-speech buffer
       if (session.preSpeechMulaw.length > 6) {
         session.preSpeechMulaw.shift();
@@ -692,24 +697,24 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       }
       bufferedInPreSpeech = true;
     }
-    
+
     // Track user speaking during processing
     if (session.isProcessing) {
       session.userSpeakingWhileProcessing = true;
     }
-    
+
     // BARGE-IN DETECTION
     if (session.isPlaying) {
       const playbackMs = Date.now() - session.playbackStartedAt;
       const strongSpeech = rms >= (dynamicThreshold * BARGE_IN_RMS_MULTIPLIER);
-      
-      if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && 
-          (strongSpeech || session.speechChunkCount >= (SPEECH_START_CHUNKS + 1))) {
+
+      if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS &&
+        (strongSpeech || session.speechChunkCount >= (SPEECH_START_CHUNKS + 1))) {
         session.interruptVoiceChunks++;
       } else {
         session.interruptVoiceChunks = 0;
       }
-      
+
       // Immediate interrupt on strong speech
       if (session.interruptVoiceChunks >= BARGE_IN_REQUIRED_CHUNKS) {
         logger.log('BARGE-IN: Stopping playback', {
@@ -718,35 +723,35 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
           rms,
           chunks: session.interruptVoiceChunks
         });
-        
+
         // Stop playback
         try {
           ws.send(JSON.stringify({ event: 'clearAudio' }));
         } catch (e) { /* ignore */ }
-        
+
         session.isPlaying = false;
         session.playbackStartedAt = 0;
         session.interruptVoiceChunks = 0;
-        
+
         // Cancel ongoing pipeline
         session.cancelOngoingOperations();
-        
+
         // Update FSM
         session.fsm.handleInterrupt();
-        
+
         metrics.incrementInterrupt();
       }
     }
-    
+
     // Speech start detection
     if (!session.isSpeaking && session.speechChunkCount >= SPEECH_START_CHUNKS) {
       session.isSpeaking = true;
       session.speechStartedAt = Date.now();
       session.fsm.transition('user_speaking');
       logger.debug('Speech started', session.callSid);
-      
+
       clearTimeout(session.silenceTimer);
-      
+
       // Flush pre-speech buffer
       if (session.preSpeechPcm.length > 0) {
         session.audioChunks.push(...session.preSpeechMulaw);
@@ -757,50 +762,50 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
         session.preSpeechBytes = 0;
       }
     }
-    
+
     // Buffer speech audio
     if (session.isSpeaking && !bufferedInPreSpeech) {
       session.audioChunks.push(mulawBytes);
       session.pcmBuffer.push(pcmChunk);
       session.totalPcmBytes += pcmChunk.length;
-      
+
       // Buffer overflow protection
       if (session.totalPcmBytes > MAX_BUFFER_BYTES) {
         logger.warn('Buffer overflow, forcing processing', session.callSid);
         triggerProcessing(session, ws);
       }
     }
-    
+
     return;
   }
-  
+
   // Silence detected
   session.silentChunkCount++;
   session.speechChunkCount = 0;
   session.interruptVoiceChunks = 0;
-  
+
   // Clear pre-speech cache after short silence
   if (session.silentChunkCount >= 2) {
     session.preSpeechMulaw = [];
     session.preSpeechPcm = [];
     session.preSpeechBytes = 0;
   }
-  
+
   // Speech end detection
   if (session.isSpeaking && session.silentChunkCount >= SPEECH_END_CHUNKS) {
     session.isSpeaking = false;
     logger.debug('Speech ended', session.callSid, session.totalPcmBytes, 'bytes');
-    
+
     const effectiveMinBytes = Math.max(800, Math.floor(MIN_UTTERANCE_BYTES * 0.6));
     if (session.totalPcmBytes >= effectiveMinBytes) {
       triggerProcessing(session, ws);
     } else {
       clearBuffers(session);
     }
-    
+
     startSilenceTimer(session, ws);
   }
-  
+
   // Start silence timer if not speaking
   if (!session.isSpeaking && !session.silenceTimer) {
     startSilenceTimer(session, ws);
@@ -823,9 +828,9 @@ function clearBuffers(session) {
 function triggerProcessing(session, ws) {
   const pcmChunks = session.pcmBuffer.slice();
   clearBuffers(session);
-  
+
   if (!pcmChunks.length) return;
-  
+
   // Cancel any ongoing operations
   if (session.isProcessing) {
     session.cancelOngoingOperations();
@@ -833,7 +838,7 @@ function triggerProcessing(session, ws) {
     logger.debug('Queued utterance after cancellation', session.callSid);
     return;
   }
-  
+
   // Cancel any playing audio
   if (session.isPlaying) {
     try {
@@ -841,7 +846,7 @@ function triggerProcessing(session, ws) {
     } catch (e) { /* ignore */ }
     session.isPlaying = false;
   }
-  
+
   startPipeline(session, ws, pcmChunks);
 }
 
@@ -851,7 +856,7 @@ function startPipeline(session, ws, pcmChunks) {
   session.currentPipelineId = pipelineId;
   session.userSpeakingWhileProcessing = false;
   session.abortController = new AbortController();
-  
+
   processUtterance(session, ws, pcmChunks, pipelineId, session.abortController.signal)
     .catch(err => logger.error('Pipeline error', session.callSid, err.message))
     .finally(() => {
@@ -859,7 +864,7 @@ function startPipeline(session, ws, pcmChunks) {
         session.isProcessing = false;
         session.abortController = null;
       }
-      
+
       // Process any pending chunks
       if (!session.isProcessing && session.pendingPcmChunks.length > 0 && ws.readyState === 1) {
         const pending = session.pendingPcmChunks.slice();
@@ -874,36 +879,36 @@ function startPipeline(session, ws, pcmChunks) {
 
 async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal) {
   const pipelineStart = Date.now();
-  
+
   // Check for cancellation
   if (abortSignal.aborted) {
     logger.debug('Pipeline cancelled before STT', session.callSid);
     return;
   }
-  
+
   // 1. STT
   const pcmData = Buffer.concat(pcmChunks);
   const wavBuffer = buildWavBuffer(pcmData);
-  
+
   const sttStart = Date.now();
   let sttResult = await stt.transcribe(wavBuffer, session.callSid, 'audio/wav', session.language);
-  
+
   if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
     logger.debug('Pipeline cancelled after STT', session.callSid);
     return;
   }
-  
+
   const sttLatency = Date.now() - sttStart;
-  
+
   if (sttResult.empty || !sttResult.text) {
     logger.debug('STT returned empty, skipping', session.callSid);
     return;
   }
-  
+
   // 2. FSM Intent Processing
   const fsmResult = session.fsm.processTranscript(sttResult.text);
   logger.log(`STT (${sttLatency}ms): "${sttResult.text}" | Intent: ${fsmResult.intent || fsmResult.data?.intent} | State: ${session.fsm.getState()}`);
-  
+
   // Record transcript
   session.transcriptEntries.push({
     startMs: Date.now() - session.startTime - sttLatency,
@@ -912,17 +917,17 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     text: sttResult.text,
     confidence: sttResult.confidence
   });
-  
+
   // Check for cancellation before LLM
-  if (abortSignal.aborted || pipelineId !== session.lastPipelineId || 
-      session.userSpeakingWhileProcessing) {
+  if (abortSignal.aborted || pipelineId !== session.lastPipelineId ||
+    session.userSpeakingWhileProcessing) {
     logger.debug('Skipping LLM due to cancellation or overlap', session.callSid);
     return;
   }
-  
+
   // 3. LLM with FSM context
   const llmStart = Date.now();
-  
+
   const reply = await llm.generateReply({
     callState: session.fsm.getLLMContext(),
     script: { companyName: config.companyName },
@@ -933,14 +938,14 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     callDirection: session.direction,
     honorific: session.fsm.leadData.honorific || 'sir_maam'
   });
-  
+
   if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
     logger.debug('Pipeline cancelled after LLM', session.callSid);
     return;
   }
-  
+
   const llmLatency = Date.now() - llmStart;
-  
+
   // Cost guard: compress response if burn rate is high
   let speakText = reply.speak || '';
   const burnRate = costControl.getEstimatedBurnRatePerMin(session.callSid);
@@ -949,51 +954,54 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     speakText = speakText.substring(0, cap);
     logger.warn('Cost guard active', { callSid: session.callSid, burnRate: burnRate.toFixed(2), cap });
   }
-  
+
   // Truncate if still too long
   if (speakText.length > 140) {
     speakText = speakText.substring(0, 140);
   }
-  
+
   logger.log(`LLM (${llmLatency}ms): "${speakText}" | Action: ${reply.action}`);
-  
+
+  // Relax overlap detection
+  const overlapDetected = session.userSpeakingWhileProcessing && session.pendingPcmChunks.length > MIN_UTTERANCE_BYTES * 0.5;
+
   // Check for user overlap before TTS
-  if (session.userSpeakingWhileProcessing || session.pendingPcmChunks.length > 0 || session.isSpeaking) {
+  if (overlapDetected) {
     logger.log('Skipping TTS due to user overlap', session.callSid);
     return;
   }
-  
+
   // 4. TTS & Playback
   if (speakText && ws.readyState === 1) {
     const ttsStart = Date.now();
-    
+
     if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
       return;
     }
-    
+
     const ttsResult = await tts.synthesizeRaw(speakText, session.callSid, session.language);
     const ttsLatency = Date.now() - ttsStart;
-    
+
     if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
       return;
     }
-    
+
     // Final overlap check
-    if (session.userSpeakingWhileProcessing || session.pendingPcmChunks.length > 0 || session.isSpeaking) {
+    if (overlapDetected) {
       logger.log('Skipping playback due to late overlap', session.callSid);
       return;
     }
-    
+
     if (ttsResult?.mulawBuffer) {
       // Transition FSM to speaking
       session.fsm.transition('intent_classified', { response: speakText });
-      
+
       const completed = await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
-      
+
       if (completed) {
         session.fsm.transition('speech_complete');
       }
-      
+
       // Record agent transcript
       session.transcriptEntries.push({
         startMs: Date.now() - session.startTime,
@@ -1002,16 +1010,16 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
         text: speakText,
         confidence: 1
       });
-      
+
       const totalLatency = Date.now() - pipelineStart;
       logger.log(`Pipeline complete: ${totalLatency}ms (STT:${sttLatency} LLM:${llmLatency} TTS:${ttsLatency})`);
       metrics.addPipelineLatency(sttLatency, llmLatency, ttsLatency);
     }
   }
-  
+
   // Handle actions
   if (reply.action === 'hangup' || reply.action === 'escalate') {
-    const farewell = reply.action === 'escalate' 
+    const farewell = reply.action === 'escalate'
       ? 'Let me connect you with our property expert right away. Please hold.'
       : null;
     await endCallGracefully(session, ws, farewell);
@@ -1027,25 +1035,25 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
 
 function startSilenceTimer(session, ws) {
   clearTimeout(session.silenceTimer);
-  
+
   session.silenceTimer = setTimeout(async () => {
     if (ws.readyState !== 1 || session._ended) return;
-    
+
     // Don't count silence while active
     if (session.isSpeaking || session.isProcessing || session.isPlaying) {
       startSilenceTimer(session, ws);
       return;
     }
-    
+
     const fsmResult = session.fsm.handleSilence();
     const langConfig = getLanguage(session.language);
-    
+
     if (fsmResult.silenceCount >= 2) {
       logger.log('Second silence, ending call', session.callSid);
       await endCallGracefully(session, ws, langConfig.farewell);
     } else {
       logger.log('First silence, prompting', session.callSid);
-      
+
       try {
         const ttsResult = await tts.synthesizeRaw(langConfig.silencePrompt, session.callSid, session.language);
         if (ttsResult?.mulawBuffer) {
@@ -1054,7 +1062,7 @@ function startSilenceTimer(session, ws) {
       } catch (err) {
         logger.error('Silence prompt error', err.message);
       }
-      
+
       startSilenceTimer(session, ws);
     }
   }, SILENCE_PROMPT_MS);
@@ -1067,13 +1075,13 @@ function startSilenceTimer(session, ws) {
 async function endCallGracefully(session, ws, farewellText) {
   if (session._ended) return;
   session._ended = true;
-  
+
   clearTimeout(session.silenceTimer);
   clearTimeout(session.maxDurationTimer);
-  
+
   // Cancel any ongoing operations
   session.cancelOngoingOperations();
-  
+
   try {
     if (farewellText && ws.readyState === 1) {
       try {
@@ -1086,36 +1094,36 @@ async function endCallGracefully(session, ws, farewellText) {
         logger.warn('Farewell play failed', err.message);
       }
     }
-    
+
     if (session.callSid) {
-      await vobizClient.endCall(session.callSid).catch(e => 
+      await vobizClient.endCall(session.callSid).catch(e =>
         logger.warn('End call API error', e.message)
       );
     }
   } catch (err) {
     logger.error('Graceful end error', err.message);
   }
-  
+
   // Cleanup
   sessions.delete(session.callSid);
   llm.clearHistory(session.callSid);
   costControl.endCallTracking(session.callSid);
-  
+
   await finalizeCall(session);
 }
 
 async function cleanupSession(session, ws, pingInterval) {
   clearInterval(pingInterval);
   if (!session) return;
-  
+
   session._ended = true;
   clearTimeout(session.silenceTimer);
   clearTimeout(session.maxDurationTimer);
-  
+
   session.cancelOngoingOperations();
-  
+
   await finalizeCall(session);
-  
+
   sessions.delete(session.callSid);
   llm.clearHistory(session.callSid);
   costControl.endCallTracking(session.callSid);
@@ -1124,7 +1132,7 @@ async function cleanupSession(session, ws, pingInterval) {
 async function finalizeCall(session) {
   if (!session || session._finalized) return;
   session._finalized = true;
-  
+
   const duration = Math.round((Date.now() - session.startTime) / 1000);
   logger.log('Finalizing call', {
     callSid: session.callSid,
@@ -1133,22 +1141,22 @@ async function finalizeCall(session) {
     score: session.fsm.leadData.qualityScore || 0,
     language: session.language
   });
-  
+
   try {
-    const call = session.callSid 
+    const call = session.callSid
       ? await Call.findOne({ callSid: session.callSid })
       : null;
-    
+
     if (call) {
       call.durationSec = duration;
       call.endAt = new Date();
       call.status = 'completed';
       await call.save();
     }
-    
+
     if (call && session.transcriptEntries.length > 0) {
       const fullText = session.transcriptEntries.map(e => `${e.speaker}: ${e.text}`).join('\n');
-      
+
       await Transcript.create({
         callId: call._id,
         entries: session.transcriptEntries,
@@ -1156,13 +1164,13 @@ async function finalizeCall(session) {
         summary: fullText.substring(0, 500)
       });
     }
-    
+
     if (session.callerNumber && Object.keys(session.fsm.leadData).length > 0) {
       const leadStatus = session.fsm.leadData.siteVisitDate ? 'site-visit-booked'
         : session.fsm.leadData.qualityScore >= 50 ? 'qualified'
-        : session.fsm.leadData.qualityScore > 0 ? 'follow-up'
-        : 'new';
-      
+          : session.fsm.leadData.qualityScore > 0 ? 'follow-up'
+            : 'new';
+
       await Lead.findOneAndUpdate(
         { phoneNumber: session.callerNumber, callId: call?._id },
         {
