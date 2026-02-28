@@ -175,8 +175,72 @@ async function prewarmPhrases(phrases, language = 'en-IN') {
   return { attempted: unique.length, warmed };
 }
 
+// ── Streaming TTS ───────────────────────────────────────────────────────────
+
+async function* synthesizeStream(text, callSid, language = 'en-IN') {
+  if (!text || text.trim().length === 0) return;
+
+  const cleanText = text.trim();
+  const startMs = Date.now();
+
+  try {
+    metrics.incrementTtsRequest(true);
+
+    const langConfig = getLanguage(language);
+    const voice = langConfig.ttsVoice || 'alloy';
+
+    // Call the streaming endpoint from our openaiClient
+    const stream = await openai.ttsSynthesizeStream(cleanText, voice, 'pcm');
+
+    // We expect 24kHz 16-bit PCM mono from OpenAI
+    // We need to chunk it, resample to 8kHz, convert to mu-law, and yield.
+    // Optimal chunk size for resampling is important. 
+    // Let's use 4800 bytes of 24kHz = 2400 samples = 100ms of audio.
+    const CHUNK_SIZE = 4800;
+    let buffer = Buffer.alloc(0);
+
+    for await (const chunk of stream) {
+      buffer = Buffer.concat([buffer, chunk]);
+
+      while (buffer.length >= CHUNK_SIZE) {
+        // Take a complete chunk
+        const processBuf = buffer.subarray(0, CHUNK_SIZE);
+        buffer = buffer.subarray(CHUNK_SIZE);
+
+        // Resample 24kHz -> 8kHz
+        const pcm8k = resample24kTo8k(processBuf);
+
+        // Convert to mu-law explicitly for Vobiz
+        const mulawBuffer = pcmBufferToMulaw(pcm8k);
+
+        yield mulawBuffer;
+      }
+    }
+
+    // Process any remaining bytes at the end of the stream
+    if (buffer.length > 0) {
+      // Ensure we have an even number of bytes for 16-bit PCM
+      const safeBuffer = buffer.length % 2 === 0 ? buffer : buffer.subarray(0, buffer.length - 1);
+      if (safeBuffer.length > 0) {
+        const pcm8k = resample24kTo8k(safeBuffer);
+        const mulawBuffer = pcmBufferToMulaw(pcm8k);
+        yield mulawBuffer;
+      }
+    }
+
+    const synthMs = Date.now() - startMs;
+    if (callSid) costControl.addTtsUsage(callSid, cleanText.length);
+    logger.debug(`TTS stream complete: ${cleanText.length} chars (${synthMs}ms)`);
+
+  } catch (err) {
+    logger.error('TTS stream error:', err.message || err);
+    metrics.incrementTtsRequest(false);
+  }
+}
+
 module.exports = {
   synthesizeRaw,
+  synthesizeStream,
   prewarmPhrases,
   pcm16ToMulaw,
   pcmBufferToMulaw,

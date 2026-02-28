@@ -925,10 +925,10 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     return;
   }
 
-  // 3. LLM with FSM context
+  // 3. LLM with FSM context (Streaming)
   const llmStart = Date.now();
 
-  const reply = await llm.generateReply({
+  const replyStream = llm.generateReplyStream({
     callState: session.fsm.getLLMContext(),
     script: { companyName: config.companyName },
     lastTranscript: sttResult.text,
@@ -940,85 +940,80 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   });
 
   if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
-    logger.debug('Pipeline cancelled after LLM', session.callSid);
+    logger.debug('Pipeline cancelled after STT', session.callSid);
     return;
   }
 
-  const llmLatency = Date.now() - llmStart;
-
-  // Cost guard: compress response if burn rate is high
-  let speakText = reply.speak || '';
   const burnRate = costControl.getEstimatedBurnRatePerMin(session.callSid);
-  if (burnRate > TARGET_COST_PER_MIN_RS && speakText) {
-    const cap = burnRate > (TARGET_COST_PER_MIN_RS * 1.3) ? 85 : 110;
-    speakText = speakText.substring(0, cap);
-    logger.warn('Cost guard active', { callSid: session.callSid, burnRate: burnRate.toFixed(2), cap });
-  }
+  const costGuardActive = burnRate > TARGET_COST_PER_MIN_RS;
 
-  // Truncate if still too long
-  if (speakText.length > 140) {
-    speakText = speakText.substring(0, 140);
-  }
+  let firstChunkMs = 0;
+  let fullSentence = '';
+  let finalAction = null;
+  let isFirstSentence = true;
 
-  logger.log(`LLM (${llmLatency}ms): "${speakText}" | Action: ${reply.action}`);
+  // Process LLM in streaming mode
+  for await (const chunk of replyStream) {
+    if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
 
-  // Relax overlap detection
-  const overlapDetected = session.userSpeakingWhileProcessing && session.pendingPcmChunks.length > MIN_UTTERANCE_BYTES * 0.5;
-
-  // Check for user overlap before TTS
-  if (overlapDetected) {
-    logger.log('Skipping TTS due to user overlap', session.callSid);
-    return;
-  }
-
-  // 4. TTS & Playback
-  if (speakText && ws.readyState === 1) {
-    const ttsStart = Date.now();
-
-    if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
-      return;
-    }
-
-    const ttsResult = await tts.synthesizeRaw(speakText, session.callSid, session.language);
-    const ttsLatency = Date.now() - ttsStart;
-
-    if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
-      return;
-    }
-
-    // Final overlap check
+    // Check for overlap continuously
+    const overlapDetected = session.userSpeakingWhileProcessing && session.pendingPcmChunks.length > MIN_UTTERANCE_BYTES * 0.5;
     if (overlapDetected) {
-      logger.log('Skipping playback due to late overlap', session.callSid);
+      logger.log('Skipping playback due to user overlap', session.callSid);
       return;
     }
 
-    if (ttsResult?.mulawBuffer) {
-      // Transition FSM to speaking
-      session.fsm.transition('intent_classified', { response: speakText });
+    if (chunk.type === 'sentence') {
+      let sentence = chunk.text;
 
-      const completed = await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
-
-      if (completed) {
-        session.fsm.transition('speech_complete');
+      if (firstChunkMs === 0) {
+        firstChunkMs = Date.now() - llmStart;
+        logger.debug(`Time to first sentence: ${firstChunkMs}ms`);
+        // Transition FSM to speaking
+        session.fsm.transition('intent_classified', { response: '(streaming)' });
       }
 
-      // Record agent transcript
-      session.transcriptEntries.push({
-        startMs: Date.now() - session.startTime,
-        endMs: Date.now() - session.startTime + 500,
-        speaker: 'agent',
-        text: speakText,
-        confidence: 1
-      });
+      if (costGuardActive && fullSentence.length > 120) continue; // Skip further sentences if guard is active
 
-      const totalLatency = Date.now() - pipelineStart;
-      logger.log(`Pipeline complete: ${totalLatency}ms (STT:${sttLatency} LLM:${llmLatency} TTS:${ttsLatency})`);
-      metrics.addPipelineLatency(sttLatency, llmLatency, ttsLatency);
+      fullSentence += sentence + ' ';
+
+      // Fire and forget TTS synthesis stream
+      const ttsStream = tts.synthesizeStream(sentence, session.callSid, session.language);
+
+      // Start streaming audio to the websocket concurrently for THIS sentence
+      (async () => {
+        try {
+          for await (const mulawChunk of ttsStream) {
+            if (abortSignal.aborted || pipelineId !== session.lastPipelineId || session.userSpeakingWhileProcessing) return;
+            await sendAudioThroughStream(session, ws, mulawChunk, { skipPacing: false, fastStart: isFirstSentence });
+          }
+        } catch (e) { /* ignore stream dropped errors */ }
+      })();
+
+      isFirstSentence = false;
+    } else {
+      // Must be the final parsed JSON response returned from the stream 
+      finalAction = chunk.action;
     }
   }
 
+  const completeLatency = Date.now() - llmStart;
+  logger.log(`LLM complete (${completeLatency}ms). First chunk at ${firstChunkMs}ms. | Action: ${finalAction}`);
+
+  // Record agent transcript
+  session.transcriptEntries.push({
+    startMs: Date.now() - session.startTime,
+    endMs: Date.now() - session.startTime + 500,
+    speaker: 'agent',
+    text: fullSentence.trim(),
+    confidence: 1
+  });
+
+  session.fsm.transition('speech_complete');
+  metrics.addPipelineLatency(sttLatency, completeLatency, 0); // TTS latency is interleaved now
+
   // Handle actions
-  if (reply.action === 'hangup' || reply.action === 'escalate') {
+  if (finalAction === 'hangup' || finalAction === 'escalate') {
     const farewell = reply.action === 'escalate'
       ? 'Let me connect you with our property expert right away. Please hold.'
       : null;

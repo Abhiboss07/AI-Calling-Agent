@@ -473,4 +473,203 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
   }
 }
 
-module.exports = { generateReply, clearHistory, getHistory };
+// ── Streaming LLM Reply Generator ───────────────────────────────────────────
+
+async function* generateReplyStream({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific }) {
+  try {
+    const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
+    const langConfig = getLanguage(languageCode);
+    const step = callState?.step || '';
+    const direction = String(callDirection || callState?.direction || 'inbound').toLowerCase() === 'outbound' ? 'outbound' : 'inbound';
+    const endSignal = isConversationEndSignal(lastTranscript || '');
+
+    if (step === 'inbound_assist' && isAudioCheck(lastTranscript || '')) {
+      const resp = {
+        ...FALLBACK_RESPONSE,
+        speak: phrase(languageCode, 'inboundAssist'),
+        action: 'collect',
+        nextStep: 'purpose',
+        reasoning: 'deterministic_inbound_assist'
+      };
+      yield { type: 'sentence', text: resp.speak };
+      return resp;
+    }
+
+    const fastReply = deterministicTurnReply(step, languageCode, lastTranscript, direction);
+    if (fastReply) {
+      yield { type: 'sentence', text: fastReply.speak };
+      return fastReply;
+    }
+
+    let systemContent = buildSystemPrompt();
+
+    if (knowledgeBase) {
+      try {
+        let kbPrompt = (knowledgeBase.systemPrompt || '').toString();
+        kbPrompt = kbPrompt.replace(/\{\{agent_name\}\}/g, knowledgeBase.agentName || config.agentName);
+        kbPrompt = kbPrompt.replace(/\{\{company_name\}\}/g, knowledgeBase.companyName || config.companyName);
+        kbPrompt = kbPrompt.replace(/\{\{knowledge_base\}\}/g, knowledgeBase.content || '');
+        if (kbPrompt.trim()) {
+          systemContent = `${kbPrompt}\n\n${systemContent}`;
+        }
+      } catch (e) {
+        logger.warn('Failed to apply knowledge base prompt template', e.message || e);
+      }
+    }
+
+    systemContent += `\n\nCALL MODE: ${direction.toUpperCase()}.`;
+    if (direction === 'outbound') {
+      systemContent += '\nOutbound flow requirement: if step is availability_check, ask if it is a good time. If no, ask callback time politely.';
+    } else {
+      systemContent += '\nInbound flow requirement: greet briefly and handle user request directly.';
+    }
+    systemContent += '\nStyle requirement: short conversational lines, one question at a time, no robotic repetition.';
+
+    if (languageCode === 'hinglish') {
+      systemContent += '\nRespond in natural Hinglish (Roman script).';
+    } else if (languageCode && languageCode !== 'en-IN') {
+      systemContent += `\nCustomer language: ${langConfig.name}. Respond in ${langConfig.name}.`;
+    }
+
+    const userMsg = [
+      `CUSTOMER NAME: ${customerName || 'unknown'}`,
+      `CALL DIRECTION: ${direction}`,
+      `HONORIFIC HINT: ${honorific || ' sir_maam '}`,
+      `LATEST: "${lastTranscript || '(silence)'}"`,
+      `CALL STATE: ${JSON.stringify(callState || {})}`,
+      '',
+      'Generate the next agent response in the required JSON format.'
+    ].join('\n');
+
+    const systemMsg = { role: 'system', content: systemContent };
+    const history = callSid ? getHistory(callSid).messages : [];
+    const messages = [
+      systemMsg,
+      ...history,
+      { role: 'user', content: userMsg }
+    ];
+
+    if (!process.env.OPENAI_API_KEY) {
+      yield { type: 'sentence', text: FALLBACK_RESPONSE.speak };
+      return { ...FALLBACK_RESPONSE };
+    }
+
+    metrics.incrementLlmRequest(true);
+
+    const stream = await openai.chatCompletionStream(messages, 'gpt-4o-mini', {
+      temperature: 0.25,
+      max_tokens: 140
+    });
+
+    let fullJson = '';
+    let extractedSpeak = '';
+    let isParsingSpeak = false;
+    let sentenceBuffer = '';
+
+    // The stream is Node.js incoming message object, process chunks
+    for await (const chunk of stream) {
+      // Chunk format for OpenAI stream is SSE: "data: {...}\n\n"
+      const lines = chunk.toString().split('\n').filter(line => line.trim().length > 0);
+      for (const line of lines) {
+        if (line === 'data: [DONE]') break;
+        if (line.startsWith('data: ')) {
+          try {
+            const parsed = JSON.parse(line.slice(6));
+            if (parsed.choices?.[0]?.delta?.content) {
+              const str = parsed.choices[0].delta.content;
+              fullJson += str;
+
+              // We're looking for the "speak": "..." part of the JSON to extract tokens
+              if (!isParsingSpeak) {
+                const match = fullJson.match(/"speak"\s*:\s*"/i);
+                if (match) {
+                  isParsingSpeak = true;
+                  const speakSoFar = fullJson.substring(match.index + match[0].length);
+                  sentenceBuffer += speakSoFar;
+                  extractedSpeak += speakSoFar;
+                }
+              } else {
+                // Determine if we've hit the end of the "speak" value
+                // In JSON, values are delimited by a trailing quote not preceded by an escape.
+                const unescapedQuoteMatch = str.match(/(?<!\\)"/);
+                if (unescapedQuoteMatch) {
+                  isParsingSpeak = false;
+                  const textContent = str.substring(0, unescapedQuoteMatch.index);
+                  sentenceBuffer += textContent;
+                  extractedSpeak += textContent;
+
+                  if (sentenceBuffer.trim().length > 0) {
+                    yield { type: 'sentence', text: sentenceBuffer.trim() };
+                    sentenceBuffer = '';
+                  }
+                } else {
+                  sentenceBuffer += str;
+                  extractedSpeak += str;
+
+                  // Yield sentence immediately upon punctuation
+                  if (/[.?!]\s*$/.test(sentenceBuffer)) {
+                    yield { type: 'sentence', text: sentenceBuffer.trim() };
+                    sentenceBuffer = '';
+                  }
+                }
+              }
+            }
+          } catch (e) { /* ignore parse error on partial chunks */ }
+        }
+      }
+    }
+
+    // Flush remaining buffer
+    if (sentenceBuffer.trim().length > 0) {
+      yield { type: 'sentence', text: sentenceBuffer.trim() };
+    }
+
+    if (callSid) {
+      addToHistory(callSid, 'user', userMsg);
+      addToHistory(callSid, 'assistant', fullJson);
+    }
+
+    let parsed;
+    try {
+      if (fullJson.endsWith('}')) {
+        parsed = parseAgentJson(fullJson);
+      } else {
+        parsed = parseAgentJson(fullJson + '}');
+      }
+    } catch (e) {
+      const loose = parseAgentFieldsLoose(fullJson);
+      if (loose) {
+        parsed = loose;
+      } else {
+        const speakText = extractedSpeak.trim() || fullJson.replace(/[{}"]/g, '').trim();
+        parsed = {
+          ...FALLBACK_RESPONSE,
+          speak: speakText.length > 5 ? speakText.substring(0, 150) : FALLBACK_RESPONSE.speak
+        };
+      }
+    }
+
+    return enforceScriptFlow(parsed, {
+      step,
+      languageCode,
+      customerName,
+      endSignal,
+      lastTranscript,
+      callDirection: direction
+    });
+  } catch (err) {
+    logger.error('LLM stream error', err.message || err);
+    metrics.incrementLlmRequest(false);
+    const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
+    const farewell = (getLanguage(languageCode)?.farewell) || 'Thank you for your time. We will call you back. Goodbye.';
+    yield { type: 'sentence', text: farewell };
+    return {
+      ...FALLBACK_RESPONSE,
+      speak: farewell,
+      action: 'hangup',
+      nextStep: 'close'
+    };
+  }
+}
+
+module.exports = { generateReply, generateReplyStream, clearHistory, getHistory };

@@ -121,6 +121,57 @@ async function ttsSynthesize(text, voice = 'alloy', format = 'mp3') {
   });
 }
 
+// ── START NEW STREAMING ENDPOINTS ───────────────────────────────────────────
+
+/** @param {Array<{role:string,content:string}>} messages
+ *  @param {string} model
+ *  @param {{temperature?:number, max_tokens?:number}} opts */
+async function chatCompletionStream(messages, model = 'gpt-4o-mini', opts = {}) {
+  if (!config.openaiApiKey) throw new Error('OPENAI_API_KEY missing');
+
+  const body = {
+    model,
+    messages,
+    temperature: opts.temperature ?? 0.3,
+    max_tokens: opts.max_tokens ?? 200,
+    stream: true
+  };
+
+  if (opts.response_format) {
+    body.response_format = opts.response_format;
+  }
+
+  const resp = await apiClient.post('/v1/chat/completions', body, {
+    headers: { 'Content-Type': 'application/json' },
+    responseType: 'stream',
+    timeout: 30000 // longer timeout for streams
+  });
+
+  return resp.data;
+}
+
+/** @param {string} text - The text to synthesize
+ *  @param {string} voice - Voice id
+ *  @param {string} format - 'pcm' or 'mp3' */
+async function ttsSynthesizeStream(text, voice = 'alloy', format = 'pcm') {
+  if (!config.openaiApiKey) throw new Error('OPENAI_API_KEY missing');
+
+  const body = {
+    model: config.tts?.model || 'tts-1',
+    voice,
+    input: text,
+    response_format: format === 'pcm' ? 'pcm' : 'mp3'
+  };
+
+  const resp = await apiClient.post('/v1/audio/speech', body, {
+    headers: { 'Content-Type': 'application/json' },
+    responseType: 'stream',
+    timeout: 30000 // longer timeout for streams
+  });
+
+  return resp.data;
+}
+
 // ── Startup Validation ──────────────────────────────────────────────────────
 // Quick check to verify the API key is valid (uses free /v1/models endpoint)
 async function validateApiKey() {
@@ -134,4 +185,11 @@ async function validateApiKey() {
   }
 }
 
-module.exports = { transcribeAudio, chatCompletion, ttsSynthesize, validateApiKey };
+module.exports = {
+  transcribeAudio,
+  chatCompletion,
+  chatCompletionStream,
+  ttsSynthesize,
+  ttsSynthesizeStream,
+  validateApiKey
+};
