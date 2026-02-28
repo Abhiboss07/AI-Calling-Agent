@@ -121,6 +121,7 @@ const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
 const ECHO_COOLDOWN_MS = 1500;  // Discard audio for 1500ms after playback ends (Vobiz has no AEC)
 const MAX_SPEECH_DURATION_MS = 8000; // Force processing after 8s of continuous speech
 const NOISE_CALIBRATION_CHUNKS = 25; // ~500ms of audio to calibrate noise floor after cool-down
+const VOICE_MARGIN = 0.08; // Voice must exceed noise floor by this ADDITIVE margin
 
 // Session management
 const sessions = new Map();
@@ -719,7 +720,10 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session._noiseCalibrationRemaining = 0;
       // Ensure noise floor has a sensible minimum
       if (session.noiseFloorRms < 0.001) session.noiseFloorRms = VAD_THRESHOLD * 0.5;
-      const threshold = Math.max(VAD_THRESHOLD, session.noiseFloorRms * 2.0);
+      // FREEZE the noise floor — don't let it drift during speech
+      session._frozenNoiseFloor = session.noiseFloorRms;
+      // ADDITIVE threshold: noiseFloor + margin (NOT multiplicative)
+      const threshold = Math.max(VAD_THRESHOLD, session.noiseFloorRms + VOICE_MARGIN);
       logger.log('Noise calibration complete', {
         callSid: session.callSid,
         noiseFloor: session.noiseFloorRms.toFixed(4),
@@ -732,16 +736,16 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     return;
   }
 
-  // ── 4. ADAPTIVE NOISE FLOOR (ongoing) ──
-  const floor = session.noiseFloorRms || VAD_THRESHOLD;
-  // Only update from quiet samples (below current threshold)
-  const currentDynThreshold = Math.max(VAD_THRESHOLD, floor * 2.0);
-  if (rms > 0 && rms < currentDynThreshold) {
-    session.noiseFloorRms = (floor * 0.95) + (rms * 0.05);
-  }
+  // ── 4. FROZEN NOISE FLOOR — no adaptive updates ──
+  // Noise floor is set during calibration and FROZEN.
+  // This prevents speech from pushing the noise floor up,
+  // which made the threshold unreachable (the core bug).
+  const floor = session._frozenNoiseFloor || session.noiseFloorRms || VAD_THRESHOLD;
 
-  // ── 5. VOICE ACTIVITY DETECTION ──
-  const dynamicThreshold = Math.max(VAD_THRESHOLD, (session.noiseFloorRms || VAD_THRESHOLD) * 2.0);
+  // ── 5. VOICE ACTIVITY DETECTION (additive threshold) ──
+  // Additive margin: speech must be VOICE_MARGIN louder than ambient
+  // Example: ambient 0.50 + 0.08 = threshold 0.58 → speech at 0.86 detected ✅
+  const dynamicThreshold = Math.max(VAD_THRESHOLD, floor + VOICE_MARGIN);
   const hasVoice = rms >= dynamicThreshold;
 
   // Periodic logging (every ~5 seconds)
