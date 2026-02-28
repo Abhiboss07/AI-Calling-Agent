@@ -113,22 +113,24 @@ router.post('/answer', webhookRateLimit(60000, 100), validateVobizSignature, asy
     const from = req.body?.From || req.body?.from || 'unknown';
     const to = req.body?.To || req.body?.to || 'unknown';
     const direction = req.body?.Direction || req.body?.direction || 'inbound';
+    const normalizedDirection = String(direction).toLowerCase() === 'outbound' ? 'outbound' : 'inbound';
+    const customerNumber = normalizedDirection === 'outbound' ? to : from;
 
     // Extract language from custom parameters or use default
     const language = req.body?.language || req.query?.language || config.language.default;
     const langConfig = getLanguage(language);
 
-    logger.log('📞 Answer webhook', { callUuid, from, to, direction, language });
+    logger.log('📞 Answer webhook', { callUuid, from, to, direction: normalizedDirection, customerNumber, language });
 
     // ── Create Call record for INBOUND calls (outbound already exist) ────────
     try {
         const existing = await Call.findOne({ callSid: callUuid });
         if (!existing) {
             await Call.create({
-                phoneNumber: from,
+                phoneNumber: customerNumber,
                 callSid: callUuid,
                 status: 'ringing',
-                direction: direction === 'outbound' ? 'outbound' : 'inbound',
+                direction: normalizedDirection,
                 language,
                 startAt: new Date(),
                 metadata: { from, to }
@@ -154,7 +156,7 @@ router.post('/answer', webhookRateLimit(60000, 100), validateVobizSignature, asy
         '<Response>',
         // Bidirectional stream — call stays alive as long as WS is open
         // URL must be clean (no leading whitespace/newlines) for Vobiz to parse correctly
-        `  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000" statusCallbackUrl="${xmlEscape(statusUrl)}" statusCallbackMethod="POST">${streamUrl}?callUuid=${callUuid}&amp;callerNumber=${xmlEscape(from)}&amp;direction=${xmlEscape(direction)}&amp;language=${xmlEscape(language)}</Stream>`,
+        `  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000" statusCallbackUrl="${xmlEscape(statusUrl)}" statusCallbackMethod="POST">${streamUrl}?callUuid=${callUuid}&amp;callerNumber=${xmlEscape(customerNumber)}&amp;direction=${xmlEscape(normalizedDirection)}&amp;language=${xmlEscape(language)}</Stream>`,
         // If stream disconnects, say goodbye rather than dead air
         `  <Speak voice="WOMAN" language="${xmlEscape(language)}">${xmlEscape(langConfig.farewell)}</Speak>`,
         '</Response>'

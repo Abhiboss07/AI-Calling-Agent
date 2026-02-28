@@ -22,7 +22,7 @@ try {
 
 if (!SYSTEM_PROMPT) {
   SYSTEM_PROMPT = `You are a professional real estate AI phone agent for ${config.companyName}.
-Your name is ${config.agentName}. Keep responses under 25 words. Be natural and human-like.
+Your name is ${config.agentName}. Keep responses short, natural, and helpful.
 Always respond in JSON: {"speak":"...","action":"continue|collect|hangup|escalate|book_visit","nextStep":"...","data":{},"qualityScore":0,"reasoning":"..."}`;
 }
 
@@ -82,6 +82,15 @@ function normalizeLanguageCode(language) {
   return language;
 }
 
+function normalizeHeardText(text = '') {
+  const out = String(text || '').trim().toLowerCase();
+  if (out === 'news' || out === 'news.') return 'yes';
+  return out
+    .replace(/\b(yeahh|yea|yup|yupp)\b/g, 'yes')
+    .replace(/\b(haanji|hanji)\b/g, 'haan ji')
+    .replace(/\b(naah|nah)\b/g, 'no');
+}
+
 function extractJsonLikePayload(text) {
   const trimmed = (text || '').trim();
   if (!trimmed) return null;
@@ -129,58 +138,12 @@ function parseAgentFieldsLoose(text) {
   };
 }
 
-function templateByStep(step, languageCode, customerName) {
-  const name = customerName || 'there';
-  const agent = config.agentName || 'Agent';
-  const company = config.companyName || 'our company';
-
-  if (step === 'greeting' || step === 'identify') {
-    if (languageCode === 'hi-IN') {
-      return `नमस्ते! मैं ${agent} ${company} से बोल रही हूँ। क्या मैं ${name} से बात कर रही हूँ?`;
-    }
-    if (languageCode === 'hinglish') {
-      return `Hi! Main ${agent} ${company} se bol rahi hoon. Kya main ${name} se baat kar rahi hoon?`;
-    }
-    return `Hi, ${agent} from ${company}. Is this ${name}?`;
-  }
-
-  if (step === 'warm-up') {
-    if (languageCode === 'hi-IN') return `बहुत अच्छा लगा ${name} से बात करके! आप खरीदना चाहते हैं, किराए पर लेना चाहते हैं, या निवेश करना चाहते हैं?`;
-    if (languageCode === 'hinglish') return `Great to speak with you, ${name}! Aap buy, rent, ya investment ke liye dekh rahe hain?`;
-    return `Great. Are you looking to buy, rent, or invest?`;
-  }
-
-  if (step === 'close' || step === 'summary') {
-    if (languageCode === 'hi-IN') {
-      return `धन्यवाद ${name}! आपसे बात करके अच्छा लगा। हमारी टीम जल्दी आपसे संपर्क करेगी।`;
-    }
-    if (languageCode === 'hinglish') {
-      return `Thank you ${name}! Aapse baat karke accha laga. Hamari team jaldi aapse contact karegi.`;
-    }
-    return `Thank you ${name}! It was great speaking with you. Our team will contact you shortly.`;
-  }
-
-  return '';
-}
-
 function isConversationEndSignal(text = '') {
   return /(thank|thanks|dhanyavaad|धन्यवाद|bye|goodbye|not interested|that is all|bas itna|बस इतना|call me later)/i.test(String(text));
 }
 
-function isAffirmativeIdentity(text = '') {
-  return /^(yes|yeah|yep|haan|han|ji|speaking|this is me|i am|myself)\b/i.test(String(text).trim());
-}
-
-function isNegativeIdentity(text = '') {
-  return /\b(no|wrong number|not .*speaking|nahi|nahin|galat number)\b/i.test(String(text));
-}
-
-function isWhoAreYou(text = '') {
-  return /\b(who are you|kaun ho|kon ho|koun hai|who is this|aap kaun)\b/i.test(String(text));
-}
-
 function isAudioCheck(text = '') {
-  return /\b(can you hear me|are you there|hello|sun pa rahe|aawaz aa rahi|voice check)\b/i.test(String(text));
+  return /(can you hear me|are you there|hello|sun pa rahe|aawaz aa rahi|voice check)/i.test(String(text));
 }
 
 function isMeaningfulUtterance(text = '') {
@@ -189,92 +152,131 @@ function isMeaningfulUtterance(text = '') {
   return words.length >= 2;
 }
 
-function normalizeHeardText(text = '') {
-  const t = String(text || '').trim().toLowerCase();
-  // Common Whisper confusion on phone lines: "news" vs "yes"
-  if (t === 'news' || t === 'news.') return 'yes';
-  return t;
-}
-
 function classifyPurposeIntent(text = '') {
   const t = normalizeHeardText(text);
-  if (/\b(buy|purchase|looking to buy|own home|kharid|kharidna)\b/i.test(t)) return 'buy';
-  if (/\b(rent|rental|lease|kiraye|rent pe)\b/i.test(t)) return 'rent';
-  if (/\b(invest|investment|investor|returns)\b/i.test(t)) return 'invest';
+  if (/\b(buy|purchase|looking to buy|own home|kharid|kharidna|खरीद)\b/i.test(t)) return 'buy';
+  if (/\b(rent|rental|lease|kiraye|rent pe|किराए)\b/i.test(t)) return 'rent';
+  if (/\b(invest|investment|investor|returns|निवेश)\b/i.test(t)) return 'invest';
   return '';
 }
 
-function deterministicTurnReply(step, languageCode, customerName, transcript) {
-  const safeTranscript = normalizeHeardText(transcript);
-  const greeting = templateByStep('greeting', languageCode, customerName);
-  const warmup = templateByStep('warm-up', languageCode, customerName);
+function classifyAvailability(text = '') {
+  const t = normalizeHeardText(text);
+  if (/\b(yes|haan|haan ji|sure|ok|okay|go ahead|boliye|bolo)\b/i.test(t)) return 'yes';
+  if (/\b(no|not now|busy|later|call later|abhi nahi|नहीं|baad me)\b/i.test(t)) return 'no';
+  return 'unknown';
+}
 
-  if (step === 'greeting' || step === 'identify') {
-    if (isAudioCheck(safeTranscript)) {
-      return {
-        ...FALLBACK_RESPONSE,
-        speak: 'Yes, I can hear you. Are you looking to buy, rent, or invest?',
-        action: 'collect',
-        nextStep: 'purpose',
-        reasoning: 'deterministic_audio_check'
-      };
+function phrase(languageCode, key) {
+  const map = {
+    'en-IN': {
+      availabilityReask: 'Is this a good time to talk for one minute?',
+      availabilityYes: 'Great, thank you. Are you looking to buy, rent, or invest?',
+      availabilityNo: 'No problem. What is a better time for a quick callback?',
+      rescheduleAsk: 'Sure. Please share a suitable time for callback.',
+      rescheduleThanks: 'Perfect, thank you. We will call you at that time. Goodbye.',
+      inboundAssist: 'Thank you for calling. How may I help you today?',
+      audioCheck: 'Yes, I can hear you clearly. Please go ahead.',
+      close: 'Thank you for your time. Goodbye.'
+    },
+    'hinglish': {
+      availabilityReask: 'Kya abhi 1 minute baat karna convenient hai?',
+      availabilityYes: 'Great, thank you. Aap buy, rent, ya invest ke liye dekh rahe hain?',
+      availabilityNo: 'No problem. Callback ke liye kaunsa time better rahega?',
+      rescheduleAsk: 'Sure, callback ka suitable time bata dijiye.',
+      rescheduleThanks: 'Perfect, thank you. Hum ussi time call karenge. Goodbye.',
+      inboundAssist: 'Thank you for calling. Aaj main aapki kaise help kar sakti hoon?',
+      audioCheck: 'Ji, main aapko clear sun pa rahi hoon. Please boliye.',
+      close: 'Thank you ji. Goodbye.'
+    },
+    'hi-IN': {
+      availabilityReask: 'क्या अभी एक मिनट बात करना ठीक रहेगा?',
+      availabilityYes: 'बहुत अच्छा। क्या आप खरीदना, किराए पर लेना, या निवेश करना चाहते हैं?',
+      availabilityNo: 'कोई बात नहीं। कृपया बताइए, दोबारा कॉल का सही समय क्या रहेगा?',
+      rescheduleAsk: 'ठीक है, कृपया कॉल बैक का सही समय बताइए।',
+      rescheduleThanks: 'बहुत धन्यवाद। हम उसी समय कॉल करेंगे। नमस्ते।',
+      inboundAssist: 'धन्यवाद। मैं आपकी कैसे मदद कर सकती हूँ?',
+      audioCheck: 'जी, आपकी आवाज साफ आ रही है। बताइए।',
+      close: 'धन्यवाद। नमस्ते।'
     }
-    if (isNegativeIdentity(safeTranscript)) {
-      return {
-        ...FALLBACK_RESPONSE,
-        speak: 'Thanks for letting me know. Sorry for the disturbance. Goodbye.',
-        action: 'hangup',
-        nextStep: 'close',
-        reasoning: 'deterministic_wrong_number'
-      };
-    }
-    if (isAffirmativeIdentity(safeTranscript) || isMeaningfulUtterance(safeTranscript)) {
-      return {
-        ...FALLBACK_RESPONSE,
-        speak: warmup,
-        action: 'collect',
-        nextStep: 'purpose',
-        reasoning: 'deterministic_progress_to_purpose'
-      };
-    }
+  };
+
+  const lang = map[languageCode] ? languageCode : 'en-IN';
+  return map[lang][key] || map['en-IN'][key];
+}
+
+function deterministicTurnReply(step, languageCode, transcript, callDirection) {
+  const heard = normalizeHeardText(transcript);
+
+  if (isAudioCheck(heard)) {
     return {
       ...FALLBACK_RESPONSE,
-      speak: greeting,
+      speak: phrase(languageCode, 'audioCheck'),
       action: 'collect',
-      nextStep: 'identify',
-      reasoning: 'deterministic_reask_identity'
+      nextStep: step || 'handle',
+      reasoning: 'deterministic_audio_check'
     };
   }
 
-  if (step === 'warm-up') {
+  if (callDirection === 'outbound' && step === 'availability_check') {
+    const availability = classifyAvailability(heard);
+    if (availability === 'yes') {
+      return {
+        ...FALLBACK_RESPONSE,
+        speak: phrase(languageCode, 'availabilityYes'),
+        action: 'collect',
+        nextStep: 'purpose',
+        reasoning: 'deterministic_availability_yes'
+      };
+    }
+    if (availability === 'no') {
+      return {
+        ...FALLBACK_RESPONSE,
+        speak: phrase(languageCode, 'availabilityNo'),
+        action: 'collect',
+        nextStep: 'reschedule_time',
+        reasoning: 'deterministic_availability_no'
+      };
+    }
     return {
       ...FALLBACK_RESPONSE,
-      speak: warmup,
+      speak: phrase(languageCode, 'availabilityReask'),
       action: 'collect',
-      nextStep: 'purpose',
-      reasoning: 'deterministic_warmup'
+      nextStep: 'availability_check',
+      reasoning: 'deterministic_availability_reask'
+    };
+  }
+
+  if (callDirection === 'outbound' && step === 'reschedule_time') {
+    if (isMeaningfulUtterance(heard)) {
+      return {
+        ...FALLBACK_RESPONSE,
+        speak: phrase(languageCode, 'rescheduleThanks'),
+        action: 'hangup',
+        nextStep: 'close',
+        data: { callbackTime: transcript },
+        reasoning: 'deterministic_reschedule_confirmed'
+      };
+    }
+    return {
+      ...FALLBACK_RESPONSE,
+      speak: phrase(languageCode, 'rescheduleAsk'),
+      action: 'collect',
+      nextStep: 'reschedule_time',
+      reasoning: 'deterministic_reschedule_reask'
     };
   }
 
   if (step === 'purpose') {
-    if (isAudioCheck(safeTranscript)) {
-      return {
-        ...FALLBACK_RESPONSE,
-        speak: 'Yes, I can hear you. Please tell me: buy, rent, or invest?',
-        action: 'collect',
-        nextStep: 'purpose',
-        reasoning: 'deterministic_audio_check_purpose'
-      };
-    }
-    const intent = classifyPurposeIntent(safeTranscript);
+    const intent = classifyPurposeIntent(heard);
     if (intent === 'buy') {
       return {
         ...FALLBACK_RESPONSE,
-        speak: 'Great. Are you looking for an apartment, villa, or plot?',
+        speak: 'Great. What type of property are you considering: apartment, villa, or plot?',
         action: 'collect',
         nextStep: 'property_type',
         data: { intent: 'buy' },
-        reasoning: 'deterministic_purpose_buy'
+        reasoning: 'deterministic_intent_buy'
       };
     }
     if (intent === 'rent') {
@@ -284,7 +286,7 @@ function deterministicTurnReply(step, languageCode, customerName, transcript) {
         action: 'collect',
         nextStep: 'location_budget',
         data: { intent: 'rent' },
-        reasoning: 'deterministic_purpose_rent'
+        reasoning: 'deterministic_intent_rent'
       };
     }
     if (intent === 'invest') {
@@ -294,16 +296,9 @@ function deterministicTurnReply(step, languageCode, customerName, transcript) {
         action: 'collect',
         nextStep: 'investment_timeline',
         data: { intent: 'invest' },
-        reasoning: 'deterministic_purpose_invest'
+        reasoning: 'deterministic_intent_invest'
       };
     }
-    return {
-      ...FALLBACK_RESPONSE,
-      speak: 'I heard you. Are you looking to buy, rent, or invest?',
-      action: 'collect',
-      nextStep: 'purpose',
-      reasoning: 'deterministic_purpose_reask'
-    };
   }
 
   return null;
@@ -318,84 +313,53 @@ function enforceScriptFlow(parsed, context) {
 
   const step = context?.step || '';
   const languageCode = context?.languageCode || 'en-IN';
-  const scripted = templateByStep(step, languageCode, context?.customerName);
-  const transcript = String(context?.lastTranscript || '').trim();
+  const callDirection = context?.callDirection || 'inbound';
 
-  if (step === 'greeting') {
-    safe.speak = scripted || safe.speak;
-    safe.action = 'collect';
-    safe.nextStep = 'identify';
-    safe.reasoning = 'scripted_greeting';
-  }
-
-  if (step === 'identify') {
-    if (isAffirmativeIdentity(transcript)) {
-      safe.speak = templateByStep('warm-up', languageCode, context?.customerName) || safe.speak;
-      safe.action = 'collect';
-      safe.nextStep = 'purpose';
-      safe.reasoning = 'identity_confirmed';
-    } else if (isMeaningfulUtterance(transcript) && !isNegativeIdentity(transcript)) {
-      safe.speak = templateByStep('warm-up', languageCode, context?.customerName) || safe.speak;
-      safe.action = 'collect';
-      safe.nextStep = 'purpose';
-      safe.reasoning = 'identity_inferred_from_utterance';
-    } else if (isNegativeIdentity(transcript)) {
-      safe.speak = 'Thanks for letting me know. Sorry for the disturbance. Goodbye.';
-      safe.action = 'hangup';
-      safe.nextStep = 'close';
-      safe.reasoning = 'wrong_number';
-    } else if (isWhoAreYou(transcript)) {
-      safe.speak = templateByStep('greeting', languageCode, context?.customerName) || safe.speak;
-      safe.action = 'collect';
-      safe.nextStep = 'identify';
-      safe.reasoning = 'identity_clarification';
-    } else {
-      safe.speak = templateByStep('greeting', languageCode, context?.customerName) || safe.speak;
-      safe.action = 'collect';
-      safe.nextStep = 'identify';
-      safe.reasoning = 'identity_reask';
-    }
-  }
-
-  if (step === 'warm-up') {
-    safe.speak = scripted || safe.speak;
-    safe.action = 'collect';
-    safe.nextStep = 'purpose';
-    safe.reasoning = 'scripted_intro';
-  }
-
-  if (step === 'close' || step === 'summary' || context?.endSignal) {
-    safe.speak = scripted || safe.speak;
+  if (context?.endSignal) {
+    safe.speak = phrase(languageCode, 'close');
     safe.action = 'hangup';
     safe.nextStep = 'close';
-    safe.reasoning = 'scripted_close';
+    safe.reasoning = 'end_signal';
   }
 
-  if (safe.speak && safe.speak.length > 150) {
-    safe.speak = safe.speak.substring(0, 150);
+  if (callDirection === 'outbound' && step === 'availability_check' && !safe.nextStep) {
+    safe.nextStep = 'availability_check';
   }
 
-  // Do not allow response to jump backward to identify once call has progressed.
-  if ((step === 'purpose' || step === 'property_type' || step === 'location_budget' || step === 'investment_timeline')
-    && safe.nextStep === 'identify') {
+  // Prevent jumping backward once qualification has started.
+  const progressed = ['purpose', 'property_type', 'location_budget', 'investment_timeline', 'qualify_budget', 'qualify_timeline'];
+  if (progressed.includes(step) && ['identify', 'greeting', 'availability_check'].includes(safe.nextStep)) {
     safe.nextStep = step;
     safe.reasoning = 'prevent_step_regression';
+  }
+
+  if (safe.speak && safe.speak.length > 160) {
+    safe.speak = safe.speak.substring(0, 160);
   }
 
   return safe;
 }
 
-async function generateReply({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase }) {
+async function generateReply({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific }) {
   try {
     const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
     const langConfig = getLanguage(languageCode);
     const step = callState?.step || '';
+    const direction = String(callDirection || callState?.direction || 'inbound').toLowerCase() === 'outbound' ? 'outbound' : 'inbound';
     const endSignal = isConversationEndSignal(lastTranscript || '');
 
-    const fastReply = deterministicTurnReply(step, languageCode, customerName, lastTranscript);
-    if (fastReply) {
-      return fastReply;
+    if (step === 'inbound_assist' && isAudioCheck(lastTranscript || '')) {
+      return {
+        ...FALLBACK_RESPONSE,
+        speak: phrase(languageCode, 'inboundAssist'),
+        action: 'collect',
+        nextStep: 'purpose',
+        reasoning: 'deterministic_inbound_assist'
+      };
     }
+
+    const fastReply = deterministicTurnReply(step, languageCode, lastTranscript, direction);
+    if (fastReply) return fastReply;
 
     let systemContent = buildSystemPrompt();
 
@@ -413,14 +377,24 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       }
     }
 
+    systemContent += `\n\nCALL MODE: ${direction.toUpperCase()}.`;
+    if (direction === 'outbound') {
+      systemContent += '\nOutbound flow requirement: if step is availability_check, ask if it is a good time. If no, ask callback time politely.';
+    } else {
+      systemContent += '\nInbound flow requirement: greet briefly and handle user request directly.';
+    }
+    systemContent += '\nStyle requirement: short conversational lines, one question at a time, no robotic repetition.';
+
     if (languageCode === 'hinglish') {
-      systemContent += '\n\nIMPORTANT LANGUAGE INSTRUCTION: Respond in natural Hinglish (Hindi-English mix) in Roman script. Keep JSON response format.';
+      systemContent += '\nRespond in natural Hinglish (Roman script).';
     } else if (languageCode && languageCode !== 'en-IN') {
-      systemContent += `\n\nIMPORTANT LANGUAGE INSTRUCTION: The customer is speaking in ${langConfig.name}. You MUST respond in ${langConfig.name}. Keep JSON response format.`;
+      systemContent += `\nCustomer language: ${langConfig.name}. Respond in ${langConfig.name}.`;
     }
 
     const userMsg = [
       `CUSTOMER NAME: ${customerName || 'unknown'}`,
+      `CALL DIRECTION: ${direction}`,
+      `HONORIFIC HINT: ${honorific || 'sir_maam'}`,
       `LATEST: "${lastTranscript || '(silence)'}"`,
       `CALL STATE: ${JSON.stringify(callState || {})}`,
       '',
@@ -444,8 +418,8 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
     metrics.incrementLlmRequest(true);
 
     const resp = await openai.chatCompletion(messages, 'gpt-4o-mini', {
-      temperature: 0.2,
-      max_tokens: 120,
+      temperature: 0.25,
+      max_tokens: 140,
       response_format: { type: 'json_object' }
     });
 
@@ -471,11 +445,21 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       } else {
         logger.warn('LLM returned non-JSON, using fallback', assistant.substring(0, 100));
         const speakText = assistant.replace(/[{}"]/g, '').trim();
-        parsed = { ...FALLBACK_RESPONSE, speak: speakText.length > 5 ? speakText.substring(0, 150) : FALLBACK_RESPONSE.speak };
+        parsed = {
+          ...FALLBACK_RESPONSE,
+          speak: speakText.length > 5 ? speakText.substring(0, 150) : FALLBACK_RESPONSE.speak
+        };
       }
     }
 
-    return enforceScriptFlow(parsed, { step, languageCode, customerName, endSignal, lastTranscript });
+    return enforceScriptFlow(parsed, {
+      step,
+      languageCode,
+      customerName,
+      endSignal,
+      lastTranscript,
+      callDirection: direction
+    });
   } catch (err) {
     logger.error('LLM error', err.message || err);
     metrics.incrementLlmRequest(false);

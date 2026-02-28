@@ -3,34 +3,43 @@ const logger = require('../utils/logger');
 const metrics = require('./metrics');
 const costControl = require('./costControl');
 
-// ══════════════════════════════════════════════════════════════════════════════
-// STT SERVICE — Whisper Transcription
-// ══════════════════════════════════════════════════════════════════════════════
-// Input: WAV buffer (8kHz mono 16-bit PCM with proper header)
-// The µ-law→PCM→WAV conversion happens in ws-media.js BEFORE calling this.
+function normalizeTranscriptText(text) {
+  let out = String(text || '').trim();
+  if (!out) return '';
 
+  const replacements = [
+    [/\b(yeahh|yea|yup|yupp)\b/gi, 'yes'],
+    [/\b(haanji|hanji)\b/gi, 'haan ji'],
+    [/\b(naah|nah)\b/gi, 'no'],
+    [/\b(okay+)\b/gi, 'ok']
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    out = out.replace(pattern, replacement);
+  }
+
+  return out.trim();
+}
+
+// Input: WAV buffer (8kHz mono 16-bit PCM with proper header)
 async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') {
-  // ── Guard: Empty or missing buffer ────────────────────────────────────
   if (!buffer || buffer.length === 0) {
     return { text: '', confidence: 0, empty: true };
   }
 
-  // Guard: Too small to contain speech (WAV header + data)
-  // 44-byte header + at least 2000 bytes of PCM data (~125ms of audio)
-  if (buffer.length < 2044) {
+  // 44-byte WAV header + at least 1200 bytes of PCM data
+  if (buffer.length < 1244) {
     logger.debug('STT: buffer too small', buffer.length, 'bytes');
     return { text: '', confidence: 0, empty: true };
   }
 
-  // Guard: Too large — cap at 30 seconds to prevent excessive Whisper costs
-  // 30s at 8kHz mono 16-bit = 480000 bytes + 44 header
+  // Guard: cap to ~30 seconds to prevent excessive costs
   if (buffer.length > 480044) {
     logger.warn('STT: buffer too large, truncating to 30s', buffer.length, 'bytes');
     buffer = buffer.subarray(0, 480044);
   }
 
-  // ── Compute actual audio duration for cost tracking ───────────────────
-  // WAV: data starts at byte 44, 8kHz mono 16-bit = 16000 bytes/sec
+  // WAV at 8kHz mono 16-bit => 16000 bytes/sec
   const dataBytes = Math.max(0, buffer.length - 44);
   const durationSec = dataBytes / 16000;
 
@@ -38,24 +47,20 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') 
     const startMs = Date.now();
     metrics.incrementSttRequest(true);
 
-    // Let Whisper auto-detect for English/Hinglish calls for better mixed-language capture.
-    const langCode = (language || '').toLowerCase();
-    const whisperLang = (langCode && !langCode.startsWith('en') && langCode !== 'hinglish')
-      ? language.split('-')[0]
+    const langCode = String(language || '').toLowerCase().trim();
+    const whisperLang = (langCode && langCode !== 'auto' && !langCode.startsWith('en') && langCode !== 'hinglish')
+      ? langCode.split('-')[0]
       : undefined;
+
     const resp = await openai.transcribeAudio(buffer, mime, whisperLang);
     const latencyMs = Date.now() - startMs;
-    const text = (resp.text || '').trim();
+    const text = normalizeTranscriptText(resp.text || '');
 
-    // Track cost with actual duration
     if (callSid) costControl.addSttUsage(callSid, durationSec);
 
     // Filter noise-only transcriptions
-    // Whisper sometimes returns short fragments for silence/noise.
-    // We allow common greetings and confirmation words so the agent responds.
-    const NOISE_PATTERNS = /^[.\s...]+$/i;
-    const isTooShortLikelyNoise = text.length < 2;
-    if (!text || text.length < 2 || NOISE_PATTERNS.test(text) || isTooShortLikelyNoise) {
+    const noisePattern = /^[.\s...]+$/i;
+    if (!text || text.length < 2 || noisePattern.test(text)) {
       logger.debug(`STT: noise filtered "${text}" (${latencyMs}ms)`);
       return { text: '', confidence: 0, empty: true };
     }
@@ -65,7 +70,7 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') 
     return {
       text,
       confidence: resp?.segments?.[0]?.avg_logprob
-        ? Math.exp(resp.segments[0].avg_logprob)   // Convert log-prob to probability
+        ? Math.exp(resp.segments[0].avg_logprob)
         : 0.8,
       empty: false,
       latencyMs,
@@ -78,4 +83,4 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') 
   }
 }
 
-module.exports = { transcribe };
+module.exports = { transcribe, normalizeTranscriptText };

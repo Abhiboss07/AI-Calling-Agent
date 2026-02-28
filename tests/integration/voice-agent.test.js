@@ -45,8 +45,8 @@ describe('LLM voice agent', () => {
   });
 });
 
-// skip STT integration in CI or when no OpenAI key (Cloudflare Pages build, GitHub Actions, etc.)
-const shouldRunStt = !!process.env.OPENAI_API_KEY && !process.env.CI;
+// Run live STT integration only with explicit opt-in because it needs external network + OpenAI.
+const shouldRunStt = process.env.RUN_LIVE_STT_TESTS === 'true' && !!process.env.OPENAI_API_KEY && !process.env.CI;
 
 // choose suite name dynamically, but always call describe normally
 const suiteName = shouldRunStt ? 'STT transcription' : 'STT transcription (skipped in CI)';
