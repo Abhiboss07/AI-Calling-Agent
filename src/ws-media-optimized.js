@@ -12,14 +12,14 @@ const stt = require('./services/stt');
 const llm = require('./services/llm');
 const tts = require('./services/tts');
 const vobizClient = require('./services/vobizClient');
-const Call = require('../models/call.model');
-const Lead = require('../models/lead.model');
-const Transcript = require('../models/transcript.model');
+const Call = require('./models/call.model');
+const Lead = require('./models/lead.model');
+const Transcript = require('./models/transcript.model');
 const metrics = require('./services/metrics');
 const costControl = require('./services/costControlOptimized');
 const { ConversationFSM, States } = require('./services/conversationFSM');
-const config = require('../config');
-const { getLanguage } = require('../config/languages');
+const config = require('./config');
+const { getLanguage } = require('./config/languages');
 
 // MULAW ↔ PCM conversion tables
 const MULAW_DECODE = new Int16Array(256);
