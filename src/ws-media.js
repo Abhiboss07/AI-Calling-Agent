@@ -301,9 +301,10 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
 
   // Do not clear by default. Clearing before every play can clip/delay prompts.
 
-  // Send in real-time 20ms chunks (160 bytes of Âµ-law at 8kHz).
+  // Send in real-time 20ms chunks (160 bytes of µ-law at 8kHz).
   // Vobiz playback is more stable when we pace media rather than burst-sending.
   const totalChunks = Math.ceil(mulawBuffer.length / PLAYBACK_CHUNK_SIZE);
+  const playbackStartTime = Date.now();
 
   for (let i = 0; i < totalChunks; i++) {
     if (ws.readyState !== 1 || !session.isPlaying || session._playbackId !== playbackId) {
@@ -335,9 +336,13 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
       break;
     }
 
-    // Pace at ~20ms/frame unless overridden via env config.
+    // Drift-compensated pacing to prevent buffer underrun/stuttering
     if (i + 1 < totalChunks) {
-      await new Promise(r => setTimeout(r, PLAYBACK_CHUNK_INTERVAL_MS));
+      const expectedTime = playbackStartTime + (i + 1) * PLAYBACK_CHUNK_INTERVAL_MS;
+      const delay = expectedTime - Date.now();
+      if (delay > 0) {
+        await new Promise(r => setTimeout(r, Math.min(delay, PLAYBACK_CHUNK_INTERVAL_MS)));
+      }
     }
   }
 
@@ -803,7 +808,7 @@ async function deliverInitialGreeting(session, ws) {
       text: greetingText,
       confidence: 1.0
     });
-    
+
     // Notify monitoring clients of transcript
     monitoringServer.notifyTranscriptUpdate({
       callUuid: session.callSid,
@@ -920,7 +925,7 @@ async function processUtterance(session, pcmChunks, ws, pipelineId) {
     text: sttResult.text,
     confidence: sttResult.confidence
   });
-  
+
   // Notify monitoring clients of transcript
   monitoringServer.notifyTranscriptUpdate({
     callUuid: session.callSid,
@@ -1135,7 +1140,7 @@ async function endCallGracefully(session, ws, farewellText) {
     if (session.callSid) {
       await vobizClient.endCall(session.callSid).catch(e => logger.warn('End call API error', e.message));
     }
-    
+
     // Notify monitoring clients of call ended
     monitoringServer.notifyCallEnded({
       callUuid: session.callSid,
