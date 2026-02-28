@@ -7,7 +7,7 @@ const vobizRoutes = require('./routes/vobiz');
 const authRoutes = require('./routes/auth');
 const apiRoutes = require('./routes/api');
 const { verifyToken } = require('./middleware/auth');
-const setupWs = require('./ws-media');
+const setupWs = require('./ws-media-optimized');
 const metrics = require('./services/metrics');
 const { startMonitoring, router: monitoringRoutes } = require('./services/monitoring');
 
