@@ -574,7 +574,11 @@ module.exports = function setupWs(app) {
           const callerNumber = msg.start?.customParameters?.callerNumber || 
                               msg.start?.customParameters?.from || 
                               msg.start?.from || queryCallerNumber;
-          const streamSid = msg.streamSid || msg.start?.streamSid;
+          const streamSid = msg.streamSid
+            || msg.start?.streamSid
+            || msg.start?.streamId
+            || msg.stream_id
+            || `stream_${Date.now()}`;
           const language = msg.start?.customParameters?.language || queryLanguage;
           const direction = msg.start?.customParameters?.direction || queryDirection;
           
