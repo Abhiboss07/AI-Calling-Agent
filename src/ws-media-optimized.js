@@ -7,7 +7,7 @@
  * 4. Cost optimization with aggressive caching
  */
 
-const logger = require('../utils/logger');
+const logger = require('./utils/logger');
 const stt = require('./stt');
 const llm = require('./llm');
 const tts = require('./tts');
@@ -16,7 +16,7 @@ const Call = require('../models/call.model');
 const Lead = require('../models/lead.model');
 const Transcript = require('../models/transcript.model');
 const metrics = require('./metrics');
-const costControl = require('./costControl');
+const costControl = require('./costControlOptimized');
 const { ConversationFSM, States } = require('./conversationFSM');
 const config = require('../config');
 const { getLanguage } = require('../config/languages');
