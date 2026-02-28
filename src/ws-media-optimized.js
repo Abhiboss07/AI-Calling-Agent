@@ -652,32 +652,26 @@ module.exports = function setupWs(app) {
 // ═════════════════════════════════════════════════════════════════════════════
 
 function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
-  // Try to deliver pending greeting
+  // ── 0. Deliver pending greeting ──
   if (session._greetingPending && session.streamSid) {
     deliverInstantGreeting(session, ws).catch(e =>
       logger.warn('Greeting delivery failed', e.message)
     );
   }
 
-  // ── BARGE-IN DETECTION (must be checked BEFORE suppressing audio during playback) ──
+  // ── 1. BARGE-IN DETECTION (checked even during playback) ──
   if (session.isPlaying) {
     const playbackMs = Date.now() - session.playbackStartedAt;
-    const bargeInThreshold = Math.max(0.04, (session.noiseFloorRms || VAD_THRESHOLD) * 3.5);
-    const strongSpeech = rms >= bargeInThreshold;
-
-    if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && strongSpeech) {
+    const bargeInThreshold = 0.15; // User voice over phone must exceed this to interrupt
+    if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && rms >= bargeInThreshold) {
       session.interruptVoiceChunks++;
     } else {
       session.interruptVoiceChunks = 0;
     }
 
-    // Barge-in: 12 continuous loud chunks (~240ms)
-    if (session.interruptVoiceChunks >= 12) {
+    if (session.interruptVoiceChunks >= BARGE_IN_REQUIRED_CHUNKS) {
       logger.log('BARGE-IN: Stopping playback', {
-        callSid: session.callSid,
-        playbackMs,
-        rms: rms.toFixed(4),
-        chunks: session.interruptVoiceChunks
+        callSid: session.callSid, playbackMs, rms: rms.toFixed(4)
       });
       try { ws.send(JSON.stringify({ event: 'clearAudio' })); } catch (e) { /* ignore */ }
       session.isPlaying = false;
@@ -688,66 +682,69 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session.cancelOngoingOperations();
       session.fsm.handleInterrupt();
       metrics.incrementInterrupt();
-      // Start echo cool-down after barge-in
+      // Echo cool-down after barge-in — audio needs time to settle
       session._echoCooldownUntil = Date.now() + ECHO_COOLDOWN_MS;
-    } else {
-      return; // Still playing, suppress audio
     }
+    return; // During playback, only barge-in is checked
   }
 
-  // ECHO COOL-DOWN: discard audio for a brief period after playback ends
-  // This prevents residual echo from being classified as user speech
-  if (session._echoCooldownUntil && Date.now() < session._echoCooldownUntil) {
-    return; // Silently discard
-  }
-  if (session._echoCooldownUntil && Date.now() >= session._echoCooldownUntil) {
-    session._echoCooldownUntil = 0; // Cool-down expired
-    // Start noise calibration phase: sample audio to learn the real noise floor
+  // ── 2. ECHO COOL-DOWN: discard audio after playback ──
+  if (session._echoCooldownUntil) {
+    if (Date.now() < session._echoCooldownUntil) {
+      return; // Discard echo
+    }
+    // Cool-down just expired — start calibration
+    session._echoCooldownUntil = 0;
     session._noiseCalibrationRemaining = NOISE_CALIBRATION_CHUNKS;
-    session.noiseFloorRms = rms; // Seed with first chunk
-    logger.debug('Echo cool-down ended, starting noise calibration', { callSid: session.callSid, initialRms: rms.toFixed(4) });
+    session._calibrationStartedAt = Date.now();
+    session.noiseFloorRms = 0;
+    session._calibrationSamples = 0;
+    logger.debug('Echo cool-down ended, starting noise calibration', { callSid: session.callSid });
   }
 
-  // NOISE CALIBRATION PHASE: learn ambient noise level before enabling speech detection
-  // Reject high-RMS samples as echo residue — real ambient noise is below 0.15
+  // ── 3. NOISE CALIBRATION: learn ambient noise level ──
   if (session._noiseCalibrationRemaining > 0) {
-    if (rms < 0.15) {
-      // Good sample — this is real ambient noise
-      session._noiseCalibrationRemaining--;
-      session.noiseFloorRms = (session.noiseFloorRms * 0.7) + (rms * 0.3);
+    // Always accept samples — use ALL of them to learn the noise floor
+    session._noiseCalibrationRemaining--;
+    session._calibrationSamples++;
+    if (session._calibrationSamples === 1) {
+      session.noiseFloorRms = rms;
     } else {
-      // Echo residue still present — extend cool-down
-      session._echoCooldownUntil = Date.now() + 200; // Wait 200ms more
-      session._noiseCalibrationRemaining = NOISE_CALIBRATION_CHUNKS; // Reset calibration
-      session.noiseFloorRms = VAD_THRESHOLD; // Reset to default
-      return;
+      session.noiseFloorRms = (session.noiseFloorRms * 0.7) + (rms * 0.3);
     }
-    if (session._noiseCalibrationRemaining === 0) {
-      const calibratedThreshold = Math.max(VAD_THRESHOLD, session.noiseFloorRms * 1.5);
+
+    // Max calibration time: 3 seconds — after that, use whatever we have
+    const calibrationElapsed = Date.now() - (session._calibrationStartedAt || Date.now());
+    if (session._noiseCalibrationRemaining === 0 || calibrationElapsed > 3000) {
+      session._noiseCalibrationRemaining = 0;
+      // Ensure noise floor has a sensible minimum
+      if (session.noiseFloorRms < 0.001) session.noiseFloorRms = VAD_THRESHOLD * 0.5;
+      const threshold = Math.max(VAD_THRESHOLD, session.noiseFloorRms * 2.0);
       logger.log('Noise calibration complete', {
         callSid: session.callSid,
         noiseFloor: session.noiseFloorRms.toFixed(4),
-        dynamicThreshold: calibratedThreshold.toFixed(4)
+        dynamicThreshold: threshold.toFixed(4),
+        samples: session._calibrationSamples
       });
-      // Restart silence timer from NOW (not from greeting delivery)
+      // Start silence timer from NOW
       startSilenceTimer(session, ws);
     }
-    return; // Don't process audio during calibration
+    return;
   }
 
-  // Update noise floor (adaptive, only from quiet samples)
-  const floor = session.noiseFloorRms || (VAD_THRESHOLD * 0.6);
-  if (rms > 0 && rms < 0.15) {
-    session.noiseFloorRms = (floor * 0.97) + (rms * 0.03);
+  // ── 4. ADAPTIVE NOISE FLOOR (ongoing) ──
+  const floor = session.noiseFloorRms || VAD_THRESHOLD;
+  // Only update from quiet samples (below current threshold)
+  const currentDynThreshold = Math.max(VAD_THRESHOLD, floor * 2.0);
+  if (rms > 0 && rms < currentDynThreshold) {
+    session.noiseFloorRms = (floor * 0.95) + (rms * 0.05);
   }
 
-  // Dynamic threshold: above noise floor so silence detection works
-  // Cap at 0.3 — above this everything is noise and speech detection is meaningless
-  const dynamicThreshold = Math.min(Math.max(VAD_THRESHOLD, (session.noiseFloorRms || floor) * 1.5), 0.3);
-
+  // ── 5. VOICE ACTIVITY DETECTION ──
+  const dynamicThreshold = Math.max(VAD_THRESHOLD, (session.noiseFloorRms || VAD_THRESHOLD) * 2.0);
   const hasVoice = rms >= dynamicThreshold;
 
-  // Periodic RMS logging (every 250 chunks = ~5 seconds)
+  // Periodic logging (every ~5 seconds)
   session._rmsLogCounter = (session._rmsLogCounter || 0) + 1;
   if (session._rmsLogCounter % 250 === 0) {
     logger.log('Audio levels', {
@@ -760,19 +757,19 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     });
   }
 
+  // ── 6. VOICE DETECTED ──
   if (hasVoice) {
     session.speechChunkCount++;
     session.silentChunkCount = 0;
     session.lastVoiceActivityAt = Date.now();
 
+    // Pre-speech buffer (while waiting for SPEECH_START_CHUNKS)
     let bufferedInPreSpeech = false;
     if (!session.isSpeaking) {
       session.preSpeechMulaw.push(mulawBytes);
       session.preSpeechPcm.push(pcmChunk);
       session.preSpeechBytes += pcmChunk.length;
-
-      // Trim pre-speech buffer
-      if (session.preSpeechMulaw.length > 6) {
+      if (session.preSpeechMulaw.length > PRE_SPEECH_CHUNKS) {
         session.preSpeechMulaw.shift();
         const old = session.preSpeechPcm.shift();
         session.preSpeechBytes -= old?.length || 0;
@@ -785,9 +782,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session.userSpeakingWhileProcessing = true;
     }
 
-    // BARGE-IN is now handled at the top of processAudioChunk
-
-    // Speech start detection
+    // Speech start: N consecutive voice chunks
     if (!session.isSpeaking && session.speechChunkCount >= SPEECH_START_CHUNKS) {
       session.isSpeaking = true;
       session.speechStartedAt = Date.now();
@@ -798,10 +793,9 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
         threshold: dynamicThreshold.toFixed(4),
         timeSinceCallStart: `${((Date.now() - session.startTime) / 1000).toFixed(1)}s`
       });
-
       clearTimeout(session.silenceTimer);
 
-      // Flush pre-speech buffer
+      // Flush pre-speech buffer into main buffer
       if (session.preSpeechPcm.length > 0) {
         session.audioChunks.push(...session.preSpeechMulaw);
         session.pcmBuffer.push(...session.preSpeechPcm);
@@ -818,8 +812,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session.pcmBuffer.push(pcmChunk);
       session.totalPcmBytes += pcmChunk.length;
 
-      // Max speech duration: force processing after MAX_SPEECH_DURATION_MS
-      // This prevents endless buffering when echo/noise keeps VAD active
+      // Safety: max speech duration (prevents infinite buffering)
       const speechDuration = Date.now() - session.speechStartedAt;
       if (speechDuration >= MAX_SPEECH_DURATION_MS) {
         logger.log('Max speech duration reached, forcing processing', {
@@ -827,31 +820,27 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
           durationMs: speechDuration,
           bytes: session.totalPcmBytes
         });
-        // CRITICAL: Reset speech state BEFORE calling triggerProcessing
-        // Without this, every subsequent 20ms chunk re-triggers processing
-        // (since speechStartedAt is still in the past) and cancels the running STT
         session.isSpeaking = false;
         session.speechStartedAt = 0;
         session.speechChunkCount = 0;
         triggerProcessing(session, ws);
+        startSilenceTimer(session, ws);
         return;
       }
 
       // Buffer overflow protection
       if (session.totalPcmBytes > MAX_BUFFER_BYTES) {
         logger.warn('Buffer overflow, forcing processing', session.callSid);
-        // Reset speech state to prevent re-triggering
         session.isSpeaking = false;
         session.speechStartedAt = 0;
         session.speechChunkCount = 0;
         triggerProcessing(session, ws);
       }
     }
-
     return;
   }
 
-  // Silence detected
+  // ── 7. SILENCE DETECTED ──
   session.silentChunkCount++;
   session.speechChunkCount = 0;
   session.interruptVoiceChunks = 0;
@@ -863,27 +852,32 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     session.preSpeechBytes = 0;
   }
 
-  // Speech end detection
+  // Speech end: N consecutive silent chunks
   if (session.isSpeaking && session.silentChunkCount >= SPEECH_END_CHUNKS) {
+    const speechDuration = Date.now() - session.speechStartedAt;
     session.isSpeaking = false;
+    session.speechStartedAt = 0;
+    session.speechChunkCount = 0;
     logger.log('Speech ended (silence detected)', {
       callSid: session.callSid,
       bytes: session.totalPcmBytes,
-      silentChunks: session.silentChunkCount,
-      durationMs: Date.now() - session.speechStartedAt
+      durationMs: speechDuration,
+      silentChunks: session.silentChunkCount
     });
 
     const effectiveMinBytes = Math.max(800, Math.floor(MIN_UTTERANCE_BYTES * 0.6));
     if (session.totalPcmBytes >= effectiveMinBytes) {
       triggerProcessing(session, ws);
     } else {
+      logger.debug('Utterance too short, discarding', {
+        callSid: session.callSid, bytes: session.totalPcmBytes, min: effectiveMinBytes
+      });
       clearBuffers(session);
     }
-
     startSilenceTimer(session, ws);
   }
 
-  // Start silence timer if not speaking
+  // Start silence timer if idle
   if (!session.isSpeaking && !session.silenceTimer) {
     startSilenceTimer(session, ws);
   }
