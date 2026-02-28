@@ -983,13 +983,15 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
 
   // Handle actions
   if (finalAction === 'hangup' || finalAction === 'escalate') {
-    const farewell = reply.action === 'escalate'
+    const farewell = finalAction === 'escalate'
       ? 'Let me connect you with our property expert right away. Please hold.'
       : null;
     await endCallGracefully(session, ws, farewell);
   } else if (!costControl.isWithinBudget(session.callSid)) {
-    logger.warn('Per-call budget exceeded', session.callSid);
-    await endCallGracefully(session, ws, getLanguage(session.language).farewell);
+    logger.warn('Budget exceeded, hanging up', session.callSid);
+    await endCallGracefully(session, ws, 'Our call duration limit is reached. We will call you back. Goodbye.');
+  } else if (session.fsm.getState() === 'call_ended') {
+    await endCallGracefully(session, ws, null);
   }
 }
 
