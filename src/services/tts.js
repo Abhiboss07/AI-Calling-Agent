@@ -207,8 +207,8 @@ async function* synthesizeStream(text, callSid, language = 'en-IN') {
         const processBuf = buffer.subarray(0, CHUNK_SIZE);
         buffer = buffer.subarray(CHUNK_SIZE);
 
-        // Resample 24kHz -> 8kHz
-        const pcm8k = resample24kTo8k(processBuf);
+        // Resample 24kHz -> 8kHz (use fast downsampling to avoid sinc boundary artifacts on chunks)
+        const pcm8k = downsample24kTo8kFast(processBuf);
 
         // Convert to mu-law explicitly for Vobiz
         const mulawBuffer = pcmBufferToMulaw(pcm8k);
@@ -219,10 +219,11 @@ async function* synthesizeStream(text, callSid, language = 'en-IN') {
 
     // Process any remaining bytes at the end of the stream
     if (buffer.length > 0) {
-      // Ensure we have an even number of bytes for 16-bit PCM
-      const safeBuffer = buffer.length % 2 === 0 ? buffer : buffer.subarray(0, buffer.length - 1);
+      // Ensure we have an even number of bytes for 16-bit PCM and divisible by 6 for 3:1 average downsampling
+      const extra = buffer.length % 6;
+      const safeBuffer = extra === 0 ? buffer : buffer.subarray(0, buffer.length - extra);
       if (safeBuffer.length > 0) {
-        const pcm8k = resample24kTo8k(safeBuffer);
+        const pcm8k = downsample24kTo8kFast(safeBuffer);
         const mulawBuffer = pcmBufferToMulaw(pcm8k);
         yield mulawBuffer;
       }

@@ -606,8 +606,8 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
                   sentenceBuffer += str;
                   extractedSpeak += str;
 
-                  // Yield sentence immediately upon punctuation
-                  if (/[.?!]\s*$/.test(sentenceBuffer)) {
+                  // Yield sentence immediately upon punctuation or pause markers
+                  if (/[.,?!:-]\s*$/.test(sentenceBuffer)) {
                     yield { type: 'sentence', text: sentenceBuffer.trim() };
                     sentenceBuffer = '';
                   }

@@ -195,6 +195,11 @@ class EnhancedCallSession {
     this.preSpeechBytes = 0;
     this.noiseFloorRms = VAD_THRESHOLD * 0.6;
 
+    // Playback buffering
+    this.playbackQueue = []; // Array of mu-law buffers
+    this.playbackLoopRunning = false;
+    this.audioResidue = Buffer.alloc(0);
+
     // State management
     this.isProcessing = false;
     this.isSpeaking = false;
@@ -273,102 +278,61 @@ async function sendAudioThroughStream(session, ws, mulawBuffer, options = {}) {
   session.isPlaying = true;
   session.playbackStartedAt = Date.now();
   session.interruptVoiceChunks = 0;
-  session._playbackId = (session._playbackId || 0) + 1;
-  const playbackId = session._playbackId;
 
-  // For fast start, use larger initial chunks
-  const chunkSize = fastStart ? Math.min(640, mulawBuffer.length) : PLAYBACK_CHUNK_SIZE;
-  const totalChunks = Math.ceil(mulawBuffer.length / chunkSize);
   let chunksSent = 0;
 
-  for (let i = 0; i < totalChunks; i++) {
-    // Check for interruption
-    if (ws.readyState !== 1 || !session.isPlaying || session._playbackId !== playbackId) {
-      logger.debug('Playback interrupted', {
-        callSid: session.callSid,
-        chunk: i,
-        total: totalChunks,
-        reason: session._playbackId !== playbackId ? 'new_playback' : 'state_change'
-      });
-      break;
-    }
-
-    // Check for barge-in
-    if (session.interruptVoiceChunks >= BARGE_IN_REQUIRED_CHUNKS) {
-      logger.log('Barge-in detected during playback', {
-        callSid: session.callSid,
-        chunks: session.interruptVoiceChunks
-      });
-
-      // Send clear audio command
-      try {
-        ws.send(JSON.stringify({ event: 'clearAudio' }));
-      } catch (e) { /* ignore */ }
-
-      session.isPlaying = false;
-      session.fsm.handleInterrupt();
-      metrics.incrementInterrupt();
-
-      // Cancel ongoing operations
-      session.cancelOngoingOperations();
-
-      return false; // Playback was interrupted
-    }
-
-    const start = i * chunkSize;
-    const end = Math.min(start + chunkSize, mulawBuffer.length);
-    const chunk = mulawBuffer.slice(start, end);
-
-    const msg = JSON.stringify({
-      event: 'playAudio',
-      streamSid: session.streamSid,
-      contentType: 'audio/x-mulaw',
-      sampleRate: 8000,
-      media: {
-        streamSid: session.streamSid,
-        contentType: 'audio/x-mulaw',
-        sampleRate: 8000,
-        payload: chunk.toString('base64')
+  try {
+    while ((session.playbackQueue.length > 0 || session.audioResidue.length > 0) && session.isPlaying && ws.readyState === 1) {
+      if (session.audioResidue.length < PLAYBACK_CHUNK_SIZE && session.playbackQueue.length > 0) {
+        session.audioResidue = Buffer.concat([session.audioResidue, session.playbackQueue.shift()]);
       }
-    });
 
-    try {
-      ws.send(msg);
-      chunksSent++;
-    } catch (err) {
-      logger.warn('Stream send error', err.message);
-      break;
-    }
+      const chunkSize = Math.min(PLAYBACK_CHUNK_SIZE, session.audioResidue.length);
+      if (chunkSize === 0) break;
 
-    // Pace at ~real-time, but allow fast start for greeting
-    if (!skipPacing && i + 1 < totalChunks) {
-      // Drift-compensated pacing
-      let interval = PLAYBACK_CHUNK_INTERVAL_MS;
-      if (fastStart && i < 5) interval = Math.max(5, interval / 2); // Faster at start
+      const chunk = session.audioResidue.subarray(0, chunkSize);
+      session.audioResidue = session.audioResidue.subarray(chunkSize);
 
-      const expectedTime = session.playbackStartedAt + (i + 1) * interval;
+      const msg = JSON.stringify({
+        event: 'playAudio',
+        streamSid: session.streamSid,
+        media: { payload: chunk.toString('base64') }
+      });
+
+      try {
+        ws.send(msg);
+        chunksSent++;
+      } catch (err) {
+        logger.warn('Stream send error', err.message);
+        break;
+      }
+
+      // Exact Pacing
+      const expectedTime = session.playbackStartedAt + chunksSent * PLAYBACK_CHUNK_INTERVAL_MS;
       const delay = expectedTime - Date.now();
-
       if (delay > 0) {
         await new Promise(r => setTimeout(r, delay));
       }
     }
+  } finally {
+    session.playbackLoopRunning = false;
+    // We only send a checkpoint if the queue is fully drained (meaning the segment is completely done playing).
+    // The LLM/TTS generation might just be done, or we might have been interrupted.
+    if (!session.isPlaying || (session.playbackQueue.length === 0 && session.audioResidue.length === 0)) {
+      session.isPlaying = false;
+      session.playbackStartedAt = 0;
+      session.interruptVoiceChunks = 0;
+      try {
+        ws.send(JSON.stringify({ event: 'checkpoint', name: `speech_${Date.now()}` }));
+      } catch (e) { /* ignore */ }
+    }
   }
+}
 
-  // Send checkpoint
-  try {
-    ws.send(JSON.stringify({
-      event: 'checkpoint',
-      name: `speech_${Date.now()}`
-    }));
-  } catch (e) { /* ignore */ }
-
-  const completed = chunksSent === totalChunks;
-  session.isPlaying = false;
-  session.playbackStartedAt = 0;
-  session.interruptVoiceChunks = 0;
-
-  return completed;
+// Alias for old usage, backwards compatible to just enqueue
+async function sendAudioThroughStream(session, ws, mulawBuffer) {
+  enqueueAudio(session, ws, mulawBuffer);
+  return true; // We don't block anymore!
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -732,6 +696,8 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
         session.isPlaying = false;
         session.playbackStartedAt = 0;
         session.interruptVoiceChunks = 0;
+        session.playbackQueue = [];
+        session.audioResidue = Buffer.alloc(0);
 
         // Cancel ongoing pipeline
         session.cancelOngoingOperations();
