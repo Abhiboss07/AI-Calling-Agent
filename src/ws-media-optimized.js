@@ -8,16 +8,16 @@
  */
 
 const logger = require('./utils/logger');
-const stt = require('./stt');
-const llm = require('./llm');
-const tts = require('./tts');
-const vobizClient = require('./vobizClient');
+const stt = require('./services/stt');
+const llm = require('./services/llm');
+const tts = require('./services/tts');
+const vobizClient = require('./services/vobizClient');
 const Call = require('../models/call.model');
 const Lead = require('../models/lead.model');
 const Transcript = require('../models/transcript.model');
-const metrics = require('./metrics');
-const costControl = require('./costControlOptimized');
-const { ConversationFSM, States } = require('./conversationFSM');
+const metrics = require('./services/metrics');
+const costControl = require('./services/costControlOptimized');
+const { ConversationFSM, States } = require('./services/conversationFSM');
 const config = require('../config');
 const { getLanguage } = require('../config/languages');
 
