@@ -304,7 +304,7 @@ async function runPlaybackLoop(session, ws) {
       session.audioResidue = session.audioResidue.subarray(chunkSize);
 
       const msg = JSON.stringify({
-        event: 'playAudio',
+        event: 'media',
         streamSid: session.streamSid,
         media: { payload: chunk.toString('base64') }
       });

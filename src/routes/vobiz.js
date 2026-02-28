@@ -156,7 +156,7 @@ router.post('/answer', webhookRateLimit(60000, 100), validateVobizSignature, asy
         '<Response>',
         // Bidirectional stream — call stays alive as long as WS is open
         // URL must be clean (no leading whitespace/newlines) for Vobiz to parse correctly
-        `  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000" statusCallbackUrl="${xmlEscape(statusUrl)}" statusCallbackMethod="POST">${streamUrl}?callUuid=${callUuid}&amp;callerNumber=${xmlEscape(customerNumber)}&amp;direction=${xmlEscape(normalizedDirection)}&amp;language=${xmlEscape(language)}</Stream>`,
+        `  <Stream bidirectional="true" keepCallAlive="true" statusCallbackUrl="${xmlEscape(statusUrl)}" statusCallbackMethod="POST">${streamUrl}?callUuid=${callUuid}&amp;callerNumber=${xmlEscape(customerNumber)}&amp;direction=${xmlEscape(normalizedDirection)}&amp;language=${xmlEscape(language)}</Stream>`,
         '</Response>'
     ].join('\n');
 
