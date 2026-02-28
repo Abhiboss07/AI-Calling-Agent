@@ -239,7 +239,9 @@ class EnhancedCallSession {
     // Echo cool-down: discard audio for a brief period after playback ends
     this._echoCooldownUntil = 0;
     // Noise calibration: after cool-down, sample audio to learn noise floor
-    this._noiseCalibrationRemaining = NOISE_CALIBRATION_CHUNKS; // Also calibrate at call start
+    // NOTE: starts at 0, only set after echo cool-down (not at session start,
+    // because early audio arrives during greeting playback = echo at full volume)
+    this._noiseCalibrationRemaining = 0;
 
     // RMS logging
     this._rmsLogCounter = 0;
@@ -657,6 +659,13 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     );
   }
 
+  // ── STRICT HALF-DUPLEX: suppress ALL audio processing during playback ──
+  // Vobiz has no AEC, so the greeting/TTS echo comes back at full volume
+  // (RMS 0.5-0.9). We must skip everything — including calibration — during playback.
+  if (session.isPlaying) {
+    return; // Completely deaf while agent speaks
+  }
+
   // ECHO COOL-DOWN: discard audio for a brief period after playback ends
   // This prevents residual echo from being classified as user speech
   if (session._echoCooldownUntil && Date.now() < session._echoCooldownUntil) {
@@ -677,7 +686,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     // Aggressively track noise floor during calibration (fast convergence)
     session.noiseFloorRms = (session.noiseFloorRms * 0.8) + (rms * 0.2);
     if (session._noiseCalibrationRemaining === 0) {
-      const calibratedThreshold = Math.max(VAD_THRESHOLD, session.noiseFloorRms * 2.5);
+      const calibratedThreshold = Math.max(VAD_THRESHOLD, Math.min(session.noiseFloorRms * 2.5, VAD_THRESHOLD * 8));
       logger.log('Noise calibration complete', {
         callSid: session.callSid,
         noiseFloor: session.noiseFloorRms.toFixed(4),
@@ -695,27 +704,22 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     session.noiseFloorRms = (floor * 0.97) + (rms * 0.03);
   }
 
-  // Dynamic threshold: must be significantly above noise floor to count as speech
-  const dynamicThreshold = Math.max(VAD_THRESHOLD, (session.noiseFloorRms || floor) * 2.5);
+  // Dynamic threshold: must be above noise floor but CAPPED to remain reachable
+  // Cap at VAD_THRESHOLD * 8 (~0.096) so real speech (RMS ~0.03-0.15) can always trigger
+  const dynamicThreshold = Math.max(VAD_THRESHOLD, Math.min((session.noiseFloorRms || floor) * 2.5, VAD_THRESHOLD * 8));
 
-  // STRICT HALF-DUPLEX ECHO SUPPRESSION:
-  // Because Vobiz lacks Acoustic Echo Cancellation (AEC), the agent's playback 
-  // bleeds back into the microphone at very high volume levels (RMS 0.25+). 
-  // We completely deafen the microphone while the agent speaks by setting an impossible threshold.
-  const currentThreshold = session.isPlaying ? 999.0 : dynamicThreshold;
-  const hasVoice = rms >= currentThreshold;
+  const hasVoice = rms >= dynamicThreshold;
 
   // Periodic RMS logging (every 250 chunks = ~5 seconds)
   session._rmsLogCounter = (session._rmsLogCounter || 0) + 1;
   if (session._rmsLogCounter % 250 === 0) {
-    logger.debug('Audio levels', {
+    logger.log('Audio levels', {
       callSid: session.callSid,
       rms: rms.toFixed(4),
       noiseFloor: (session.noiseFloorRms || 0).toFixed(4),
-      threshold: currentThreshold.toFixed(4),
+      threshold: dynamicThreshold.toFixed(4),
       hasVoice,
-      isSpeaking: session.isSpeaking,
-      isPlaying: session.isPlaying
+      isSpeaking: session.isSpeaking
     });
   }
 
