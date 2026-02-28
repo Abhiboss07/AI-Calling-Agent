@@ -678,7 +678,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       const playbackMs = Date.now() - session.playbackStartedAt;
 
       // Require a significantly louder signal to interrupt playback (barge-in)
-      const bargeInThreshold = Math.max(0.025, dynamicThreshold * 3.0);
+      const bargeInThreshold = Math.max(0.04, dynamicThreshold * 3.5);
       const strongSpeech = rms >= bargeInThreshold;
 
       if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && strongSpeech) {
@@ -687,8 +687,8 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
         session.interruptVoiceChunks = 0;
       }
 
-      // Immediate interrupt on strong speech
-      if (session.interruptVoiceChunks >= BARGE_IN_REQUIRED_CHUNKS) {
+      // Immediate interrupt on strong speech (requires 12 continuous chunks ~ 240ms of loud noise)
+      if (session.interruptVoiceChunks >= 12) {
         logger.log('BARGE-IN: Stopping playback', {
           callSid: session.callSid,
           playbackMs,
