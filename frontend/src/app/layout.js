@@ -24,7 +24,13 @@ export default function RootLayout({ children }) {
                 <Sidebar />
                 <div className="layout-body">
                   <TopBar />
-                  <main>{children}</main>
+                  <main style={{ 
+                    flex: 1, 
+                    padding: '32px', 
+                    overflowY: 'auto', 
+                    background: 'var(--bg-primary)',
+                    marginLeft: 'var(--sidebar-width)'
+                  }}>{children}</main>
                 </div>
               </div>
             </WebSocketProvider>

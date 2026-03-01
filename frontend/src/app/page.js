@@ -44,14 +44,14 @@ export default function DashboardPage() {
   const allCalls = [...(calls || []).reverse(), ...recentCalls].slice(0, 10);
 
   return (
-    <div style={{ padding: '32px', maxWidth: 1200, margin: '0 auto' }}>
+    <div style={{ padding: '32px', maxWidth: '1280px', margin: '0 auto' }}>
       {/* Welcome Section */}
       <div className="fade-in-up" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 32 }}>
         <div>
-          <h2 style={{ fontSize: 30, fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.02em', margin: 0 }}>Dashboard Overview</h2>
-          <p style={{ color: 'var(--text-muted)', marginTop: 8, fontSize: 15, margin: '8px 0 0' }}>Real-time performance monitoring for your AI Calling Agents.</p>
+          <h2 style={{ fontSize: 32, fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.02em', margin: 0 }}>Dashboard Overview</h2>
+          <p style={{ color: 'var(--text-muted)', marginTop: 8, fontSize: 15, margin: '8px 0 0' }}>Real-time performance monitoring for your Real Estate AI Calling Agents.</p>
         </div>
-        <button className="glass-btn" style={{
+        <button className="glass-btn neon-glow-blue" style={{
           display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px',
           background: 'var(--bg-hover)', border: '1px solid var(--border)',
           borderRadius: 8, color: 'var(--text-secondary)', fontSize: 14, fontWeight: 600,
@@ -65,12 +65,9 @@ export default function DashboardPage() {
       {/* KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 24, marginBottom: 32 }}>
         {kpiCards.map((kpi, i) => (
-          <div key={i} className="fade-in-up glass-card" style={{
+          <div key={i} className="fade-in-up glass" style={{
             animationDelay: `${i * 0.08}s`,
             padding: 24, borderRadius: 12,
-            background: 'rgba(255,255,255,0.03)',
-            backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255,255,255,0.05)',
             borderLeft: `4px solid ${kpi.color}`,
             transition: 'transform 0.3s, box-shadow 0.3s',
             cursor: 'default'
@@ -90,7 +87,7 @@ export default function DashboardPage() {
               </span>
             </div>
             <p style={{ color: 'var(--text-muted)', fontSize: 14, fontWeight: 500, margin: 0 }}>{kpi.label}</p>
-            <h3 style={{ fontSize: 30, fontWeight: 700, color: 'var(--text-primary)', margin: '4px 0 0', letterSpacing: '-0.02em' }}>{kpi.value}</h3>
+            <h3 style={{ fontSize: 32, fontWeight: 700, color: 'var(--text-primary)', margin: '4px 0 0', letterSpacing: '-0.02em' }}>{kpi.value}</h3>
           </div>
         ))}
       </div>
@@ -100,9 +97,8 @@ export default function DashboardPage() {
         {/* Left Column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {/* Live Monitor Table */}
-          <div className="fade-in-up glass-card" style={{
-            background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, overflow: 'hidden',
+          <div className="fade-in-up glass" style={{
+            overflow: 'hidden',
             animationDelay: '0.3s'
           }}>
             <div style={{
@@ -184,10 +180,8 @@ export default function DashboardPage() {
           </div>
 
           {/* Call Volume Chart */}
-          <div className="fade-in-up glass-card" style={{
+          <div className="fade-in-up glass" style={{
             padding: 24, borderRadius: 12, minHeight: 220,
-            background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255,255,255,0.05)',
             display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
             animationDelay: '0.4s'
           }}>
@@ -213,10 +207,8 @@ export default function DashboardPage() {
         {/* Right Column: Side Stats */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {/* Top Agent Stats */}
-          <div className="fade-in-up glass-card" style={{
+          <div className="fade-in-up glass" style={{
             padding: 24, borderRadius: 12,
-            background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255,255,255,0.05)',
             animationDelay: '0.35s'
           }}>
             <h3 style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 24, fontSize: 15, margin: '0 0 24px' }}>Top Agent Stats</h3>
@@ -254,10 +246,8 @@ export default function DashboardPage() {
           </div>
 
           {/* Quick Resources */}
-          <div className="fade-in-up glass-card" style={{
+          <div className="fade-in-up glass" style={{
             padding: 24, borderRadius: 12,
-            background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255,255,255,0.05)',
             animationDelay: '0.4s'
           }}>
             <h3 style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 16, fontSize: 15, margin: '0 0 16px' }}>Quick Resources</h3>
@@ -286,7 +276,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Automated Optimization */}
-          <div className="fade-in-up glow-card" style={{
+          <div className="fade-in-up" style={{
             padding: 24, borderRadius: 12,
             background: 'linear-gradient(135deg, rgba(19,91,236,0.1), rgba(168,85,247,0.1))',
             border: '1px solid rgba(19,91,236,0.2)',

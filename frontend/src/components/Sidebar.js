@@ -101,7 +101,7 @@ export default function Sidebar() {
                     transition: 'opacity 0.2s'
                 }}>
                     <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add_circle</span>
-                    Test Call
+                    Deploy New Agent
                 </Link>
             </div>
         </aside>
