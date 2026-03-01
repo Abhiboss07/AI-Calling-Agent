@@ -54,12 +54,12 @@ export default function KnowledgeBasePage() {
             </aside>
 
             {/* Main Content: Document List */}
-            <main className="flex-1 overflow-y-auto p-8 bg-background-light dark:bg-background-dark">
-                <div className="max-w-5xl mx-auto">
-                    <div className="flex items-center justify-between mb-8">
+            <main className="flex-1 overflow-y-auto p-6 bg-background-light dark:bg-background-dark">
+                <div className="w-full max-w-6xl mx-auto">
+                    <div className="flex items-center justify-between mb-6">
                         <div>
-                            <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-1">Learned Documents</h1>
-                            <p className="text-slate-500 dark:text-slate-400 text-sm">Manage the resources your AI agent uses to answer client inquiries.</p>
+                            <h1 className="text-xl font-bold text-slate-900 dark:text-white mb-1">Learned Documents</h1>
+                            <p className="text-slate-500 dark:text-slate-400 text-xs text-balance max-w-md">Manage the resources your AI agent uses to answer client inquiries.</p>
                         </div>
                         <div className="flex gap-2">
                             <button className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
@@ -76,127 +76,127 @@ export default function KnowledgeBasePage() {
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Document Name</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Added On</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
+                                    <th className="px-4 py-3 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Document Name</th>
+                                    <th className="px-4 py-3 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Type</th>
+                                    <th className="px-4 py-3 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                                    <th className="px-4 py-3 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Added On</th>
+                                    <th className="px-4 py-3 text-[10px] font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                                 {/* Document Row 1 */}
                                 <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
-                                    <td className="px-6 py-4">
+                                    <td className="px-4 py-3">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-8 h-10 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded flex items-center justify-center">
-                                                <span className="material-symbols-outlined text-lg">picture_as_pdf</span>
+                                            <div className="w-7 h-8 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded flex items-center justify-center flex-shrink-0">
+                                                <span className="material-symbols-outlined text-[16px]">picture_as_pdf</span>
                                             </div>
-                                            <div>
-                                                <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Oceanview_Penthouse_Listing.pdf</p>
-                                                <p className="text-xs text-slate-400">1.2 MB • 4 pages</p>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate pr-2" title="Oceanview_Penthouse_Listing.pdf">Oceanview_Penthouse_Listing.pdf</p>
+                                                <p className="text-[10px] text-slate-400">1.2 MB • 4 pages</p>
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4">
-                                        <span className="text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">Listing</span>
+                                    <td className="px-4 py-3">
+                                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 whitespace-nowrap">Listing</span>
                                     </td>
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                                            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Ready</span>
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center gap-1.5 min-w-[70px]">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
+                                            <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Ready</span>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-slate-500">Oct 24, 2023</td>
-                                    <td className="px-6 py-4 text-right">
-                                        <button className="text-slate-400 hover:text-primary transition-colors">
-                                            <span className="material-symbols-outlined">more_horiz</span>
+                                    <td className="px-4 py-3 text-[10px] text-slate-500 whitespace-nowrap">Oct 24, 2023</td>
+                                    <td className="px-4 py-3 text-right">
+                                        <button className="text-slate-400 hover:text-primary transition-colors focus:outline-none">
+                                            <span className="material-symbols-outlined text-[18px]">more_horiz</span>
                                         </button>
                                     </td>
                                 </tr>
                                 {/* Document Row 2 */}
                                 <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
-                                    <td className="px-6 py-4">
+                                    <td className="px-4 py-3">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-8 h-10 bg-blue-100 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded flex items-center justify-center">
-                                                <span className="material-symbols-outlined text-lg">language</span>
+                                            <div className="w-7 h-8 bg-blue-100 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded flex items-center justify-center flex-shrink-0">
+                                                <span className="material-symbols-outlined text-[16px]">language</span>
                                             </div>
-                                            <div>
-                                                <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">https://realestate.com/faq-section</p>
-                                                <p className="text-xs text-slate-400">Scraped 12 pages</p>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate pr-2" title="https://realestate.com/faq-section">https://realestate.com/faq-section</p>
+                                                <p className="text-[10px] text-slate-400">Scraped 12 pages</p>
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4">
-                                        <span className="text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">Website URL</span>
+                                    <td className="px-4 py-3">
+                                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 whitespace-nowrap">Website URL</span>
                                     </td>
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
-                                            <span className="text-xs font-medium text-primary">Processing...</span>
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center gap-1.5 min-w-[70px]">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse flex-shrink-0"></span>
+                                            <span className="text-[10px] font-medium text-primary">Processing</span>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-slate-500">Just now</td>
-                                    <td className="px-6 py-4 text-right">
-                                        <button className="text-slate-400 hover:text-primary transition-colors">
-                                            <span className="material-symbols-outlined">more_horiz</span>
+                                    <td className="px-4 py-3 text-[10px] text-slate-500 whitespace-nowrap">Just now</td>
+                                    <td className="px-4 py-3 text-right">
+                                        <button className="text-slate-400 hover:text-primary transition-colors focus:outline-none">
+                                            <span className="material-symbols-outlined text-[18px]">more_horiz</span>
                                         </button>
                                     </td>
                                 </tr>
                                 {/* Document Row 3 */}
                                 <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
-                                    <td className="px-6 py-4">
+                                    <td className="px-4 py-3">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-8 h-10 bg-amber-100 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded flex items-center justify-center">
-                                                <span className="material-symbols-outlined text-lg">article</span>
+                                            <div className="w-7 h-8 bg-amber-100 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded flex items-center justify-center flex-shrink-0">
+                                                <span className="material-symbols-outlined text-[16px]">article</span>
                                             </div>
-                                            <div>
-                                                <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">First_Time_Buyer_Script.docx</p>
-                                                <p className="text-xs text-slate-400">45 KB • 2 pages</p>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate pr-2" title="First_Time_Buyer_Script.docx">First_Time_Buyer_Script.docx</p>
+                                                <p className="text-[10px] text-slate-400">45 KB • 2 pages</p>
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4">
-                                        <span className="text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">Script</span>
+                                    <td className="px-4 py-3">
+                                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 whitespace-nowrap">Script</span>
                                     </td>
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                                            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Ready</span>
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center gap-1.5 min-w-[70px]">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
+                                            <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Ready</span>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-slate-500">Oct 20, 2023</td>
-                                    <td className="px-6 py-4 text-right">
-                                        <button className="text-slate-400 hover:text-primary transition-colors">
-                                            <span className="material-symbols-outlined">more_horiz</span>
+                                    <td className="px-4 py-3 text-[10px] text-slate-500 whitespace-nowrap">Oct 20, 2023</td>
+                                    <td className="px-4 py-3 text-right">
+                                        <button className="text-slate-400 hover:text-primary transition-colors focus:outline-none">
+                                            <span className="material-symbols-outlined text-[18px]">more_horiz</span>
                                         </button>
                                     </td>
                                 </tr>
                                 {/* Document Row 4 */}
                                 <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
-                                    <td className="px-6 py-4">
+                                    <td className="px-4 py-3">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-8 h-10 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded flex items-center justify-center">
-                                                <span className="material-symbols-outlined text-lg">picture_as_pdf</span>
+                                            <div className="w-7 h-8 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded flex items-center justify-center flex-shrink-0">
+                                                <span className="material-symbols-outlined text-[16px]">picture_as_pdf</span>
                                             </div>
-                                            <div>
-                                                <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Mortgage_Rates_2024.pdf</p>
-                                                <p className="text-xs text-slate-400">2.4 MB • 15 pages</p>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate pr-2" title="Mortgage_Rates_2024.pdf">Mortgage_Rates_2024.pdf</p>
+                                                <p className="text-[10px] text-slate-400">2.4 MB • 15 pages</p>
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4">
-                                        <span className="text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">Finance</span>
+                                    <td className="px-4 py-3">
+                                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 whitespace-nowrap">Finance</span>
                                     </td>
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                                            <span className="text-xs font-medium text-slate-500">Paused</span>
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center gap-1.5 min-w-[70px]">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 flex-shrink-0"></span>
+                                            <span className="text-[10px] font-medium text-slate-500">Paused</span>
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-slate-500">Oct 18, 2023</td>
-                                    <td className="px-6 py-4 text-right">
-                                        <button className="text-slate-400 hover:text-primary transition-colors">
-                                            <span className="material-symbols-outlined">more_horiz</span>
+                                    <td className="px-4 py-3 text-[10px] text-slate-500 whitespace-nowrap">Oct 18, 2023</td>
+                                    <td className="px-4 py-3 text-right">
+                                        <button className="text-slate-400 hover:text-primary transition-colors focus:outline-none">
+                                            <span className="material-symbols-outlined text-[18px]">more_horiz</span>
                                         </button>
                                     </td>
                                 </tr>

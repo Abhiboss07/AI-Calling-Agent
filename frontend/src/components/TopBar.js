@@ -90,17 +90,13 @@ export default function TopBar() {
                 )}
 
                 <div className="flex items-center gap-4 border-r border-slate-800 pr-6">
-                    <a
-                        href="https://workabhi.com"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 group hover:bg-slate-800/50 py-1.5 px-3 rounded-lg transition-colors border border-transparent hover:border-slate-700"
-                    >
-                        <div className="w-6 h-6 rounded bg-primary/20 flex items-center justify-center">
-                            <span className="text-primary font-black text-xs">W</span>
-                        </div>
-                        <span className="text-sm font-bold text-slate-300 group-hover:text-white transition-colors">workabhi</span>
-                    </a>
+                    <button className="relative text-slate-400 hover:text-slate-100 transition-colors">
+                        <span className="material-symbols-outlined text-xl">notifications</span>
+                        <span className="absolute top-0 right-0 w-2 h-2 bg-primary rounded-full border border-background-dark animate-pulse"></span>
+                    </button>
+                    <button className="text-slate-400 hover:text-slate-100 transition-colors">
+                        <span className="material-symbols-outlined text-xl">chat_bubble</span>
+                    </button>
                 </div>
 
                 {/* User Profile & Dropdown */}
