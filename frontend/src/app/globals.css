@@ -6,7 +6,7 @@
 
 :root {
   /* Core Colors */
-  --bg-primary: #f8f9fa;
+  --bg-primary: #f5f5f7;
   --bg-white: #ffffff;
   --bg-sidebar: #ffffff;
   --bg-hover: #f3f4f6;
@@ -16,11 +16,11 @@
   --text-secondary: #6b7280;
   --text-muted: #9ca3af;
 
-  /* Accent — Blue */
-  --accent: #2563EB;
-  --accent-light: #EFF6FF;
-  --accent-hover: #1D4ED8;
-  --accent-glow: rgba(37, 99, 235, 0.15);
+  /* Accent — Warm Orange (Vobiz-inspired) */
+  --accent: #F97316;
+  --accent-light: #FFF7ED;
+  --accent-hover: #EA580C;
+  --accent-glow: rgba(249, 115, 22, 0.15);
 
   /* Semantic */
   --success: #10b981;
@@ -45,6 +45,34 @@
   --radius: 12px;
   --radius-sm: 8px;
   --radius-lg: 16px;
+}
+
+/* ═══════════════ DARK MODE ═══════════════ */
+[data-theme="dark"] {
+  --bg-primary: #0f1117;
+  --bg-white: #1a1d27;
+  --bg-sidebar: #14161e;
+  --bg-hover: #252836;
+
+  --text-primary: #f0f1f3;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+
+  --accent: #FB923C;
+  --accent-light: rgba(251, 146, 60, 0.12);
+  --accent-hover: #F97316;
+  --accent-glow: rgba(251, 146, 60, 0.2);
+
+  --success-light: rgba(16, 185, 129, 0.12);
+  --danger-light: rgba(239, 68, 68, 0.12);
+  --warning-light: rgba(245, 158, 11, 0.12);
+  --info-light: rgba(59, 130, 246, 0.12);
+
+  --border: #2a2d3a;
+  --border-light: #1f222d;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -114,7 +142,7 @@ main {
 .sidebar-logo {
   width: 36px;
   height: 36px;
-  background: linear-gradient(135deg, #2563EB, #60A5FA);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   border-radius: 10px;
   display: flex;
   align-items: center;
@@ -1663,6 +1691,7 @@ label {
 }
 
 @media (max-width: 1024px) {
+
   .realtime-grid,
   .profile-grid,
   .support-grid,
@@ -1863,6 +1892,7 @@ label {
 }
 
 @media (max-width: 900px) {
+
   .monitor-metrics,
   .monitor-call-meta {
     grid-template-columns: 1fr;
