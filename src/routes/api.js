@@ -106,11 +106,15 @@ router.post('/v1/calls/start', async (req, res) => {
     }
 
     // FIX M6: Prevent duplicate simultaneous calls to the same number
+    // Added Stale-Lock Recovery: Only block if the existing call is less than 5 minutes old
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+
     if (!force) {
       const existingCall = await Call.findOne({
         campaignId,
         phoneNumber: cleanPhone,
-        status: { $in: ['queued', 'ringing', 'in-progress'] }
+        status: { $in: ['queued', 'ringing', 'in-progress'] },
+        createdAt: { $gte: fiveMinutesAgo }
       });
       if (existingCall) {
         return res.status(409).json({
