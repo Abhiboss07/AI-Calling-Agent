@@ -11,6 +11,14 @@ const metrics = require('../services/metrics');
 const costControl = require('../services/costControl');
 const storage = require('../services/storage');
 const UploadLog = require('../models/uploadLog.model');
+const Document = require('../models/document.model');
+const multer = require('multer');
+
+// Configure Multer for in-memory uploads (process or forward to S3)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 function getPublicBaseUrl(req) {
   const configured = (config.baseUrl || '').trim();
@@ -30,14 +38,14 @@ function getPublicBaseUrl(req) {
 router.post('/v1/calls/test-start', async (req, res) => {
   try {
     const { campaignId, phoneNumber, fromNumber, language, agentName, testMode } = req.body;
-    
+
     if (!campaignId || !phoneNumber) return res.status(400).json({ ok: false, error: 'campaignId and phoneNumber required' });
 
     // For testing, skip phone validation
     const cleanPhone = phoneNumber.replace(/[^+\d]/g, '');
-    
+
     console.log(' Test call initiated', { campaignId, phoneNumber, fromNumber, language, agentName, testMode });
-    
+
     // Create call record directly (no Vobiz integration for test)
     const call = await Call.create({
       phoneNumber: cleanPhone,
@@ -46,16 +54,16 @@ router.post('/v1/calls/test-start', async (req, res) => {
       direction: 'test',
       language: language || 'en-IN',
       startAt: new Date(),
-      metadata: { 
+      metadata: {
         testMode: true,
         agentName: agentName || 'Shubhi',
         fromNumber: fromNumber || '+911234567890',
         campaignId
       }
     });
-    
+
     metrics.incrementCallsStarted();
-    
+
     // Notify monitoring clients
     const { monitoringServer } = require('../services/monitoring');
     monitoringServer.notifyCallStarted({
@@ -64,7 +72,7 @@ router.post('/v1/calls/test-start', async (req, res) => {
       direction: 'test',
       startTime: new Date()
     });
-    
+
     res.json({
       ok: true,
       callId: call._id,
@@ -72,7 +80,7 @@ router.post('/v1/calls/test-start', async (req, res) => {
       status: 'test-initiated',
       message: 'Test call initiated successfully'
     });
-    
+
   } catch (error) {
     logger.error('Test call initiation failed', error.message);
     res.status(500).json({ ok: false, error: 'Failed to initiate test call' });
@@ -422,10 +430,10 @@ router.get('/v1/wallet', async (req, res) => {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
-    
+
     const sevenDaysAgo = new Date(today);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
@@ -434,50 +442,58 @@ router.get('/v1/wallet', async (req, res) => {
       // Today's stats
       Call.aggregate([
         { $match: { startAt: { $gte: today } } },
-        { $group: {
-          _id: null,
-          totalCalls: { $sum: 1 },
-          totalDuration: { $sum: '$durationSec' },
-          connectedCalls: { $sum: { $cond: [{ $ne: ['$durationSec', 0] }, 1, 0] } }
-        }}
+        {
+          $group: {
+            _id: null,
+            totalCalls: { $sum: 1 },
+            totalDuration: { $sum: '$durationSec' },
+            connectedCalls: { $sum: { $cond: [{ $ne: ['$durationSec', 0] }, 1, 0] } }
+          }
+        }
       ]),
-      
+
       // Yesterday's stats for comparison
       Call.aggregate([
         { $match: { startAt: { $gte: yesterday, $lt: today } } },
-        { $group: {
-          _id: null,
-          totalSpend: { $sum: { $multiply: ['$durationSec', 0.025] } } // ₹0.025/sec avg
-        }}
+        {
+          $group: {
+            _id: null,
+            totalSpend: { $sum: { $multiply: ['$durationSec', 0.025] } } // ₹0.025/sec avg
+          }
+        }
       ]),
-      
+
       // Last 7 days stats
       Call.aggregate([
         { $match: { startAt: { $gte: sevenDaysAgo } } },
-        { $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$startAt' } },
-          spend: { $sum: { $multiply: ['$durationSec', 0.025] } },
-          calls: { $sum: 1 }
-        }},
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$startAt' } },
+            spend: { $sum: { $multiply: ['$durationSec', 0.025] } },
+            calls: { $sum: 1 }
+          }
+        },
         { $sort: { _id: 1 } }
       ]),
-      
+
       // Category breakdown (CDR vs Non-connected)
       Call.aggregate([
         { $match: { startAt: { $gte: today } } },
-        { $group: {
-          _id: {
-            $cond: [
-              { $and: [{ $gt: ['$durationSec', 0] }, { $eq: ['$status', 'completed'] }] },
-              'cdr',
-              'non-connected'
-            ]
-          },
-          count: { $sum: 1 },
-          cost: { $sum: { $multiply: ['$durationSec', 0.025] } }
-        }}
+        {
+          $group: {
+            _id: {
+              $cond: [
+                { $and: [{ $gt: ['$durationSec', 0] }, { $eq: ['$status', 'completed'] }] },
+                'cdr',
+                'non-connected'
+              ]
+            },
+            count: { $sum: 1 },
+            cost: { $sum: { $multiply: ['$durationSec', 0.025] } }
+          }
+        }
       ]),
-      
+
       // Recent transactions
       Call.find({ startAt: { $gte: sevenDaysAgo } })
         .sort({ startAt: -1 })
@@ -489,11 +505,11 @@ router.get('/v1/wallet', async (req, res) => {
     const todayData = todayStats[0] || { totalCalls: 0, totalDuration: 0, connectedCalls: 0 };
     const yesterdayData = yesterdayStats[0] || { totalSpend: 0 };
     const todaySpend = (todayData.totalDuration || 0) * 0.025;
-    
+
     // Calculate wallet balance (estimated from call costs)
     const estimatedSpend = todaySpend + (todayData.totalCalls || 0) * 0.02;
     const walletBalance = Math.max(0, 10 - estimatedSpend); // Assume ₹10 base, subtract spend
-    
+
     // Build daily breakdown
     const dailyBreakdown = weekStats.map(day => ({
       date: day._id,
@@ -506,7 +522,7 @@ router.get('/v1/wallet', async (req, res) => {
     const nonConnectedData = categoryStats.find(c => c._id === 'non-connected') || { count: 0, cost: 0 };
     const streamCost = cdrData.count * 0.20; // ₹0.20 per stream
     const totalSpend = todaySpend + (todayData.totalCalls * 0.02); // Add small base fee
-    
+
     const spendingCategories = [
       { label: 'CDR', value: Math.round(cdrData.cost * 100) / 100, color: '#3b82f6', percentage: 67 },
       { label: 'Non-connected', value: Math.round(nonConnectedData.cost * 100) / 100, color: '#f59e0b', percentage: 3 },
@@ -526,7 +542,7 @@ router.get('/v1/wallet', async (req, res) => {
 
     // Calculate spend change percentage
     const previousPeriodSpend = yesterdayData.totalSpend || 1;
-    const spendChange = previousPeriodSpend > 0 
+    const spendChange = previousPeriodSpend > 0
       ? ((todaySpend - previousPeriodSpend) / previousPeriodSpend * 100).toFixed(1)
       : 0;
 
@@ -540,8 +556,8 @@ router.get('/v1/wallet', async (req, res) => {
         dailyAverage: Math.round((totalSpend / 7) * 100) / 100,
         totalCalls: todayData.totalCalls || 0,
         totalMinutes: Math.round(((todayData.totalDuration || 0) / 60) * 10) / 10,
-        successRate: todayData.totalCalls > 0 
-          ? Math.round((todayData.connectedCalls / todayData.totalCalls) * 100) 
+        successRate: todayData.totalCalls > 0
+          ? Math.round((todayData.connectedCalls / todayData.totalCalls) * 100)
           : 0,
         spendingCategories,
         dailyBreakdown,
@@ -590,6 +606,104 @@ router.get('/v1/clients', async (req, res) => {
     res.json({ ok: true, data: clients, page: pg, perPage: pp });
   } catch (err) {
     logger.error('Client list error', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// KNOWLEDGE BASE DOCUMENTS
+// ──────────────────────────────────────────────────────────────────────────
+
+// Get all documents
+router.get('/v1/documents', async (req, res) => {
+  try {
+    const { category, page = 1, perPage = 50 } = req.query;
+    const query = {};
+    if (category && category !== 'All Documents') {
+      query.category = category;
+    }
+
+    const pg = Math.max(1, Number(page));
+    const pp = Math.min(100, Math.max(1, Number(perPage)));
+
+    const [documents, total] = await Promise.all([
+      Document.find(query).sort({ createdAt: -1 }).skip((pg - 1) * pp).limit(pp).lean(),
+      Document.countDocuments(query)
+    ]);
+
+    res.json({ ok: true, data: documents, total, page: pg, perPage: pp });
+  } catch (err) {
+    logger.error('Fetch documents error', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Upload PDF document
+router.post('/v1/documents/upload', upload.single('file'), async (req, res) => {
+  try {
+    const { category = 'All Documents' } = req.body;
+
+    if (!req.file) return res.status(400).json({ ok: false, error: 'No file uploaded' });
+
+    // In a real app, upload this buffer to S3 or process via embeddings
+    // Here we just record it in the DB to drive the UI
+    const doc = await Document.create({
+      title: req.file.originalname,
+      type: 'PDF Document',
+      status: 'Ready', // Simulating successful processing
+      sizeBytes: req.file.size,
+      pages: Math.max(1, Math.floor(req.file.size / 50000)), // Dummy page count estimation
+      category
+    });
+
+    // Simulate standard latency
+    setTimeout(() => res.json({ ok: true, data: doc }), 500);
+  } catch (err) {
+    logger.error('Document upload error', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Sync Website URL
+router.post('/v1/documents/url', async (req, res) => {
+  try {
+    const { url, category = 'All Documents' } = req.body;
+
+    if (!url) return res.status(400).json({ ok: false, error: 'URL is required' });
+
+    const doc = await Document.create({
+      title: url,
+      type: 'Website URL',
+      status: 'Processing', // Simulating async scraping job
+      url,
+      pages: 12, // Dummy scraped pages
+      category
+    });
+
+    // Simulate async completion after 5s
+    setTimeout(async () => {
+      try {
+        await Document.findByIdAndUpdate(doc._id, { status: 'Ready' });
+      } catch (e) {
+        logger.error('Failed to async update URL doc status', e.message);
+      }
+    }, 5000);
+
+    res.json({ ok: true, data: doc });
+  } catch (err) {
+    logger.error('Document sync url error', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Delete Document
+router.delete('/v1/documents/:id', async (req, res) => {
+  try {
+    const doc = await Document.findByIdAndDelete(req.params.id);
+    if (!doc) return res.status(404).json({ ok: false, error: 'not found' });
+    res.json({ ok: true, id: doc._id });
+  } catch (err) {
+    logger.error('Delete document error', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
