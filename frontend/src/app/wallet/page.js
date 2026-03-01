@@ -1,190 +1,182 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import Link from 'next/link';
-import { API_BASE, getAuthHeaders } from '../../lib/api';
-
 export default function WalletPage() {
-  const [metrics, setMetrics] = useState(null);
-  const [calls, setCalls] = useState([]);
-  const [selectedAmount, setSelectedAmount] = useState('₹100');
-  const [loading, setLoading] = useState(true);
-
-  const loadData = useCallback(async () => {
-    try {
-      const [mRes, cRes] = await Promise.all([
-        fetch(`${API_BASE}/v1/metrics`, { headers: getAuthHeaders() }).catch(() => null),
-        fetch(`${API_BASE}/v1/calls?perPage=10`, { headers: getAuthHeaders() }).catch(() => null)
-      ]);
-      if (mRes?.ok) { const d = await mRes.json().catch(() => ({})); if (d.ok) setMetrics(d.data); }
-      if (cRes?.ok) { const d = await cRes.json().catch(() => ({})); if (d.ok && d.data) setCalls(d.data); }
-    } catch { }
-    finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { loadData(); const id = setInterval(loadData, 30000); return () => clearInterval(id); }, [loadData]);
-
-  const balance = metrics?.walletBalance || 0;
-  const totalSpent = metrics?.totalSpentRs || 0;
-  const totalCalls = metrics?.callsStarted || 0;
-  const avgCostPerCall = totalCalls > 0 ? (totalSpent / totalCalls).toFixed(2) : '0.00';
-
   return (
-    <div style={{ padding: 32, maxWidth: 1024, margin: '0 auto' }}>
-      {/* Header */}
-      <div className="fade-in-up" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
-        <div>
-          <h1 style={{ fontSize: 36, fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.02em', margin: 0 }}>Wallet & Billing</h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: 15, margin: '8px 0 0' }}>Monitor your agent usage credits and manage payments.</p>
-        </div>
-        <button className="neon-glow" style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px 24px',
-          background: 'var(--accent)', color: 'white', borderRadius: 8, fontWeight: 700, fontSize: 14,
-          border: 'none', cursor: 'pointer', boxShadow: '0 8px 24px rgba(19,91,236,0.2)'
-        }}>
-          <span className="material-symbols-outlined" style={{ marginRight: 8, fontSize: 20 }}>add_card</span>
-          Top Up Credits
-        </button>
-      </div>
-
-      {/* Summary Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24, marginBottom: 32 }}>
-        {[
-          { label: 'Current Balance', value: `₹${balance}`, sub: `~${Math.round(balance * 20)} credits`, subColor: 'var(--success)', note: 'Last top up recently', noteIcon: 'trending_up' },
-          { label: 'Total Spent (30d)', value: `₹${totalSpent}`, subColor: 'var(--danger)', note: 'Based on recent calls', noteIcon: 'trending_up' },
-          { label: 'Avg. Cost Per Call', value: `₹${avgCostPerCall}`, note: `Based on ${totalCalls} calls`, noteColor: 'var(--text-muted)' },
-        ].map((card, i) => (
-          <div key={i} className="fade-in-up glass-card" style={{ padding: 24, borderRadius: 12, animationDelay: `${i * 0.1}s` }}>
-            <p style={{ color: 'var(--text-muted)', fontSize: 14, fontWeight: 500, margin: '0 0 8px' }}>{card.label}</p>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <p style={{ fontSize: 30, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{card.value}</p>
-              {card.sub && (
-                <span style={{ color: 'var(--success)', fontSize: 12, fontWeight: 700, padding: '2px 8px', background: 'rgba(16,185,129,0.1)', borderRadius: 4 }}>
-                  {card.sub}
-                </span>
-              )}
-            </div>
-            {card.note && (
-              <p style={{ color: card.noteColor || card.subColor || 'var(--text-muted)', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, margin: '8px 0 0' }}>
-                {card.noteIcon && <span className="material-symbols-outlined" style={{ fontSize: 14 }}>{card.noteIcon}</span>}
-                {card.note}
-              </p>
-            )}
+    <div className="flex flex-1 justify-center py-8">
+      <div className="flex flex-col max-w-[1024px] flex-1 px-4 md:px-10 gap-8">
+        {/* Page Title */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-slate-900 dark:text-white text-4xl font-black leading-tight tracking-tight">Wallet &amp; Billing</h1>
+            <p className="text-slate-500 dark:text-slate-400 text-base font-normal">Monitor your agent usage credits and manage payment methods.</p>
           </div>
-        ))}
-      </div>
-
-      {/* Spend Chart + Quick Top Up */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24, marginBottom: 32 }}>
-        {/* Daily Spend Chart */}
-        <div className="fade-in-up glass-card" style={{ padding: 24, borderRadius: 12, animationDelay: '0.3s' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-            <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Daily Spend History</h3>
-            <select style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', padding: '6px 16px 6px 8px' }}>
-              <option>Last 7 Days</option>
-              <option>Last 30 Days</option>
-            </select>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: 180, gap: 8, padding: '0 8px' }}>
-            {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].map((day, i) => {
-              const heights = [45, 60, 85, 35, 55, 20, 40];
-              return (
-                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                  <div className="chart-bar" style={{
-                    width: '100%', height: `${heights[i]}%`, borderRadius: '4px 4px 0 0',
-                    background: i === 2 ? 'var(--accent)' : 'rgba(19,91,236,0.2)',
-                    transition: 'all 0.3s', cursor: 'pointer'
-                  }} />
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>{day}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Quick Top Up */}
-        <div className="fade-in-up glass-card" style={{ padding: 24, borderRadius: 12, animationDelay: '0.35s' }}>
-          <h3 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 16px' }}>Quick Top Up</h3>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderRadius: 8, border: '1px solid var(--accent)', background: 'rgba(19,91,236,0.05)', marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>credit_card</span>
-              <div>
-                <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Payment Method</p>
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>UPI / Card</p>
-              </div>
-            </div>
-            <span className="material-symbols-outlined" style={{ color: 'var(--accent)', fontSize: 20 }}>check_circle</span>
-          </div>
-          <p style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', margin: '0 0 8px' }}>Select Amount</p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-            {['₹50', '₹100', '₹250', 'Custom'].map(amt => (
-              <button key={amt} onClick={() => setSelectedAmount(amt)} style={{
-                padding: '10px 16px', borderRadius: 8, fontSize: 14, fontWeight: 700,
-                cursor: 'pointer', transition: 'all 0.2s',
-                border: selectedAmount === amt ? '1px solid var(--accent)' : '1px solid var(--border)',
-                background: selectedAmount === amt ? 'var(--accent)' : 'transparent',
-                color: selectedAmount === amt ? 'white' : 'var(--text-primary)'
-              }}>{amt}</button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Call Usage History Table */}
-      <div className="fade-in-up glass-card" style={{ borderRadius: 12, padding: 24, animationDelay: '0.4s' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Call Usage History</h3>
-          <button style={{ color: 'var(--accent)', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer' }}>
-            Export CSV <span className="material-symbols-outlined" style={{ fontSize: 18 }}>download</span>
+          <button className="flex items-center justify-center px-6 py-3 bg-primary text-white rounded-lg font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all">
+            <span className="material-symbols-outlined mr-2">add_card</span>
+            Top Up Credits
           </button>
         </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Agent / Call ID', 'Date & Time', 'Duration', 'Cost', 'Status'].map(h => (
-                  <th key={h} style={{ padding: '16px 0', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {calls.length === 0 ? (
-                <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No call data yet</td></tr>
-              ) : calls.map((call, i) => (
-                <tr key={call._id || i} className="table-row-hover" style={{ borderBottom: '1px solid var(--border-light)', transition: 'background 0.2s' }}>
-                  <td style={{ padding: '16px 0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{ width: 32, height: 32, borderRadius: 4, background: 'var(--accent-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <span className="material-symbols-outlined" style={{ color: 'var(--accent)', fontSize: 18 }}>support_agent</span>
-                      </div>
-                      <div>
-                        <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>{call.phoneNumber || 'AI Agent'}</p>
-                        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>#{call._id?.slice(-6) || 'N/A'}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td style={{ padding: '16px 0', fontSize: 14 }}>{call.createdAt ? new Date(call.createdAt).toLocaleString() : 'N/A'}</td>
-                  <td style={{ padding: '16px 0', fontSize: 14, fontWeight: 500 }}>{call.durationSec ? `${Math.floor(call.durationSec / 60)}m ${call.durationSec % 60}s` : '0s'}</td>
-                  <td style={{ padding: '16px 0', fontSize: 14, fontWeight: 700 }}>₹{call.costRs?.toFixed(2) || '0.00'}</td>
-                  <td style={{ padding: '16px 0' }}>
-                    <span style={{
-                      display: 'inline-flex', padding: '3px 10px', borderRadius: 4, fontSize: 12, fontWeight: 500,
-                      background: call.status === 'completed' ? 'rgba(16,185,129,0.1)' : call.status === 'failed' ? 'rgba(239,68,68,0.1)' : 'var(--bg-hover)',
-                      color: call.status === 'completed' ? 'var(--success)' : call.status === 'failed' ? 'var(--danger)' : 'var(--text-muted)'
-                    }}>{call.status || 'Unknown'}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Current Balance</p>
+            <div className="flex items-baseline gap-2">
+              <p className="text-slate-900 dark:text-white text-3xl font-bold">$425.50</p>
+              <span className="text-emerald-500 text-xs font-bold px-1.5 py-0.5 bg-emerald-500/10 rounded">~8,510 credits</span>
+            </div>
+            <p className="text-emerald-500 text-xs font-medium flex items-center gap-1">
+              <span className="material-symbols-outlined text-[14px]">trending_up</span>
+              Last top up 2 days ago
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Total Spent (30d)</p>
+            <p className="text-slate-900 dark:text-white text-3xl font-bold">$1,240.00</p>
+            <p className="text-rose-500 text-xs font-medium flex items-center gap-1">
+              <span className="material-symbols-outlined text-[14px]">trending_up</span>
+              12% more than last month
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Avg. Cost Per Call</p>
+            <p className="text-slate-900 dark:text-white text-3xl font-bold">$0.14</p>
+            <p className="text-slate-500 dark:text-slate-400 text-xs font-medium">Based on 8,857 calls</p>
+          </div>
         </div>
-        {calls.length > 0 && (
-          <div style={{ textAlign: 'center', marginTop: 12 }}>
-            <button style={{ padding: '8px 16px', fontSize: 14, fontWeight: 700, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
-              Load more history
+
+        {/* Spend Visualizer & Payment */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Spend History Chart */}
+          <div className="lg:col-span-2 flex flex-col gap-6 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <div className="flex justify-between items-center">
+              <h3 className="text-slate-900 dark:text-white text-lg font-bold">Daily Spend History</h3>
+              <select className="bg-slate-100 dark:bg-slate-900 border-none rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 py-1 pl-2 pr-8 focus:ring-primary">
+                <option>Last 7 Days</option>
+                <option>Last 30 Days</option>
+              </select>
+            </div>
+            <div className="flex items-end justify-between h-48 gap-2 pt-4 px-2">
+              {[
+                { h: '45%', label: 'MON' },
+                { h: '60%', label: 'TUE' },
+                { h: '85%', label: 'WED', active: true },
+                { h: '35%', label: 'THU' },
+                { h: '55%', label: 'FRI' },
+                { h: '20%', label: 'SAT' },
+                { h: '40%', label: 'SUN' },
+              ].map((bar, i) => (
+                <div key={i} className="group relative flex flex-1 flex-col items-center gap-2">
+                  <div
+                    className={`w-full rounded-t-sm ${bar.active ? 'bg-primary' : 'bg-primary/20 group-hover:bg-primary/40'} transition-colors`}
+                    style={{ height: bar.h }}
+                  ></div>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold">{bar.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Quick Top Up */}
+          <div className="flex flex-col gap-6 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+            <h3 className="text-slate-900 dark:text-white text-lg font-bold">Quick Top Up</h3>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 rounded-lg border border-primary bg-primary/5">
+                <div className="flex items-center gap-3">
+                  <span className="material-symbols-outlined text-primary">credit_card</span>
+                  <div>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white">Visa ending in 4242</p>
+                    <p className="text-xs text-slate-500">Expires 12/26</p>
+                  </div>
+                </div>
+                <span className="material-symbols-outlined text-primary text-[20px]">check_circle</span>
+              </div>
+              <div className="flex items-center gap-2 justify-center py-2 opacity-60">
+                <div className="w-8 h-5 bg-slate-200 dark:bg-slate-700 rounded flex items-center justify-center text-[10px] font-bold">VISA</div>
+                <div className="w-8 h-5 bg-slate-200 dark:bg-slate-700 rounded flex items-center justify-center text-[10px] font-bold">MC</div>
+                <div className="w-8 h-5 bg-slate-200 dark:bg-slate-700 rounded flex items-center justify-center text-[10px] font-bold">AX</div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  <span>Select Amount</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button className="py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">$50</button>
+                  <button className="py-2 border border-primary bg-primary text-white rounded-lg text-sm font-bold">$100</button>
+                  <button className="py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">$250</button>
+                  <button className="py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">Custom</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Usage History Table */}
+        <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+          <div className="flex justify-between items-center">
+            <h3 className="text-slate-900 dark:text-white text-lg font-bold">Call Usage History</h3>
+            <button className="text-primary text-sm font-bold flex items-center gap-1 hover:underline">
+              Export CSV <span className="material-symbols-outlined text-[18px]">download</span>
             </button>
           </div>
-        )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-slate-100 dark:border-slate-700">
+                  <th className="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Agent / Call ID</th>
+                  <th className="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Date &amp; Time</th>
+                  <th className="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Duration</th>
+                  <th className="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Cost</th>
+                  <th className="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
+                {[
+                  { agent: 'Listing Inquiry Bot', id: '#48592-CL', date: 'Oct 24, 2:15 PM', duration: '4m 32s', cost: '$0.64', status: 'Success' },
+                  { agent: 'Listing Inquiry Bot', id: '#48588-CL', date: 'Oct 24, 1:40 PM', duration: '1m 15s', cost: '$0.20', status: 'Success' },
+                  { agent: 'Outbound Prospecting', id: '#48582-CL', date: 'Oct 24, 11:12 AM', duration: '0m 45s', cost: '$0.15', status: 'No Answer' },
+                  { agent: 'Listing Inquiry Bot', id: '#48575-CL', date: 'Oct 24, 9:05 AM', duration: '8m 10s', cost: '$1.12', status: 'Success' },
+                ].map((row, i) => (
+                  <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                    <td className="py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="size-8 rounded bg-primary/10 flex items-center justify-center">
+                          <span className="material-symbols-outlined text-primary text-[18px]">support_agent</span>
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-slate-900 dark:text-white">{row.agent}</p>
+                          <p className="text-xs text-slate-500">{row.id}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-4">
+                      <p className="text-sm text-slate-700 dark:text-slate-300">{row.date}</p>
+                    </td>
+                    <td className="py-4">
+                      <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">{row.duration}</p>
+                    </td>
+                    <td className="py-4">
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">{row.cost}</p>
+                    </td>
+                    <td className="py-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${row.status === 'Success'
+                          ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+                          : 'bg-slate-100 dark:bg-slate-900/50 text-slate-600 dark:text-slate-400'
+                        }`}>{row.status}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-center mt-2">
+            <button className="px-4 py-2 text-sm font-bold text-slate-500 hover:text-primary transition-colors">Load more history</button>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <footer className="mt-auto border-t border-slate-200 dark:border-slate-800 py-6 text-center">
+          <p className="text-xs text-slate-500 dark:text-slate-400">© 2024 AI Call Agent Technologies Inc. All transactions are encrypted and secured.</p>
+        </footer>
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import TopBar from "@/components/TopBar";
 import AuthProvider from "@/components/AuthProvider";
 import { WebSocketProvider } from "@/contexts/WebSocketContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import Script from "next/script";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -15,22 +16,21 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <head>
+        <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+      </head>
+      <body className={`${inter.className} bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 antialiased overflow-x-hidden`}>
         <ThemeProvider>
           <AuthProvider>
             <WebSocketProvider>
-              <div className="layout-container">
+              <div className="flex h-screen overflow-hidden">
                 <Sidebar />
-                <div className="layout-body">
+                <div className="flex-1 flex flex-col overflow-hidden">
                   <TopBar />
-                  <main style={{ 
-                    flex: 1, 
-                    padding: '32px', 
-                    overflowY: 'auto', 
-                    background: 'var(--bg-primary)',
-                    marginLeft: 'var(--sidebar-width)'
-                  }}>{children}</main>
+                  <main className="flex-1 overflow-y-auto bg-background-light dark:bg-background-dark">
+                    {children}
+                  </main>
                 </div>
               </div>
             </WebSocketProvider>

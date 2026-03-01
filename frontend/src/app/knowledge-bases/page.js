@@ -1,254 +1,215 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
-
-const documents = [
-    { 
-        name: 'Oceanview_Penthouse_Listing.pdf', 
-        type: 'Listing', 
-        status: 'ready', 
-        date: 'Oct 24, 2023', 
-        size: '1.2 MB • 4 pages', 
-        icon: 'picture_as_pdf', 
-        color: '#ef4444' 
-    },
-    { 
-        name: 'https://realestate.com/faq-section', 
-        type: 'Website URL', 
-        status: 'processing', 
-        date: 'Just now', 
-        size: 'Scraped 12 pages', 
-        icon: 'language', 
-        color: '#3b82f6' 
-    },
-    { 
-        name: 'First_Time_Buyer_Script.docx', 
-        type: 'Script', 
-        status: 'ready', 
-        date: 'Oct 20, 2023', 
-        size: '45 KB • 2 pages', 
-        icon: 'article', 
-        color: '#f59e0b' 
-    },
-    { 
-        name: 'Mortgage_Rates_2024.pdf', 
-        type: 'Finance', 
-        status: 'paused', 
-        date: 'Oct 18, 2023', 
-        size: '2.4 MB • 15 pages', 
-        icon: 'picture_as_pdf', 
-        color: '#ef4444' 
-    },
-];
-
 export default function KnowledgeBasePage() {
-    const [activeCategory, setActiveCategory] = useState('all');
-    const [chatMessages, setChatMessages] = useState([
-        { from: 'ai', text: "Hi! I've processed your latest listings. You can ask me anything about the Oceanview Penthouse or buyer scripts.", time: '10:24 AM' },
-        { from: 'user', text: "How many bedrooms are in the Oceanview Penthouse?", time: '10:25 AM' },
-        { from: 'ai', text: "The Oceanview Penthouse listing specifies 4 bedrooms and 4.5 bathrooms, including a primary suite with floor-to-ceiling glass walls.", time: '10:25 AM', source: 'Oceanview_Penthouse_Listing.pdf' },
-    ]);
-    const [chatInput, setChatInput] = useState('');
-
-    const handleSend = () => {
-        if (!chatInput.trim()) return;
-        setChatMessages(prev => [...prev, { from: 'user', text: chatInput, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
-        setChatInput('');
-        setTimeout(() => {
-            setChatMessages(prev => [...prev, {
-                from: 'ai',
-                text: "Based on my training data, I can provide insights about this topic. Let me check the relevant documents for you.",
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                source: 'Knowledge Base'
-            }]);
-        }, 1500);
-    };
-
-    const categories = [
-        { id: 'all', label: 'All Documents', icon: 'folder', count: 24 },
-        { id: 'listings', label: 'Property Listings', icon: 'home_work' },
-        { id: 'scripts', label: 'Scripts & FAQs', icon: 'description' },
-        { id: 'legal', label: 'Legal & Contracts', icon: 'gavel' },
-    ];
-
-    const getStatusColor = (status) => {
-        switch(status) {
-            case 'ready': return { bg: 'rgba(16, 185, 129, 0.1)', color: '#10b981', dot: '#10b981' };
-            case 'processing': return { bg: 'rgba(19, 91, 236, 0.1)', color: '#135bec', dot: '#135bec' };
-            case 'paused': return { bg: 'rgba(107, 114, 128, 0.1)', color: '#6b7280', dot: '#9ca3af' };
-            default: return { bg: 'rgba(107, 114, 128, 0.1)', color: '#6b7280', dot: '#9ca3af' };
-        }
-    };
-
     return (
-        <div style={{ display: 'flex', height: 'calc(100vh - var(--topbar-height))' }}>
-            {/* Left Sidebar */}
-            <aside className="glass" style={{ 
-                width: 256, 
-                padding: 24, 
-                display: 'flex', 
-                flexDirection: 'column', 
-                gap: 32, 
-                flexShrink: 0,
-                background: 'white',
-                borderRight: '1px solid var(--border)'
-            }}>
+        <div className="flex flex-1 overflow-hidden h-full">
+            {/* Left Sidebar: Actions & Controls */}
+            <aside className="w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-background-dark p-6 flex flex-col gap-8">
                 <div>
-                    <h3 style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16, margin: '0 0 16px' }}>Ingestion</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <button className="neon-glow-blue" style={{
-                            display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 12px',
-                            borderRadius: 8, background: 'var(--primary)', color: 'white', fontWeight: 500, fontSize: 14,
-                            border: 'none', cursor: 'pointer'
-                        }}>
-                            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>upload_file</span> Upload PDFs
+                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Ingestion</h3>
+                    <div className="space-y-2">
+                        <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-primary text-white font-medium text-sm transition-all hover:bg-primary/90 shadow-lg shadow-primary/20">
+                            <span className="material-symbols-outlined text-sm">upload_file</span>
+                            Upload PDFs
                         </button>
-                        <button style={{
-                            display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 12px',
-                            borderRadius: 8, background: 'transparent', border: '1px solid var(--border)',
-                            color: 'var(--text-secondary)', fontWeight: 500, fontSize: 14, cursor: 'pointer',
-                            transition: 'background 0.2s'
-                        }}>
-                            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>link</span> Sync Website URL
+                        <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-all">
+                            <span className="material-symbols-outlined text-sm">link</span>
+                            Sync Website URL
                         </button>
                     </div>
                 </div>
-
                 <div>
-                    <h3 style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16, margin: '0 0 16px' }}>Categories</h3>
-                    <nav style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {categories.map(cat => {
-                            const isSel = activeCategory === cat.id;
-                            return (
-                                <a key={cat.id} onClick={() => setActiveCategory(cat.id)} style={{
-                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                    padding: '8px 12px', borderRadius: 8, fontSize: 14,
-                                    background: isSel ? 'var(--accent-light)' : 'transparent',
-                                    color: isSel ? 'var(--accent)' : 'var(--text-muted)',
-                                    fontWeight: isSel ? 500 : 400, cursor: 'pointer', textDecoration: 'none',
-                                    transition: 'all 0.2s'
-                                }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{cat.icon}</span>
-                                        {cat.label}
-                                    </div>
-                                    {cat.count && <span style={{ fontSize: 10, background: 'rgba(19,91,236,0.2)', padding: '2px 8px', borderRadius: 999 }}>{cat.count}</span>}
-                                </a>
-                            );
-                        })}
+                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Categories</h3>
+                    <nav className="space-y-1">
+                        <a className="flex items-center justify-between px-3 py-2 rounded-lg bg-primary/10 text-primary font-medium text-sm" href="#">
+                            <div className="flex items-center gap-3">
+                                <span className="material-symbols-outlined text-sm">folder</span>
+                                All Documents
+                            </div>
+                            <span className="text-[10px] bg-primary/20 px-2 py-0.5 rounded-full">24</span>
+                        </a>
+                        <a className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 text-sm" href="#">
+                            <span className="material-symbols-outlined text-sm">home_work</span>
+                            Property Listings
+                        </a>
+                        <a className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 text-sm" href="#">
+                            <span className="material-symbols-outlined text-sm">description</span>
+                            Scripts &amp; FAQs
+                        </a>
+                        <a className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 text-sm" href="#">
+                            <span className="material-symbols-outlined text-sm">gavel</span>
+                            Legal &amp; Contracts
+                        </a>
                     </nav>
                 </div>
-
-                <div style={{ marginTop: 'auto' }}>
-                    <div className="glass" style={{ padding: 16, borderRadius: 12, background: 'var(--bg-hover)', border: '1px solid var(--border)' }}>
-                        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, margin: '0 0 8px' }}>Storage Usage</p>
-                        <div style={{ width: '100%', height: 6, background: 'var(--border)', borderRadius: 999, marginBottom: 8 }}>
-                            <div className="progress-animate" style={{ width: '75%', height: '100%', background: 'var(--accent)', borderRadius: 999 }} />
+                <div className="mt-auto">
+                    <div className="p-4 rounded-xl bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">Storage Usage</p>
+                        <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full mb-2">
+                            <div className="w-3/4 h-full bg-primary rounded-full"></div>
                         </div>
-                        <p style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 500, margin: 0 }}>750MB / 1GB (75%)</p>
+                        <p className="text-[10px] text-slate-500 font-medium">750MB / 1GB (75%)</p>
                     </div>
                 </div>
             </aside>
 
-            {/* Main Content */}
-            <main style={{ flex: 1, overflowY: 'auto', padding: 32, background: 'var(--background-light)' }}>
-                <div style={{ maxWidth: 1024, margin: '0 auto' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 }}>
+            {/* Main Content: Document List */}
+            <main className="flex-1 overflow-y-auto p-8 bg-background-light dark:bg-background-dark">
+                <div className="max-w-5xl mx-auto">
+                    <div className="flex items-center justify-between mb-8">
                         <div>
-                            <h1 style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>Learned Documents</h1>
-                            <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Manage the resources your AI agent uses to answer client inquiries.</p>
+                            <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-1">Learned Documents</h1>
+                            <p className="text-slate-500 dark:text-slate-400 text-sm">Manage the resources your AI agent uses to answer client inquiries.</p>
                         </div>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                            <button style={{ padding: 8, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                        <div className="flex gap-2">
+                            <button className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
                                 <span className="material-symbols-outlined">grid_view</span>
                             </button>
-                            <button style={{ padding: 8, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                            <button className="p-2 text-primary font-bold">
                                 <span className="material-symbols-outlined">view_list</span>
                             </button>
                         </div>
                     </div>
 
-                    {/* Documents Table */}
-                    <div className="glass" style={{ 
-                        background: 'white', 
-                        border: '1px solid var(--border)', 
-                        borderRadius: 12, 
-                        overflow: 'hidden' 
-                    }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    {/* Table Container */}
+                    <div className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                        <table className="w-full text-left border-collapse">
                             <thead>
-                                <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-hover)' }}>
-                                    <th style={{ padding: '16px 24px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'left' }}>Document Name</th>
-                                    <th style={{ padding: '16px 24px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'left' }}>Type</th>
-                                    <th style={{ padding: '16px 24px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'left' }}>Status</th>
-                                    <th style={{ padding: '16px 24px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'left' }}>Added On</th>
-                                    <th style={{ padding: '16px 24px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'right' }}>Actions</th>
+                                <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Document Name</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Added On</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                {documents.map((doc, i) => {
-                                    const statusStyle = getStatusColor(doc.status);
-                                    return (
-                                        <tr key={i} style={{ borderBottom: '1px solid var(--border-light)', transition: 'background 0.2s' }} className="table-row-hover">
-                                            <td style={{ padding: '16px 24px' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                                    <div style={{ 
-                                                        width: 32, height: 40, 
-                                                        background: `${doc.color}15`, 
-                                                        color: doc.color, 
-                                                        borderRadius: 4, 
-                                                        display: 'flex', 
-                                                        alignItems: 'center', 
-                                                        justifyContent: 'center' 
-                                                    }}>
-                                                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{doc.icon}</span>
-                                                    </div>
-                                                    <div>
-                                                        <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>{doc.name}</p>
-                                                        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>{doc.size}</p>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td style={{ padding: '16px 24px' }}>
-                                                <span style={{ fontSize: 12, padding: '4px 8px', borderRadius: 4, background: 'var(--bg-hover)', color: 'var(--text-muted)' }}>
-                                                    {doc.type}
-                                                </span>
-                                            </td>
-                                            <td style={{ padding: '16px 24px' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                    <span style={{ 
-                                                        width: 8, height: 8, 
-                                                        borderRadius: '50%', 
-                                                        background: statusStyle.dot,
-                                                        animation: doc.status === 'processing' ? 'pulse 2s infinite' : 'none'
-                                                    }} />
-                                                    <span style={{ fontSize: 12, fontWeight: 500, color: statusStyle.color }}>
-                                                        {doc.status === 'ready' ? 'Ready' : doc.status === 'processing' ? 'Processing...' : 'Paused'}
-                                                    </span>
-                                                </div>
-                                            </td>
-                                            <td style={{ padding: '16px 24px', fontSize: 14, color: 'var(--text-muted)' }}>
-                                                {doc.date}
-                                            </td>
-                                            <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                                                <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
-                                                    <span className="material-symbols-outlined">more_horiz</span>
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {/* Document Row 1 */}
+                                <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-10 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded flex items-center justify-center">
+                                                <span className="material-symbols-outlined text-lg">picture_as_pdf</span>
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Oceanview_Penthouse_Listing.pdf</p>
+                                                <p className="text-xs text-slate-400">1.2 MB • 4 pages</p>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className="text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">Listing</span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Ready</span>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-sm text-slate-500">Oct 24, 2023</td>
+                                    <td className="px-6 py-4 text-right">
+                                        <button className="text-slate-400 hover:text-primary transition-colors">
+                                            <span className="material-symbols-outlined">more_horiz</span>
+                                        </button>
+                                    </td>
+                                </tr>
+                                {/* Document Row 2 */}
+                                <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-10 bg-blue-100 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded flex items-center justify-center">
+                                                <span className="material-symbols-outlined text-lg">language</span>
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">https://realestate.com/faq-section</p>
+                                                <p className="text-xs text-slate-400">Scraped 12 pages</p>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className="text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">Website URL</span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+                                            <span className="text-xs font-medium text-primary">Processing...</span>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-sm text-slate-500">Just now</td>
+                                    <td className="px-6 py-4 text-right">
+                                        <button className="text-slate-400 hover:text-primary transition-colors">
+                                            <span className="material-symbols-outlined">more_horiz</span>
+                                        </button>
+                                    </td>
+                                </tr>
+                                {/* Document Row 3 */}
+                                <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-10 bg-amber-100 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded flex items-center justify-center">
+                                                <span className="material-symbols-outlined text-lg">article</span>
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">First_Time_Buyer_Script.docx</p>
+                                                <p className="text-xs text-slate-400">45 KB • 2 pages</p>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className="text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">Script</span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                            <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Ready</span>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-sm text-slate-500">Oct 20, 2023</td>
+                                    <td className="px-6 py-4 text-right">
+                                        <button className="text-slate-400 hover:text-primary transition-colors">
+                                            <span className="material-symbols-outlined">more_horiz</span>
+                                        </button>
+                                    </td>
+                                </tr>
+                                {/* Document Row 4 */}
+                                <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-10 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded flex items-center justify-center">
+                                                <span className="material-symbols-outlined text-lg">picture_as_pdf</span>
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Mortgage_Rates_2024.pdf</p>
+                                                <p className="text-xs text-slate-400">2.4 MB • 15 pages</p>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className="text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">Finance</span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                                            <span className="text-xs font-medium text-slate-500">Paused</span>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-sm text-slate-500">Oct 18, 2023</td>
+                                    <td className="px-6 py-4 text-right">
+                                        <button className="text-slate-400 hover:text-primary transition-colors">
+                                            <span className="material-symbols-outlined">more_horiz</span>
+                                        </button>
+                                    </td>
+                                </tr>
                             </tbody>
                         </table>
-                        <div style={{ padding: 16, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Showing 4 of 24 documents</p>
-                            <div style={{ display: 'flex', gap: 4 }}>
-                                <button style={{ padding: 8, border: '1px solid var(--border)', borderRadius: 4, background: 'none', cursor: 'pointer' }}>
-                                    <span className="material-symbols-outlined" style={{ fontSize: 16 }}>chevron_left</span>
+                        <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                            <p className="text-xs text-slate-500">Showing 4 of 24 documents</p>
+                            <div className="flex gap-1">
+                                <button className="p-2 border border-slate-200 dark:border-slate-700 rounded hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                                    <span className="material-symbols-outlined text-xs">chevron_left</span>
                                 </button>
-                                <button style={{ padding: 8, border: '1px solid var(--border)', borderRadius: 4, background: 'none', cursor: 'pointer' }}>
-                                    <span className="material-symbols-outlined" style={{ fontSize: 16 }}>chevron_right</span>
+                                <button className="p-2 border border-slate-200 dark:border-slate-700 rounded hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                                    <span className="material-symbols-outlined text-xs">chevron_right</span>
                                 </button>
                             </div>
                         </div>
@@ -256,108 +217,62 @@ export default function KnowledgeBasePage() {
                 </div>
             </main>
 
-            {/* Right Sidebar - Test Chat */}
-            <aside className="glass" style={{ 
-                width: 320, 
-                borderLeft: '1px solid var(--border)', 
-                background: 'white',
-                display: 'flex', 
-                flexDirection: 'column', 
-                overflow: 'hidden' 
-            }}>
-                <div style={{ padding: 16, borderBottom: '1px solid var(--border)', background: 'var(--bg-hover)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Test Knowledge</h3>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: '#10b981', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 6px', borderRadius: 4, textTransform: 'uppercase' }}>Live</span>
+            {/* Right Sidebar: Test Chat */}
+            <aside className="w-80 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-background-dark flex flex-col overflow-hidden">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/30">
+                    <div className="flex items-center justify-between mb-1">
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">Test Knowledge</h3>
+                        <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded uppercase">Live</span>
                     </div>
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>Verify what the AI knows about your uploaded documents.</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Verify what the AI knows about your uploaded documents.</p>
                 </div>
-                
-                <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    {chatMessages.map((msg, i) => (
-                        <div key={i} style={{ 
-                            display: 'flex', 
-                            flexDirection: 'column', 
-                            gap: 6, 
-                            maxWidth: '90%',
-                            alignSelf: msg.from === 'user' ? 'flex-end' : 'flex-start'
-                        }}>
-                            <div style={{
-                                background: msg.from === 'user' ? 'var(--primary)' : 'var(--bg-hover)',
-                                color: msg.from === 'user' ? 'white' : 'var(--text-primary)',
-                                padding: 12,
-                                borderRadius: 12,
-                                borderTopLeftRadius: msg.from === 'ai' ? 4 : 12,
-                                borderTopRightRadius: msg.from === 'user' ? 4 : 12,
-                                borderLeft: msg.source ? `2px solid var(--primary)` : 'none'
-                            }}>
-                                <p style={{ fontSize: 12, margin: 0, lineHeight: 1.4 }}>{msg.text}</p>
-                                {msg.source && (
-                                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-                                        <p style={{ fontSize: 10, color: 'var(--primary)', fontWeight: 700, textTransform: 'uppercase', margin: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                            <span className="material-symbols-outlined" style={{ fontSize: 12 }}>source</span>
-                                            Source: {msg.source}
-                                        </p>
-                                    </div>
-                                )}
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {/* Message from AI */}
+                    <div className="flex flex-col gap-1.5 max-w-[90%]">
+                        <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-xl rounded-tl-none">
+                            <p className="text-xs text-slate-700 dark:text-slate-300">Hi! I&apos;ve processed your latest listings. You can ask me anything about the Oceanview Penthouse or buyer scripts.</p>
+                        </div>
+                        <p className="text-[10px] text-slate-400 ml-1">AI Agent • 10:24 AM</p>
+                    </div>
+                    {/* Message from User */}
+                    <div className="flex flex-col gap-1.5 items-end max-w-[90%] ml-auto">
+                        <div className="bg-primary text-white p-3 rounded-xl rounded-tr-none">
+                            <p className="text-xs">How many bedrooms are in the Oceanview Penthouse?</p>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mr-1">You • 10:25 AM</p>
+                    </div>
+                    {/* Message from AI with Source */}
+                    <div className="flex flex-col gap-1.5 max-w-[90%]">
+                        <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded-xl rounded-tl-none border-l-2 border-primary">
+                            <p className="text-xs text-slate-700 dark:text-slate-300">The Oceanview Penthouse listing specifies 4 bedrooms and 4.5 bathrooms, including a primary suite with floor-to-ceiling glass walls.</p>
+                            <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+                                <p className="text-[10px] text-primary font-bold uppercase flex items-center gap-1">
+                                    <span className="material-symbols-outlined text-[12px]">source</span>
+                                    Source: Oceanview_Penthouse_Listing.pdf
+                                </p>
                             </div>
-                            <p style={{ fontSize: 10, color: 'var(--text-muted)', margin: 0, marginLeft: msg.from === 'user' ? 'auto' : 4, marginRight: msg.from === 'user' ? 4 : 'auto' }}>
-                                {msg.from === 'user' ? 'You' : 'AI Agent'} • {msg.time}
-                            </p>
                         </div>
-                    ))}
+                        <p className="text-[10px] text-slate-400 ml-1">AI Agent • 10:25 AM</p>
+                    </div>
                 </div>
-
-                <div style={{ padding: 16, borderTop: '1px solid var(--border)' }}>
-                    <div style={{ position: 'relative' }}>
-                        <textarea
-                            value={chatInput}
-                            onChange={(e) => setChatInput(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
-                            placeholder="Ask a question..."
-                            rows={2}
-                            style={{
-                                width: '100%',
-                                background: 'var(--bg-hover)',
-                                border: '1px solid var(--border)',
-                                borderRadius: 8,
-                                fontSize: 12,
-                                padding: '12px 36px 12px 12px',
-                                resize: 'none',
-                                outline: 'none',
-                                fontFamily: 'inherit'
-                            }}
-                        />
-                        <button 
-                            onClick={handleSend}
-                            style={{
-                                position: 'absolute',
-                                right: 8,
-                                bottom: 8,
-                                padding: 6,
-                                background: 'var(--primary)',
-                                color: 'white',
-                                borderRadius: 6,
-                                border: 'none',
-                                cursor: 'pointer',
-                                transition: 'background 0.2s'
-                            }}
-                        >
-                            <span className="material-symbols-outlined" style={{ fontSize: 14, lineHeight: 1 }}>send</span>
+                {/* Input Area */}
+                <div className="p-4 border-t border-slate-200 dark:border-slate-800">
+                    <div className="relative">
+                        <textarea className="w-full bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-lg text-xs py-3 pl-3 pr-10 resize-none focus:ring-primary focus:border-primary" placeholder="Ask a question..." rows="2"></textarea>
+                        <button className="absolute right-2 bottom-2 p-1.5 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors">
+                            <span className="material-symbols-outlined text-sm leading-none">send</span>
                         </button>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, paddingHorizontal: 4 }}>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                            <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
-                                <span className="material-symbols-outlined" style={{ fontSize: 16 }}>mic</span>
+                    <div className="flex items-center justify-between mt-3 px-1">
+                        <div className="flex gap-2">
+                            <button className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+                                <span className="material-symbols-outlined text-sm">mic</span>
                             </button>
-                            <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
-                                <span className="material-symbols-outlined" style={{ fontSize: 16 }}>settings_voice</span>
+                            <button className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+                                <span className="material-symbols-outlined text-sm">settings_voice</span>
                             </button>
                         </div>
-                        <button style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', background: 'none', border: 'none', cursor: 'pointer' }}>
-                            Reset Chat
-                        </button>
+                        <button className="text-[10px] font-bold text-slate-400 uppercase hover:text-primary transition-colors">Reset Chat</button>
                     </div>
                 </div>
             </aside>

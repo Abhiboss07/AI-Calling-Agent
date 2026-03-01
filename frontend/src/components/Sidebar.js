@@ -4,105 +4,70 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const navItems = [
-    { href: '/', label: 'Dashboard', icon: 'dashboard' },
-    { href: '/clients', label: 'Voice', icon: 'mic' },
-    { href: '/wallet', label: 'Wallet', icon: 'account_balance_wallet' },
-    { href: '/management', label: 'Management', icon: 'settings_suggest' },
-    { href: '/knowledge-bases', label: 'Knowledge Base', icon: 'database' },
-    { href: '/dashboard', label: 'Live Monitor', icon: 'monitoring' },
+    { href: '/', icon: 'dashboard', label: 'Dashboard' },
+    { href: '/voice', icon: 'mic', label: 'Voice' },
+    { href: '/wallet', icon: 'account_balance_wallet', label: 'Wallet' },
+    { href: '/clients', icon: 'settings_suggest', label: 'Management' },
+    { href: '/knowledge-bases', icon: 'database', label: 'Knowledge Base' },
+    { href: '/dashboard', icon: 'monitoring', label: 'Live Monitor' },
 ];
 
 export default function Sidebar() {
     const pathname = usePathname();
 
     return (
-        <aside className="sidebar" style={{
-            width: 'var(--sidebar-width)',
-            background: 'var(--bg-sidebar)',
-            borderRight: '1px solid var(--border)',
-            display: 'flex',
-            flexDirection: 'column',
-            height: '100vh',
-            position: 'fixed',
-            left: 0,
-            top: 0,
-            zIndex: 30,
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)'
-        }}>
+        <aside className="w-72 bg-surface/50 border-r border-slate-800/50 flex flex-col shrink-0">
             {/* Logo */}
-            <div style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{
-                    background: 'var(--accent)',
-                    borderRadius: 8,
-                    padding: 6,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                }}>
-                    <span className="material-symbols-outlined" style={{ color: 'white', fontSize: 24 }}>rocket_launch</span>
+            <div className="p-6 flex items-center gap-3">
+                <div className="bg-primary rounded-lg p-1.5 flex items-center justify-center">
+                    <span className="material-symbols-outlined text-white text-2xl">rocket_launch</span>
                 </div>
                 <div>
-                    <h1 style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', margin: 0 }}>RE-Agent AI</h1>
-                    <p style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Real Estate Pro</p>
+                    <h1 className="text-slate-100 font-bold tracking-tight text-lg">AI Call Agent</h1>
+                    <p className="text-slate-500 text-xs font-medium uppercase tracking-wider">Calling Pro</p>
                 </div>
             </div>
 
             {/* Navigation */}
-            <nav style={{ flex: 1, padding: '16px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {navItems.map(item => {
-                    const isActive = pathname === item.href;
+            <nav className="flex-1 px-4 py-4 space-y-1">
+                {navItems.map((item) => {
+                    const isActive = pathname === item.href ||
+                        (item.href !== '/' && pathname?.startsWith(item.href));
+
                     return (
-                        <Link key={item.href} href={item.href} style={{
-                            display: 'flex', alignItems: 'center', gap: 12,
-                            padding: '12px 16px', borderRadius: 8,
-                            background: isActive ? 'linear-gradient(90deg, rgba(19,91,236,0.2) 0%, rgba(19,91,236,0) 100%)' : 'transparent',
-                            borderLeft: isActive ? '3px solid var(--accent)' : '3px solid transparent',
-                            color: isActive ? 'var(--accent)' : 'var(--text-muted)',
-                            fontSize: 14, fontWeight: isActive ? 600 : 500,
-                            textDecoration: 'none',
-                            transition: 'all 0.2s'
-                        }}>
-                            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>{item.icon}</span>
-                            <span>{item.label}</span>
+                        <Link
+                            key={item.href}
+                            href={item.href}
+                            className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${isActive
+                                    ? 'sidebar-active text-primary'
+                                    : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'
+                                }`}
+                        >
+                            <span className="material-symbols-outlined">{item.icon}</span>
+                            <span className={`text-sm ${isActive ? 'font-semibold' : 'font-medium'}`}>
+                                {item.label}
+                            </span>
                         </Link>
                     );
                 })}
             </nav>
 
-            {/* Usage Credits */}
-            <div style={{ padding: '24px', marginTop: 'auto' }}>
-                <div style={{
-                    background: 'rgba(255,255,255,0.03)',
-                    backdropFilter: 'blur(10px)',
-                    border: '1px solid rgba(255,255,255,0.05)',
-                    borderRadius: 12,
-                    padding: 16,
-                    marginBottom: 16
-                }}>
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Usage Credits</p>
-                    <div style={{ width: '100%', background: 'var(--bg-hover)', borderRadius: 999, height: 6, marginBottom: 8 }}>
-                        <div style={{ width: '75%', background: 'var(--accent)', height: 6, borderRadius: 999 }} />
+            {/* Bottom Section */}
+            <div className="p-6 mt-auto">
+                {/* Usage Credits */}
+                <div className="glass rounded-xl p-4 mb-4">
+                    <p className="text-xs text-slate-400 mb-2">Usage Credits</p>
+                    <div className="w-full bg-slate-800 rounded-full h-1.5 mb-2">
+                        <div className="bg-primary h-1.5 rounded-full" style={{ width: '75%' }}></div>
                     </div>
-                    <p style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>1,240 / 2,000 mins</p>
+                    <p className="text-xs font-medium text-slate-200">1,240 / 2,000 mins</p>
                 </div>
-                <Link href="/test-call" style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    width: '100%', padding: '12px 16px',
-                    background: 'var(--accent)',
-                    color: 'white',
-                    borderRadius: 8,
-                    fontWeight: 700,
-                    fontSize: 14,
-                    textDecoration: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 0 15px rgba(19,91,236,0.3)',
-                    transition: 'opacity 0.2s'
-                }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add_circle</span>
+
+                {/* Deploy Button */}
+                <button className="w-full py-3 bg-primary hover:bg-primary/90 text-white rounded-lg font-bold text-sm transition-colors neon-glow-blue flex items-center justify-center gap-2">
+                    <span className="material-symbols-outlined text-sm">add_circle</span>
                     Deploy New Agent
-                </Link>
+                </button>
             </div>
         </aside>
     );

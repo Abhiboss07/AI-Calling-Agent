@@ -20,7 +20,6 @@ export function AuthProvider({ children }) {
     const [loading, setLoading] = useState(true);
     const [token, setToken] = useState(null);
 
-    // debug: show configured API base
     useEffect(() => {
         console.debug('AuthProvider initializing, API_BASE =', API_BASE);
     }, []);
@@ -34,12 +33,6 @@ export function AuthProvider({ children }) {
             setLoading(false);
         }
     }, []);
-
-    useEffect(() => {
-        if (!loading && !user && !PUBLIC_ROUTES.includes(normalizedPath)) {
-            router.replace('/login');
-        }
-    }, [loading, user, normalizedPath, router]);
 
     async function fetchUser(jwt) {
         try {
@@ -56,7 +49,6 @@ export function AuthProvider({ children }) {
                     }
                 } catch { /* non-JSON */ }
             }
-            // Token invalid — clear
             localStorage.removeItem('ea_token');
             setToken(null);
         } catch {
@@ -82,29 +74,14 @@ export function AuthProvider({ children }) {
 
     const isPublicRoute = PUBLIC_ROUTES.includes(normalizedPath);
 
-    // Show nothing while checking auth (prevents flash)
     if (loading) {
         return (
             <AuthContext.Provider value={{ user, token, login, logout, loading }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#f8f9fa', color: '#9ca3af' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#101622', color: '#9ca3af' }}>
                     Loading...
                 </div>
             </AuthContext.Provider>
         );
-    }
-
-    // Auth pages — render without layout wrapper
-    if (isPublicRoute) {
-        return (
-            <AuthContext.Provider value={{ user, token, login, logout, loading }}>
-                {children}
-            </AuthContext.Provider>
-        );
-    }
-
-    // Protected pages — redirect if not authenticated
-    if (!user) {
-        return null;
     }
 
     return (
