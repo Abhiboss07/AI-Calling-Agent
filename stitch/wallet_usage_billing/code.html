@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Wallet &amp; Usage Billing | EstateAI</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#135bec",
+                        "background-light": "#f6f6f8",
+                        "background-dark": "#101622",
+                    },
+                    fontFamily: {
+                        "display": ["Inter"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 font-display">
+<div class="relative flex h-auto min-h-screen w-full flex-col overflow-x-hidden">
+<div class="layout-container flex h-full grow flex-col">
+<!-- Top Navigation -->
+<header class="flex items-center justify-between whitespace-nowrap border-b border-solid border-slate-200 dark:border-slate-800 px-6 py-3 lg:px-40 bg-background-light dark:bg-background-dark sticky top-0 z-50">
+<div class="flex items-center gap-4">
+<div class="size-6 text-primary">
+<svg fill="currentColor" viewbox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+<path d="M24 4C25.7818 14.2173 33.7827 22.2182 44 24C33.7827 25.7818 25.7818 33.7827 24 44C22.2182 33.7827 14.2173 25.7818 4 24C14.2173 22.2182 22.2182 14.2173 24 4Z"></path>
+</svg>
+</div>
+<h2 class="text-slate-900 dark:text-white text-lg font-bold leading-tight tracking-tight">EstateAI</h2>
+</div>
+<div class="flex flex-1 justify-end gap-8">
+<nav class="hidden md:flex items-center gap-8">
+<a class="text-slate-600 dark:text-slate-300 text-sm font-medium hover:text-primary transition-colors" href="#">Dashboard</a>
+<a class="text-slate-600 dark:text-slate-300 text-sm font-medium hover:text-primary transition-colors" href="#">Agents</a>
+<a class="text-primary text-sm font-bold border-b-2 border-primary pb-1" href="#">Wallet</a>
+<a class="text-slate-600 dark:text-slate-300 text-sm font-medium hover:text-primary transition-colors" href="#">Settings</a>
+</nav>
+<div class="flex gap-2">
+<button class="flex items-center justify-center rounded-lg h-10 w-10 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+<span class="material-symbols-outlined text-[20px]">notifications</span>
+</button>
+<div class="bg-center bg-no-repeat aspect-square bg-cover rounded-full h-10 w-10 border border-slate-200 dark:border-slate-700" data-alt="User profile avatar circle" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuDArvxvgaNSYpZmhU_kbuu-Jscp5OvBKzeFyFR924mMYzhOYmEc7OhOxztX1I4PKhCfuSMDfX4dRASVcquob24BzCjuFs-oXdJg3v7JZemf2eIELqnI06jb96A3PYdS9Lfs8K49hWE6iTOwBE1jsc-yCT0mEWZhpYCViK8yGFgupzPZF2LOXKfAxYb5WnWiKpOCxGZiXluvPyBcA9jmC3bfbk0OtX3dO0JarkYbRoZcHPHnZgU-nfUEgmrK9KceqO46lR0Rgt82bkA");'></div>
+</div>
+</div>
+</header>
+<main class="flex flex-1 justify-center py-8">
+<div class="layout-content-container flex flex-col max-w-[1024px] flex-1 px-4 md:px-10 gap-8">
+<!-- Page Title -->
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+<div>
+<h1 class="text-slate-900 dark:text-white text-4xl font-black leading-tight tracking-tight">Wallet &amp; Billing</h1>
+<p class="text-slate-500 dark:text-slate-400 text-base font-normal">Monitor your agent usage credits and manage payment methods.</p>
+</div>
+<button class="flex items-center justify-center px-6 py-3 bg-primary text-white rounded-lg font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all">
+<span class="material-symbols-outlined mr-2">add_card</span>
+                        Top Up Credits
+                    </button>
+</div>
+<!-- Summary Cards -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<div class="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+<p class="text-slate-500 dark:text-slate-400 text-sm font-medium">Current Balance</p>
+<div class="flex items-baseline gap-2">
+<p class="text-slate-900 dark:text-white text-3xl font-bold">$425.50</p>
+<span class="text-emerald-500 text-xs font-bold px-1.5 py-0.5 bg-emerald-500/10 rounded">~8,510 credits</span>
+</div>
+<p class="text-emerald-500 text-xs font-medium flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">trending_up</span>
+                            Last top up 2 days ago
+                        </p>
+</div>
+<div class="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+<p class="text-slate-500 dark:text-slate-400 text-sm font-medium">Total Spent (30d)</p>
+<p class="text-slate-900 dark:text-white text-3xl font-bold">$1,240.00</p>
+<p class="text-rose-500 text-xs font-medium flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">trending_up</span>
+                            12% more than last month
+                        </p>
+</div>
+<div class="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+<p class="text-slate-500 dark:text-slate-400 text-sm font-medium">Avg. Cost Per Call</p>
+<p class="text-slate-900 dark:text-white text-3xl font-bold">$0.14</p>
+<p class="text-slate-500 dark:text-slate-400 text-xs font-medium">Based on 8,857 calls</p>
+</div>
+</div>
+<!-- Spend Visualizer & Payment -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- Spend History Chart -->
+<div class="lg:col-span-2 flex flex-col gap-6 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+<div class="flex justify-between items-center">
+<h3 class="text-slate-900 dark:text-white text-lg font-bold">Daily Spend History</h3>
+<select class="bg-slate-100 dark:bg-slate-900 border-none rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300 py-1 pl-2 pr-8 focus:ring-primary">
+<option>Last 7 Days</option>
+<option>Last 30 Days</option>
+</select>
+</div>
+<div class="flex items-end justify-between h-48 gap-2 pt-4 px-2">
+<div class="group relative flex flex-1 flex-col items-center gap-2">
+<div class="w-full bg-primary/20 rounded-t-sm group-hover:bg-primary/40 transition-colors" style="height: 45%;"></div>
+<span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold">MON</span>
+</div>
+<div class="group relative flex flex-1 flex-col items-center gap-2">
+<div class="w-full bg-primary/20 rounded-t-sm group-hover:bg-primary/40 transition-colors" style="height: 60%;"></div>
+<span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold">TUE</span>
+</div>
+<div class="group relative flex flex-1 flex-col items-center gap-2">
+<div class="w-full bg-primary rounded-t-sm" style="height: 85%;"></div>
+<span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold">WED</span>
+</div>
+<div class="group relative flex flex-1 flex-col items-center gap-2">
+<div class="w-full bg-primary/20 rounded-t-sm group-hover:bg-primary/40 transition-colors" style="height: 35%;"></div>
+<span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold">THU</span>
+</div>
+<div class="group relative flex flex-1 flex-col items-center gap-2">
+<div class="w-full bg-primary/20 rounded-t-sm group-hover:bg-primary/40 transition-colors" style="height: 55%;"></div>
+<span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold">FRI</span>
+</div>
+<div class="group relative flex flex-1 flex-col items-center gap-2">
+<div class="w-full bg-primary/20 rounded-t-sm group-hover:bg-primary/40 transition-colors" style="height: 20%;"></div>
+<span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold">SAT</span>
+</div>
+<div class="group relative flex flex-1 flex-col items-center gap-2">
+<div class="w-full bg-primary/20 rounded-t-sm group-hover:bg-primary/40 transition-colors" style="height: 40%;"></div>
+<span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold">SUN</span>
+</div>
+</div>
+</div>
+<!-- Payment Method -->
+<div class="flex flex-col gap-6 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+<h3 class="text-slate-900 dark:text-white text-lg font-bold">Quick Top Up</h3>
+<div class="space-y-4">
+<div class="flex items-center justify-between p-3 rounded-lg border border-primary bg-primary/5">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary">credit_card</span>
+<div>
+<p class="text-sm font-bold text-slate-900 dark:text-white">Visa ending in 4242</p>
+<p class="text-xs text-slate-500">Expires 12/26</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-primary text-[20px]">check_circle</span>
+</div>
+<div class="flex items-center gap-2 justify-center py-2 opacity-60">
+<div class="w-8 h-5 bg-slate-200 dark:bg-slate-700 rounded flex items-center justify-center text-[10px] font-bold">VISA</div>
+<div class="w-8 h-5 bg-slate-200 dark:bg-slate-700 rounded flex items-center justify-center text-[10px] font-bold">MC</div>
+<div class="w-8 h-5 bg-slate-200 dark:bg-slate-700 rounded flex items-center justify-center text-[10px] font-bold">AX</div>
+</div>
+<div class="space-y-2">
+<div class="flex justify-between text-xs font-bold text-slate-500 uppercase tracking-wider">
+<span>Select Amount</span>
+</div>
+<div class="grid grid-cols-2 gap-2">
+<button class="py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">$50</button>
+<button class="py-2 border border-primary bg-primary text-white rounded-lg text-sm font-bold">$100</button>
+<button class="py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">$250</button>
+<button class="py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">Custom</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Usage History Table -->
+<div class="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+<div class="flex justify-between items-center">
+<h3 class="text-slate-900 dark:text-white text-lg font-bold">Call Usage History</h3>
+<button class="text-primary text-sm font-bold flex items-center gap-1 hover:underline">
+                            Export CSV <span class="material-symbols-outlined text-[18px]">download</span>
+</button>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left">
+<thead>
+<tr class="border-b border-slate-100 dark:border-slate-700">
+<th class="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Agent / Call ID</th>
+<th class="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Date &amp; Time</th>
+<th class="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Duration</th>
+<th class="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Cost</th>
+<th class="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-50 dark:divide-slate-700/50">
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+<td class="py-4">
+<div class="flex items-center gap-3">
+<div class="size-8 rounded bg-primary/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-[18px]">support_agent</span>
+</div>
+<div>
+<p class="text-sm font-bold text-slate-900 dark:text-white">Listing Inquiry Bot</p>
+<p class="text-xs text-slate-500">#48592-CL</p>
+</div>
+</div>
+</td>
+<td class="py-4">
+<p class="text-sm text-slate-700 dark:text-slate-300">Oct 24, 2:15 PM</p>
+</td>
+<td class="py-4">
+<p class="text-sm text-slate-700 dark:text-slate-300 font-medium">4m 32s</p>
+</td>
+<td class="py-4">
+<p class="text-sm font-bold text-slate-900 dark:text-white">$0.64</p>
+</td>
+<td class="py-4">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">Success</span>
+</td>
+</tr>
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+<td class="py-4">
+<div class="flex items-center gap-3">
+<div class="size-8 rounded bg-primary/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-[18px]">support_agent</span>
+</div>
+<div>
+<p class="text-sm font-bold text-slate-900 dark:text-white">Listing Inquiry Bot</p>
+<p class="text-xs text-slate-500">#48588-CL</p>
+</div>
+</div>
+</td>
+<td class="py-4">
+<p class="text-sm text-slate-700 dark:text-slate-300">Oct 24, 1:40 PM</p>
+</td>
+<td class="py-4">
+<p class="text-sm text-slate-700 dark:text-slate-300 font-medium">1m 15s</p>
+</td>
+<td class="py-4">
+<p class="text-sm font-bold text-slate-900 dark:text-white">$0.20</p>
+</td>
+<td class="py-4">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">Success</span>
+</td>
+</tr>
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+<td class="py-4">
+<div class="flex items-center gap-3">
+<div class="size-8 rounded bg-primary/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-[18px]">support_agent</span>
+</div>
+<div>
+<p class="text-sm font-bold text-slate-900 dark:text-white">Outbound Prospecting</p>
+<p class="text-xs text-slate-500">#48582-CL</p>
+</div>
+</div>
+</td>
+<td class="py-4">
+<p class="text-sm text-slate-700 dark:text-slate-300">Oct 24, 11:12 AM</p>
+</td>
+<td class="py-4">
+<p class="text-sm text-slate-700 dark:text-slate-300 font-medium">0m 45s</p>
+</td>
+<td class="py-4">
+<p class="text-sm font-bold text-slate-900 dark:text-white">$0.15</p>
+</td>
+<td class="py-4">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 dark:bg-slate-900/50 text-slate-600 dark:text-slate-400">No Answer</span>
+</td>
+</tr>
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+<td class="py-4">
+<div class="flex items-center gap-3">
+<div class="size-8 rounded bg-primary/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-[18px]">support_agent</span>
+</div>
+<div>
+<p class="text-sm font-bold text-slate-900 dark:text-white">Listing Inquiry Bot</p>
+<p class="text-xs text-slate-500">#48575-CL</p>
+</div>
+</div>
+</td>
+<td class="py-4">
+<p class="text-sm text-slate-700 dark:text-slate-300">Oct 24, 9:05 AM</p>
+</td>
+<td class="py-4">
+<p class="text-sm text-slate-700 dark:text-slate-300 font-medium">8m 10s</p>
+</td>
+<td class="py-4">
+<p class="text-sm font-bold text-slate-900 dark:text-white">$1.12</p>
+</td>
+<td class="py-4">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">Success</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="flex items-center justify-center mt-2">
+<button class="px-4 py-2 text-sm font-bold text-slate-500 hover:text-primary transition-colors">Load more history</button>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="mt-auto border-t border-slate-200 dark:border-slate-800 py-6 px-10 text-center">
+<p class="text-xs text-slate-500 dark:text-slate-400">© 2024 EstateAI Technologies Inc. All transactions are encrypted and secured.</p>
+</footer>
+</div>
+</div>
+</body></html>

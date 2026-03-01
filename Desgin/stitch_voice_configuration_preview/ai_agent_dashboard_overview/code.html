@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AI Agent Dashboard Overview</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#135bec",
+                        "background-light": "#f6f6f8",
+                        "background-dark": "#101622",
+                        "surface": "#1a2234",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .glass {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .neon-glow-blue {
+            box-shadow: 0 0 15px rgba(19, 91, 236, 0.3);
+        }
+        .sidebar-active {
+            background: linear-gradient(90deg, rgba(19, 91, 236, 0.2) 0%, rgba(19, 91, 236, 0) 100%);
+            border-left: 3px solid #135bec;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 antialiased overflow-x-hidden">
+<div class="flex h-screen overflow-hidden">
+<!-- Sidebar Navigation -->
+<aside class="w-72 bg-surface/50 border-r border-slate-800/50 flex flex-col shrink-0">
+<div class="p-6 flex items-center gap-3">
+<div class="bg-primary rounded-lg p-1.5 flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-2xl">rocket_launch</span>
+</div>
+<div>
+<h1 class="text-slate-100 font-bold tracking-tight text-lg">RE-Agent AI</h1>
+<p class="text-slate-500 text-xs font-medium uppercase tracking-wider">Real Estate Pro</p>
+</div>
+</div>
+<nav class="flex-1 px-4 py-4 space-y-1">
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg sidebar-active text-primary transition-all" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-sm font-semibold">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:bg-slate-800/50 hover:text-slate-100 transition-all" href="#">
+<span class="material-symbols-outlined">mic</span>
+<span class="text-sm font-medium">Voice</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:bg-slate-800/50 hover:text-slate-100 transition-all" href="#">
+<span class="material-symbols-outlined">account_balance_wallet</span>
+<span class="text-sm font-medium">Wallet</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:bg-slate-800/50 hover:text-slate-100 transition-all" href="#">
+<span class="material-symbols-outlined">settings_suggest</span>
+<span class="text-sm font-medium">Management</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:bg-slate-800/50 hover:text-slate-100 transition-all" href="#">
+<span class="material-symbols-outlined">database</span>
+<span class="text-sm font-medium">Knowledge Base</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:bg-slate-800/50 hover:text-slate-100 transition-all" href="#">
+<span class="material-symbols-outlined">monitoring</span>
+<span class="text-sm font-medium">Live Monitor</span>
+</a>
+</nav>
+<div class="p-6 mt-auto">
+<div class="glass rounded-xl p-4 mb-4">
+<p class="text-xs text-slate-400 mb-2">Usage Credits</p>
+<div class="w-full bg-slate-800 rounded-full h-1.5 mb-2">
+<div class="bg-primary h-1.5 rounded-full" style="width: 75%"></div>
+</div>
+<p class="text-xs font-medium text-slate-200">1,240 / 2,000 mins</p>
+</div>
+<button class="w-full py-3 bg-primary hover:bg-primary/90 text-white rounded-lg font-bold text-sm transition-colors neon-glow-blue flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm">add_circle</span>
+                    Deploy New Agent
+                </button>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 overflow-y-auto bg-background-light dark:bg-background-dark relative">
+<!-- Header -->
+<header class="sticky top-0 z-10 glass border-b border-slate-800/50 px-8 py-4 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-slate-400">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-sm text-slate-300 w-64 placeholder:text-slate-500" placeholder="Search leads or recordings..." type="text"/>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4 border-r border-slate-800 pr-6">
+<button class="relative text-slate-400 hover:text-slate-100">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border-2 border-background-dark"></span>
+</button>
+<button class="text-slate-400 hover:text-slate-100">
+<span class="material-symbols-outlined">chat_bubble</span>
+</button>
+</div>
+<div class="flex items-center gap-3">
+<div class="text-right">
+<p class="text-sm font-semibold text-slate-100 leading-none">James Wilson</p>
+<p class="text-xs text-slate-500 mt-1">Admin Account</p>
+</div>
+<div class="h-10 w-10 rounded-full bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center text-white font-bold border-2 border-slate-800" data-alt="User profile avatar gradient pattern">JW</div>
+</div>
+</div>
+</header>
+<div class="p-8 max-w-7xl mx-auto">
+<!-- Welcome Section -->
+<div class="flex justify-between items-end mb-8">
+<div>
+<h2 class="text-3xl font-black text-slate-100 tracking-tight">Dashboard Overview</h2>
+<p class="text-slate-400 mt-2">Real-time performance monitoring for your Real Estate AI Calling Agents.</p>
+</div>
+<button class="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-semibold transition-all border border-slate-700">
+<span class="material-symbols-outlined text-lg">download</span>
+                        Export Report
+                    </button>
+</div>
+<!-- High Level Metrics -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+<div class="glass p-6 rounded-xl border-l-4 border-primary">
+<div class="flex justify-between items-start mb-4">
+<span class="material-symbols-outlined text-primary bg-primary/10 p-2 rounded-lg">call</span>
+<span class="text-green-500 text-xs font-bold flex items-center">+12.4% <span class="material-symbols-outlined text-xs">trending_up</span></span>
+</div>
+<p class="text-slate-400 text-sm font-medium">Total Calls</p>
+<h3 class="text-3xl font-bold text-slate-100 mt-1 tracking-tight">12,482</h3>
+</div>
+<div class="glass p-6 rounded-xl border-l-4 border-purple-500">
+<div class="flex justify-between items-start mb-4">
+<span class="material-symbols-outlined text-purple-500 bg-purple-500/10 p-2 rounded-lg">target</span>
+<span class="text-green-500 text-xs font-bold flex items-center">+2.4% <span class="material-symbols-outlined text-xs">trending_up</span></span>
+</div>
+<p class="text-slate-400 text-sm font-medium">Lead Conversion</p>
+<h3 class="text-3xl font-bold text-slate-100 mt-1 tracking-tight">18.5%</h3>
+</div>
+<div class="glass p-6 rounded-xl border-l-4 border-cyan-500">
+<div class="flex justify-between items-start mb-4">
+<span class="material-symbols-outlined text-cyan-500 bg-cyan-500/10 p-2 rounded-lg">schedule</span>
+<span class="text-red-400 text-xs font-bold flex items-center">-5% <span class="material-symbols-outlined text-xs">trending_down</span></span>
+</div>
+<p class="text-slate-400 text-sm font-medium">Active Minutes</p>
+<h3 class="text-3xl font-bold text-slate-100 mt-1 tracking-tight">45,200</h3>
+</div>
+<div class="glass p-6 rounded-xl border-l-4 border-emerald-500">
+<div class="flex justify-between items-start mb-4">
+<span class="material-symbols-outlined text-emerald-500 bg-emerald-500/10 p-2 rounded-lg">verified</span>
+<span class="text-green-500 text-xs font-bold flex items-center">+0.8% <span class="material-symbols-outlined text-xs">trending_up</span></span>
+</div>
+<p class="text-slate-400 text-sm font-medium">Success Rate</p>
+<h3 class="text-3xl font-bold text-slate-100 mt-1 tracking-tight">94.2%</h3>
+</div>
+</div>
+<!-- Main Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+<!-- Live Monitor Section -->
+<div class="lg:col-span-2 space-y-6">
+<div class="glass rounded-xl overflow-hidden border border-slate-800/50">
+<div class="px-6 py-4 border-b border-slate-800/50 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<span class="flex h-3 w-3 relative">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+<span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+</span>
+<h3 class="font-bold text-slate-100">Live Monitor</h3>
+</div>
+<div class="flex gap-2">
+<span class="bg-primary/20 text-primary px-3 py-1 rounded-full text-xs font-bold">8 Active Calls</span>
+<span class="bg-slate-800 text-slate-400 px-3 py-1 rounded-full text-xs font-bold">12 On Standby</span>
+</div>
+</div>
+<div class="p-0">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-slate-800/30 text-slate-400 text-xs uppercase tracking-widest font-bold">
+<th class="px-6 py-3">Lead Name</th>
+<th class="px-6 py-3">Agent ID</th>
+<th class="px-6 py-3">Status</th>
+<th class="px-6 py-3 text-right">Duration</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-800/50">
+<tr class="hover:bg-slate-800/20 transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold">RS</div>
+<div class="text-sm font-semibold text-slate-200">Robert Smith</div>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="text-sm text-slate-400 font-mono">#RE-772</span>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-500">
+                                                        Negotiating
+                                                    </span>
+</td>
+<td class="px-6 py-4 text-right text-sm text-slate-300">04:12</td>
+</tr>
+<tr class="hover:bg-slate-800/20 transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold">AM</div>
+<div class="text-sm font-semibold text-slate-200">Alice Miller</div>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="text-sm text-slate-400 font-mono">#RE-249</span>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-500">
+                                                        Initial Greeting
+                                                    </span>
+</td>
+<td class="px-6 py-4 text-right text-sm text-slate-300">01:34</td>
+</tr>
+<tr class="hover:bg-slate-800/20 transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold">TK</div>
+<div class="text-sm font-semibold text-slate-200">Thomas Klein</div>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="text-sm text-slate-400 font-mono">#RE-772</span>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-500/10 text-purple-500">
+                                                        Qualifying
+                                                    </span>
+</td>
+<td class="px-6 py-4 text-right text-sm text-slate-300">08:45</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<!-- Growth Chart Placeholder -->
+<div class="glass p-6 rounded-xl h-64 flex flex-col justify-between">
+<div class="flex justify-between items-center">
+<h3 class="font-bold text-slate-100">Call Volume Trends</h3>
+<div class="flex gap-2">
+<button class="px-3 py-1 bg-primary text-white text-xs rounded-full font-bold">7D</button>
+<button class="px-3 py-1 bg-slate-800 text-slate-400 text-xs rounded-full font-bold">30D</button>
+</div>
+</div>
+<div class="flex-1 flex items-end gap-2 pt-4">
+<div class="w-full bg-primary/20 rounded-t-lg h-[40%] hover:bg-primary transition-all cursor-pointer"></div>
+<div class="w-full bg-primary/20 rounded-t-lg h-[65%] hover:bg-primary transition-all cursor-pointer"></div>
+<div class="w-full bg-primary/20 rounded-t-lg h-[55%] hover:bg-primary transition-all cursor-pointer"></div>
+<div class="w-full bg-primary/20 rounded-t-lg h-[80%] hover:bg-primary transition-all cursor-pointer"></div>
+<div class="w-full bg-primary/20 rounded-t-lg h-[95%] hover:bg-primary transition-all cursor-pointer"></div>
+<div class="w-full bg-primary h-[85%] rounded-t-lg"></div>
+<div class="w-full bg-primary/20 rounded-t-lg h-[60%] hover:bg-primary transition-all cursor-pointer"></div>
+<div class="w-full bg-primary/20 rounded-t-lg h-[75%] hover:bg-primary transition-all cursor-pointer"></div>
+</div>
+</div>
+</div>
+<!-- Side Stats / Quick Actions -->
+<div class="space-y-6">
+<!-- Top Performing Agent -->
+<div class="glass p-6 rounded-xl border border-slate-800/50">
+<h3 class="font-bold text-slate-100 mb-6">Top Agent Stats</h3>
+<div class="flex items-center gap-4 mb-6">
+<div class="w-16 h-16 rounded-full bg-primary/20 p-1">
+<img alt="AI Agent" class="w-full h-full rounded-full bg-slate-800 object-cover" data-alt="High-tech AI agent avatar visualization" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCnWuw7HoVwQ3ctKrKTo4xTNNFMzmGKzyo5n6IFs_dVCjs7c22b6tE-0FQOJZXFD2j3CaaaXWLWqcUG7AKIuY1oZjw5AATdNZZjRneY8WAy8WPu5At22Ue9gHZH1WXrNcyn59y_RhHVk2qB13WXsKavzC7q6qpClujggdk3MQaa31Ufz9ZBCVl8XEOcaz3ExGH_foQWTAdQ092Yy2nFKsbXmRtwf8ZqjtMdKbTQ_XRqYSYYJjqJQta5iJuVzedQ97z_Osi2Kgf3lEk"/>
+</div>
+<div>
+<p class="text-lg font-bold text-slate-100">Aria - Closer Pro</p>
+<p class="text-xs text-slate-500 font-medium">Model: Turbo-X RealEstate</p>
+</div>
+</div>
+<div class="space-y-4">
+<div>
+<div class="flex justify-between text-xs font-bold mb-1.5">
+<span class="text-slate-400">Conversion Rate</span>
+<span class="text-primary">24.8%</span>
+</div>
+<div class="w-full bg-slate-800 rounded-full h-2">
+<div class="bg-primary h-2 rounded-full" style="width: 24.8%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-xs font-bold mb-1.5">
+<span class="text-slate-400">Sentiment Score</span>
+<span class="text-purple-500">92/100</span>
+</div>
+<div class="w-full bg-slate-800 rounded-full h-2">
+<div class="bg-purple-500 h-2 rounded-full" style="width: 92%"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Quick Knowledge Base Links -->
+<div class="glass p-6 rounded-xl border border-slate-800/50">
+<h3 class="font-bold text-slate-100 mb-4">Quick Resources</h3>
+<ul class="space-y-3">
+<li>
+<a class="group flex items-center justify-between p-3 rounded-lg hover:bg-slate-800/50 transition-all border border-transparent hover:border-slate-700" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-slate-400 group-hover:text-primary">menu_book</span>
+<span class="text-sm font-medium text-slate-300">OBJECTION SCRIPTS</span>
+</div>
+<span class="material-symbols-outlined text-slate-600 text-sm">arrow_forward</span>
+</a>
+</li>
+<li>
+<a class="group flex items-center justify-between p-3 rounded-lg hover:bg-slate-800/50 transition-all border border-transparent hover:border-slate-700" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-slate-400 group-hover:text-primary">apartment</span>
+<span class="text-sm font-medium text-slate-300">LISTING DATA FEED</span>
+</div>
+<span class="material-symbols-outlined text-slate-600 text-sm">arrow_forward</span>
+</a>
+</li>
+<li>
+<a class="group flex items-center justify-between p-3 rounded-lg hover:bg-slate-800/50 transition-all border border-transparent hover:border-slate-700" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-slate-400 group-hover:text-primary">record_voice_over</span>
+<span class="text-sm font-medium text-slate-300">VOICE PRESETS</span>
+</div>
+<span class="material-symbols-outlined text-slate-600 text-sm">arrow_forward</span>
+</a>
+</li>
+</ul>
+</div>
+<!-- Live Feed Card -->
+<div class="bg-gradient-to-br from-primary/10 to-purple-600/10 p-6 rounded-xl border border-primary/20 relative overflow-hidden group">
+<div class="relative z-10">
+<h3 class="font-bold text-slate-100 mb-2">Automated Optimization</h3>
+<p class="text-xs text-slate-400 mb-4">AI is currently re-learning objection handling from 524 recent call transcripts.</p>
+<button class="w-full py-2 bg-white/5 hover:bg-white/10 text-slate-100 rounded-lg text-xs font-bold transition-all border border-white/10">
+                                    View Training Logs
+                                </button>
+</div>
+<div class="absolute -right-4 -bottom-4 opacity-10 group-hover:opacity-20 transition-opacity">
+<span class="material-symbols-outlined text-9xl">psychology</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

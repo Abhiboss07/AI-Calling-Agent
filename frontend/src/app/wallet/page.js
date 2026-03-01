@@ -1,836 +1,191 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import {
-  Wallet,
-  TrendingDown,
-  TrendingUp,
-  Phone,
-  Clock,
-  IndianRupee,
-  ArrowDownRight,
-  ArrowUpRight,
-  PieChart,
-  BarChart3,
-  Activity,
-  Calendar
-} from 'lucide-react';
-import { useWebSocket } from '../../contexts/WebSocketContext';
+import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { API_BASE, getAuthHeaders } from '../../lib/api';
 
-// Chart component using SVG
-function PieChartComponent({ data }) {
-  const total = data.reduce((sum, item) => sum + item.value, 0);
-  let currentAngle = 0;
-  
-  return (
-    <div className="pie-chart-container">
-      <svg viewBox="0 0 100 100" className="pie-chart">
-        {data.map((item, index) => {
-          const angle = (item.value / total) * 360;
-          const startAngle = currentAngle;
-          currentAngle += angle;
-          const endAngle = currentAngle;
-          
-          const startRad = (startAngle * Math.PI) / 180;
-          const endRad = (endAngle * Math.PI) / 180;
-          
-          const x1 = 50 + 40 * Math.cos(startRad);
-          const y1 = 50 + 40 * Math.sin(startRad);
-          const x2 = 50 + 40 * Math.cos(endRad);
-          const y2 = 50 + 40 * Math.sin(endRad);
-          
-          const largeArc = angle > 180 ? 1 : 0;
-          
-          return (
-            <path
-              key={index}
-              d={`M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArc} 1 ${x2} ${y2} Z`}
-              fill={item.color}
-              stroke="#fff"
-              strokeWidth="2"
-            />
-          );
-        })}
-        <circle cx="50" cy="50" r="20" fill="#fff" />
-      </svg>
-      <div className="pie-legend">
-        {data.map((item, index) => (
-          <div key={index} className="legend-item">
-            <span className="legend-dot" style={{ backgroundColor: item.color }} />
-            <span className="legend-label">{item.label}</span>
-            <span className="legend-value">₹{item.value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function BarChartComponent({ data }) {
-  const maxValue = Math.max(...data.map(d => d.value));
-  
-  return (
-    <div className="bar-chart-container">
-      <div className="bar-chart">
-        {data.map((item, index) => (
-          <div key={index} className="bar-item">
-            <div className="bar-wrapper">
-              <div 
-                className="bar" 
-                style={{ 
-                  height: `${(item.value / maxValue) * 100}%`,
-                  backgroundColor: item.color || '#3b82f6'
-                }}
-              />
-            </div>
-            <span className="bar-label">{item.label}</span>
-            <span className="bar-value">₹{item.value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function formatRelativeTime(date) {
-  const now = new Date();
-  const diff = Math.floor((now - new Date(date)) / 1000);
-  
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
-}
-
 export default function WalletPage() {
-  const { connected, metrics } = useWebSocket();
-  const [walletData, setWalletData] = useState({
-    currentBalance: 0,
-    totalSpend: 0,
-    previousPeriodSpend: 0,
-    dailyAverage: 0,
-    totalCalls: 0,
-    totalMinutes: 0,
-    successRate: 0,
-    spendChange: 0
-  });
-  const [spendingCategories, setSpendingCategories] = useState([]);
-  const [dailyBreakdown, setDailyBreakdown] = useState([]);
-  const [transactions, setTransactions] = useState([]);
+  const [metrics, setMetrics] = useState(null);
+  const [calls, setCalls] = useState([]);
+  const [selectedAmount, setSelectedAmount] = useState('₹100');
   const [loading, setLoading] = useState(true);
 
-  // Fetch wallet data from API
-  useEffect(() => {
-    let mounted = true;
-    
-    const fetchWalletData = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/v1/wallet`, {
-          headers: getAuthHeaders(),
-          cache: 'no-store'
-        });
-        
-        if (!res.ok) throw new Error('Failed to fetch wallet data');
-        
-        const data = await res.json();
-        if (!mounted) return;
-        
-        if (data?.ok && data?.data) {
-          setWalletData(data.data);
-          setSpendingCategories(data.data.spendingCategories || []);
-          setDailyBreakdown(data.data.dailyBreakdown || []);
-          setTransactions(data.data.transactions || []);
-        }
-      } catch (err) {
-        console.error('Wallet fetch error:', err);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    fetchWalletData();
-    const interval = setInterval(fetchWalletData, 30000); // Refresh every 30s
-    
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-    };
+  const loadData = useCallback(async () => {
+    try {
+      const [mRes, cRes] = await Promise.all([
+        fetch(`${API_BASE}/v1/metrics`, { headers: getAuthHeaders() }).catch(() => null),
+        fetch(`${API_BASE}/v1/calls?perPage=10`, { headers: getAuthHeaders() }).catch(() => null)
+      ]);
+      if (mRes?.ok) { const d = await mRes.json().catch(() => ({})); if (d.ok) setMetrics(d.data); }
+      if (cRes?.ok) { const d = await cRes.json().catch(() => ({})); if (d.ok && d.data) setCalls(d.data); }
+    } catch { }
+    finally { setLoading(false); }
   }, []);
 
-  // Real-time updates from WebSocket
-  useEffect(() => {
-    if (!metrics?.totalCalls) return;
-    
-    // Update call count in real-time
-    setWalletData(prev => ({
-      ...prev,
-      totalCalls: metrics.totalCalls || prev.totalCalls
-    }));
-  }, [metrics]);
+  useEffect(() => { loadData(); const id = setInterval(loadData, 30000); return () => clearInterval(id); }, [loadData]);
 
-  const isSpendReduced = walletData.spendChange < 0;
+  const balance = metrics?.walletBalance || 0;
+  const totalSpent = metrics?.totalSpentRs || 0;
+  const totalCalls = metrics?.callsStarted || 0;
+  const avgCostPerCall = totalCalls > 0 ? (totalSpent / totalCalls).toFixed(2) : '0.00';
 
   return (
-    <div className="wallet-page">
-      <section className="wallet-header fade-in-up">
+    <div style={{ padding: 32, maxWidth: 1024, margin: '0 auto' }}>
+      {/* Header */}
+      <div className="fade-in-up" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
         <div>
-          <p className="section-label">BILLING & USAGE</p>
-          <h1 className="page-title">Wallet Dashboard</h1>
-          <p className="text-secondary">Monitor your balance, spending, and usage analytics in real-time.</p>
+          <h1 style={{ fontSize: 36, fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.02em', margin: 0 }}>Wallet & Billing</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: 15, margin: '8px 0 0' }}>Monitor your agent usage credits and manage payments.</p>
         </div>
-        <div className={`realtime-connection ${connected ? 'online' : 'offline'}`}>
-          <span className="dot" />
-          {connected ? 'Live Updates' : 'Disconnected'}
-        </div>
-      </section>
+        <button className="neon-glow" style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px 24px',
+          background: 'var(--accent)', color: 'white', borderRadius: 8, fontWeight: 700, fontSize: 14,
+          border: 'none', cursor: 'pointer', boxShadow: '0 8px 24px rgba(19,91,236,0.2)'
+        }}>
+          <span className="material-symbols-outlined" style={{ marginRight: 8, fontSize: 20 }}>add_card</span>
+          Top Up Credits
+        </button>
+      </div>
 
-      {/* Balance & Spend Overview */}
-      <div className="wallet-grid">
-        <div className="wallet-card balance-card fade-in-up delay-1">
-          <div className="wallet-card-header">
-            <div className="wallet-icon balance">
-              <Wallet size={24} />
+      {/* Summary Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24, marginBottom: 32 }}>
+        {[
+          { label: 'Current Balance', value: `₹${balance}`, sub: `~${Math.round(balance * 20)} credits`, subColor: 'var(--success)', note: 'Last top up recently', noteIcon: 'trending_up' },
+          { label: 'Total Spent (30d)', value: `₹${totalSpent}`, subColor: 'var(--danger)', note: 'Based on recent calls', noteIcon: 'trending_up' },
+          { label: 'Avg. Cost Per Call', value: `₹${avgCostPerCall}`, note: `Based on ${totalCalls} calls`, noteColor: 'var(--text-muted)' },
+        ].map((card, i) => (
+          <div key={i} className="fade-in-up glass-card" style={{ padding: 24, borderRadius: 12, animationDelay: `${i * 0.1}s` }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: 14, fontWeight: 500, margin: '0 0 8px' }}>{card.label}</p>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <p style={{ fontSize: 30, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{card.value}</p>
+              {card.sub && (
+                <span style={{ color: 'var(--success)', fontSize: 12, fontWeight: 700, padding: '2px 8px', background: 'rgba(16,185,129,0.1)', borderRadius: 4 }}>
+                  {card.sub}
+                </span>
+              )}
             </div>
-            <div>
-              <p className="wallet-label">Current Balance</p>
-              <h2 className="wallet-value">₹{walletData.currentBalance.toFixed(2)}</h2>
-            </div>
+            {card.note && (
+              <p style={{ color: card.noteColor || card.subColor || 'var(--text-muted)', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, margin: '8px 0 0' }}>
+                {card.noteIcon && <span className="material-symbols-outlined" style={{ fontSize: 14 }}>{card.noteIcon}</span>}
+                {card.note}
+              </p>
+            )}
           </div>
-          <button className="add-balance-btn">
-              + Add Balance
+        ))}
+      </div>
+
+      {/* Spend Chart + Quick Top Up */}
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24, marginBottom: 32 }}>
+        {/* Daily Spend Chart */}
+        <div className="fade-in-up glass-card" style={{ padding: 24, borderRadius: 12, animationDelay: '0.3s' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+            <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Daily Spend History</h3>
+            <select style={{ background: 'var(--bg-hover)', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', padding: '6px 16px 6px 8px' }}>
+              <option>Last 7 Days</option>
+              <option>Last 30 Days</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: 180, gap: 8, padding: '0 8px' }}>
+            {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].map((day, i) => {
+              const heights = [45, 60, 85, 35, 55, 20, 40];
+              return (
+                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                  <div className="chart-bar" style={{
+                    width: '100%', height: `${heights[i]}%`, borderRadius: '4px 4px 0 0',
+                    background: i === 2 ? 'var(--accent)' : 'rgba(19,91,236,0.2)',
+                    transition: 'all 0.3s', cursor: 'pointer'
+                  }} />
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700 }}>{day}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Quick Top Up */}
+        <div className="fade-in-up glass-card" style={{ padding: 24, borderRadius: 12, animationDelay: '0.35s' }}>
+          <h3 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 16px' }}>Quick Top Up</h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderRadius: 8, border: '1px solid var(--accent)', background: 'rgba(19,91,236,0.05)', marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>credit_card</span>
+              <div>
+                <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Payment Method</p>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>UPI / Card</p>
+              </div>
+            </div>
+            <span className="material-symbols-outlined" style={{ color: 'var(--accent)', fontSize: 20 }}>check_circle</span>
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', margin: '0 0 8px' }}>Select Amount</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+            {['₹50', '₹100', '₹250', 'Custom'].map(amt => (
+              <button key={amt} onClick={() => setSelectedAmount(amt)} style={{
+                padding: '10px 16px', borderRadius: 8, fontSize: 14, fontWeight: 700,
+                cursor: 'pointer', transition: 'all 0.2s',
+                border: selectedAmount === amt ? '1px solid var(--accent)' : '1px solid var(--border)',
+                background: selectedAmount === amt ? 'var(--accent)' : 'transparent',
+                color: selectedAmount === amt ? 'white' : 'var(--text-primary)'
+              }}>{amt}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Call Usage History Table */}
+      <div className="fade-in-up glass-card" style={{ borderRadius: 12, padding: 24, animationDelay: '0.4s' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Call Usage History</h3>
+          <button style={{ color: 'var(--accent)', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer' }}>
+            Export CSV <span className="material-symbols-outlined" style={{ fontSize: 18 }}>download</span>
+          </button>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                {['Agent / Call ID', 'Date & Time', 'Duration', 'Cost', 'Status'].map(h => (
+                  <th key={h} style={{ padding: '16px 0', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {calls.length === 0 ? (
+                <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No call data yet</td></tr>
+              ) : calls.map((call, i) => (
+                <tr key={call._id || i} className="table-row-hover" style={{ borderBottom: '1px solid var(--border-light)', transition: 'background 0.2s' }}>
+                  <td style={{ padding: '16px 0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 4, background: 'var(--accent-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span className="material-symbols-outlined" style={{ color: 'var(--accent)', fontSize: 18 }}>support_agent</span>
+                      </div>
+                      <div>
+                        <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>{call.phoneNumber || 'AI Agent'}</p>
+                        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>#{call._id?.slice(-6) || 'N/A'}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td style={{ padding: '16px 0', fontSize: 14 }}>{call.createdAt ? new Date(call.createdAt).toLocaleString() : 'N/A'}</td>
+                  <td style={{ padding: '16px 0', fontSize: 14, fontWeight: 500 }}>{call.durationSec ? `${Math.floor(call.durationSec / 60)}m ${call.durationSec % 60}s` : '0s'}</td>
+                  <td style={{ padding: '16px 0', fontSize: 14, fontWeight: 700 }}>₹{call.costRs?.toFixed(2) || '0.00'}</td>
+                  <td style={{ padding: '16px 0' }}>
+                    <span style={{
+                      display: 'inline-flex', padding: '3px 10px', borderRadius: 4, fontSize: 12, fontWeight: 500,
+                      background: call.status === 'completed' ? 'rgba(16,185,129,0.1)' : call.status === 'failed' ? 'rgba(239,68,68,0.1)' : 'var(--bg-hover)',
+                      color: call.status === 'completed' ? 'var(--success)' : call.status === 'failed' ? 'var(--danger)' : 'var(--text-muted)'
+                    }}>{call.status || 'Unknown'}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {calls.length > 0 && (
+          <div style={{ textAlign: 'center', marginTop: 12 }}>
+            <button style={{ padding: '8px 16px', fontSize: 14, fontWeight: 700, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
+              Load more history
             </button>
-        </div>
-
-        <div className="wallet-card spend-card fade-in-up delay-2">
-          <div className="wallet-card-header">
-            <div className="wallet-icon spend">
-              <IndianRupee size={24} />
-            </div>
-            <div>
-              <p className="wallet-label">Total Spend</p>
-              <h2 className="wallet-value">₹{walletData.totalSpend.toFixed(0)}</h2>
-            </div>
           </div>
-          <div className="spend-change">
-            <span className={`change-badge ${isSpendReduced ? 'positive' : 'negative'}`}>
-              {isSpendReduced ? <ArrowDownRight size={14} /> : <ArrowUpRight size={14} />}
-              {Math.abs(walletData.spendChange)}%
-            </span>
-            <span className="change-text">vs previous period</span>
-          </div>
-        </div>
+        )}
       </div>
-
-      {/* Usage Analytics */}
-      <section className="analytics-section fade-in-up delay-3">
-        <h3 className="section-title">
-          <Activity size={18} />
-          Usage Analytics
-          <span className="date-range">Feb 28, 2026 - Feb 28, 2026</span>
-        </h3>
-        
-        <div className="analytics-grid">
-          <div className="analytics-card">
-            <div className="analytics-icon blue">
-              <TrendingDown size={18} />
-            </div>
-            <div>
-              <p className="analytics-value">₹{walletData.totalSpend.toFixed(0)}</p>
-              <p className="analytics-label">Total Spend</p>
-              <span className={`analytics-change ${isSpendReduced ? 'positive' : 'negative'}`}>
-                {isSpendReduced ? '↓' : '↑'} {Math.abs(walletData.spendChange)}% vs prev period
-              </span>
-            </div>
-          </div>
-
-          <div className="analytics-card">
-            <div className="analytics-icon purple">
-              <Calendar size={18} />
-            </div>
-            <div>
-              <p className="analytics-value">₹{walletData.dailyAverage}</p>
-              <p className="analytics-label">Daily Average</p>
-              <span className="analytics-sub">per day in period</span>
-            </div>
-          </div>
-
-          <div className="analytics-card">
-            <div className="analytics-icon green">
-              <Phone size={18} />
-            </div>
-            <div>
-              <p className="analytics-value">{walletData.totalCalls}</p>
-              <p className="analytics-label">Total Calls</p>
-              <span className="analytics-change positive">
-                {walletData.successRate}% success
-              </span>
-            </div>
-          </div>
-
-          <div className="analytics-card">
-            <div className="analytics-icon orange">
-              <Clock size={18} />
-            </div>
-            <div>
-              <p className="analytics-value">0h {walletData.totalMinutes}m</p>
-              <p className="analytics-label">Total Minutes</p>
-              <span className="analytics-sub">1m avg</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Charts Section */}
-      <div className="charts-grid">
-        {/* Spending Categories */}
-        <section className="chart-card fade-in-up delay-4">
-          <h3 className="chart-title">
-            <PieChart size={18} />
-            Spending Categories
-          </h3>
-          <PieChartComponent data={spendingCategories} />
-        </section>
-
-        {/* Daily Breakdown */}
-        <section className="chart-card fade-in-up delay-4">
-          <h3 className="chart-title">
-            <BarChart3 size={18} />
-            Daily Breakdown
-          </h3>
-          <BarChartComponent data={dailyBreakdown} />
-        </section>
-      </div>
-
-      {/* Recent Transactions */}
-      <section className="transactions-card fade-in-up delay-5">
-        <div className="transactions-header">
-          <h3>Recent Transactions</h3>
-          <button className="see-all-btn">See all →</button>
-        </div>
-        
-        <div className="transactions-list">
-          {transactions.map((tx) => (
-            <div key={tx.id} className="transaction-item">
-              <div className="transaction-icon">
-                {tx.type === 'call' && <Phone size={16} />}
-                {tx.type === 'stream' && <Activity size={16} />}
-                {tx.type === 'fee' && <ArrowDownRight size={16} />}
-              </div>
-              <div className="transaction-details">
-                <p className="transaction-description">{tx.description}</p>
-                <p className="transaction-meta">
-                  {tx.duration && <span>{tx.duration}</span>}
-                  <span>{formatRelativeTime(tx.time)}</span>
-                </p>
-              </div>
-              <div className="transaction-amount negative">
-                -₹{Math.abs(tx.amount).toFixed(2)}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <style jsx>{`
-        .wallet-page {
-          max-width: 1200px;
-          margin: 0 auto;
-          padding: 24px;
-        }
-
-        .wallet-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          margin-bottom: 24px;
-        }
-
-        .section-label {
-          font-size: 12px;
-          font-weight: 600;
-          color: #6b7280;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          margin-bottom: 8px;
-        }
-
-        .page-title {
-          font-size: 28px;
-          font-weight: 700;
-          color: #111827;
-          margin-bottom: 8px;
-        }
-
-        .text-secondary {
-          color: #6b7280;
-          font-size: 14px;
-        }
-
-        .realtime-connection {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-          font-weight: 500;
-          padding: 8px 16px;
-          border-radius: 20px;
-          background: #f3f4f6;
-        }
-
-        .realtime-connection.online {
-          background: #d1fae5;
-          color: #065f46;
-        }
-
-        .realtime-connection .dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: #10b981;
-          animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-
-        .wallet-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-          gap: 20px;
-          margin-bottom: 24px;
-        }
-
-        .wallet-card {
-          background: #fff;
-          border-radius: 16px;
-          padding: 24px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-          border: 1px solid #e5e7eb;
-        }
-
-        .wallet-card-header {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          margin-bottom: 16px;
-        }
-
-        .wallet-icon {
-          width: 48px;
-          height: 48px;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .wallet-icon.balance {
-          background: #fef3c7;
-          color: #d97706;
-        }
-
-        .wallet-icon.spend {
-          background: #dbeafe;
-          color: #2563eb;
-        }
-
-        .wallet-label {
-          font-size: 14px;
-          color: #6b7280;
-          margin-bottom: 4px;
-        }
-
-        .wallet-value {
-          font-size: 32px;
-          font-weight: 700;
-          color: #111827;
-        }
-
-        .add-balance-btn {
-          width: 100%;
-          padding: 12px;
-          background: #f97316;
-          color: white;
-          border: none;
-          border-radius: 8px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: background 0.2s;
-        }
-
-        .add-balance-btn:hover {
-          background: #ea580c;
-        }
-
-        .spend-change {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .change-badge {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          padding: 4px 8px;
-          border-radius: 6px;
-          font-size: 12px;
-          font-weight: 600;
-        }
-
-        .change-badge.positive {
-          background: #d1fae5;
-          color: #065f46;
-        }
-
-        .change-badge.negative {
-          background: #fee2e2;
-          color: #dc2626;
-        }
-
-        .change-text {
-          font-size: 13px;
-          color: #6b7280;
-        }
-
-        .analytics-section {
-          background: #fff;
-          border-radius: 16px;
-          padding: 24px;
-          margin-bottom: 24px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-          border: 1px solid #e5e7eb;
-        }
-
-        .section-title {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 16px;
-          font-weight: 600;
-          color: #111827;
-          margin-bottom: 20px;
-        }
-
-        .date-range {
-          margin-left: auto;
-          font-size: 13px;
-          color: #6b7280;
-          font-weight: 400;
-        }
-
-        .analytics-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-          gap: 16px;
-        }
-
-        .analytics-card {
-          display: flex;
-          align-items: flex-start;
-          gap: 12px;
-          padding: 16px;
-          background: #f9fafb;
-          border-radius: 12px;
-        }
-
-        .analytics-icon {
-          width: 40px;
-          height: 40px;
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .analytics-icon.blue {
-          background: #dbeafe;
-          color: #2563eb;
-        }
-
-        .analytics-icon.purple {
-          background: #e9d5ff;
-          color: #7c3aed;
-        }
-
-        .analytics-icon.green {
-          background: #d1fae5;
-          color: #059669;
-        }
-
-        .analytics-icon.orange {
-          background: #ffedd5;
-          color: #ea580c;
-        }
-
-        .analytics-value {
-          font-size: 20px;
-          font-weight: 700;
-          color: #111827;
-        }
-
-        .analytics-label {
-          font-size: 13px;
-          color: #6b7280;
-          margin-top: 2px;
-        }
-
-        .analytics-change {
-          font-size: 12px;
-          font-weight: 500;
-          margin-top: 4px;
-        }
-
-        .analytics-change.positive {
-          color: #059669;
-        }
-
-        .analytics-change.negative {
-          color: #dc2626;
-        }
-
-        .analytics-sub {
-          font-size: 12px;
-          color: #9ca3af;
-          margin-top: 4px;
-        }
-
-        .charts-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-          gap: 20px;
-          margin-bottom: 24px;
-        }
-
-        .chart-card {
-          background: #fff;
-          border-radius: 16px;
-          padding: 24px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-          border: 1px solid #e5e7eb;
-        }
-
-        .chart-title {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 16px;
-          font-weight: 600;
-          color: #111827;
-          margin-bottom: 20px;
-        }
-
-        .pie-chart-container {
-          display: flex;
-          align-items: center;
-          gap: 24px;
-        }
-
-        .pie-chart {
-          width: 150px;
-          height: 150px;
-          transform: rotate(-90deg);
-        }
-
-        .pie-legend {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-
-        .legend-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-        }
-
-        .legend-dot {
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-        }
-
-        .legend-label {
-          flex: 1;
-          color: #374151;
-        }
-
-        .legend-value {
-          font-weight: 600;
-          color: #111827;
-        }
-
-        .bar-chart-container {
-          padding: 16px 0;
-        }
-
-        .bar-chart {
-          display: flex;
-          align-items: flex-end;
-          gap: 16px;
-          height: 150px;
-        }
-
-        .bar-item {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .bar-wrapper {
-          width: 40px;
-          height: 120px;
-          background: #f3f4f6;
-          border-radius: 8px;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .bar {
-          position: absolute;
-          bottom: 0;
-          left: 0;
-          right: 0;
-          border-radius: 8px;
-          transition: height 0.3s ease;
-        }
-
-        .bar-label {
-          font-size: 12px;
-          color: #6b7280;
-        }
-
-        .bar-value {
-          font-size: 12px;
-          font-weight: 600;
-          color: #111827;
-        }
-
-        .transactions-card {
-          background: #fff;
-          border-radius: 16px;
-          padding: 24px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-          border: 1px solid #e5e7eb;
-        }
-
-        .transactions-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
-        }
-
-        .transactions-header h3 {
-          font-size: 16px;
-          font-weight: 600;
-          color: #111827;
-        }
-
-        .see-all-btn {
-          font-size: 13px;
-          color: #f97316;
-          background: none;
-          border: none;
-          cursor: pointer;
-          font-weight: 500;
-        }
-
-        .transactions-list {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-
-        .transaction-item {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 12px;
-          background: #f9fafb;
-          border-radius: 10px;
-        }
-
-        .transaction-icon {
-          width: 36px;
-          height: 36px;
-          border-radius: 8px;
-          background: #fee2e2;
-          color: #dc2626;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .transaction-details {
-          flex: 1;
-        }
-
-        .transaction-description {
-          font-size: 14px;
-          font-weight: 500;
-          color: #111827;
-        }
-
-        .transaction-meta {
-          font-size: 12px;
-          color: #6b7280;
-          margin-top: 2px;
-          display: flex;
-          gap: 8px;
-        }
-
-        .transaction-amount {
-          font-size: 14px;
-          font-weight: 600;
-        }
-
-        .transaction-amount.negative {
-          color: #dc2626;
-        }
-
-        .fade-in-up {
-          animation: fadeInUp 0.5s ease-out;
-        }
-
-        .delay-1 { animation-delay: 0.1s; }
-        .delay-2 { animation-delay: 0.2s; }
-        .delay-3 { animation-delay: 0.3s; }
-        .delay-4 { animation-delay: 0.4s; }
-        .delay-5 { animation-delay: 0.5s; }
-
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        @media (max-width: 768px) {
-          .wallet-grid {
-            grid-template-columns: 1fr;
-          }
-          
-          .charts-grid {
-            grid-template-columns: 1fr;
-          }
-          
-          .analytics-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-        }
-      `}</style>
     </div>
   );
 }
