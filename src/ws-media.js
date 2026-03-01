@@ -119,6 +119,28 @@ function mulawToPcm16(mulawBuffer) {
   return pcm;
 }
 
+function resample8kTo16kLinear(pcm8k) {
+  const numSamples = Math.floor(pcm8k.length / 2);
+  if (numSamples === 0) return Buffer.alloc(0);
+  const pcm16k = Buffer.alloc(numSamples * 4);
+
+  for (let i = 0; i < numSamples - 1; i++) {
+    const s1 = pcm8k.readInt16LE(i * 2);
+    const s2 = pcm8k.readInt16LE((i + 1) * 2);
+    const interpolated = Math.floor((s1 + s2) / 2);
+
+    pcm16k.writeInt16LE(s1, i * 4);
+    pcm16k.writeInt16LE(interpolated, i * 4 + 2);
+  }
+
+  // Last sample duplicated
+  const lastSample = pcm8k.readInt16LE((numSamples - 1) * 2);
+  pcm16k.writeInt16LE(lastSample, (numSamples - 1) * 4);
+  pcm16k.writeInt16LE(lastSample, (numSamples - 1) * 4 + 2);
+
+  return pcm16k;
+}
+
 function buildWavBuffer(pcmData) {
   const header = Buffer.alloc(44);
   const dataSize = pcmData.length;
@@ -131,8 +153,8 @@ function buildWavBuffer(pcmData) {
   header.writeUInt32LE(16, 16);
   header.writeUInt16LE(1, 20);
   header.writeUInt16LE(1, 22);
-  header.writeUInt32LE(8000, 24);
-  header.writeUInt32LE(16000, 28);
+  header.writeUInt32LE(16000, 24); // Updated to 16kHz
+  header.writeUInt32LE(32000, 28); // 16000 * 2 (16-bit mono)
   header.writeUInt16LE(2, 32);
   header.writeUInt16LE(16, 34);
   header.write('data', 36);
@@ -213,7 +235,11 @@ class CallSession {
     this.preSpeechMulaw = [];
     this.preSpeechPcm = [];
     this.preSpeechBytes = 0;
+
+    // VAD & Noise Floor State
     this.noiseFloorRms = VAD_THRESHOLD * 0.6;
+    this.vadCalibrated = false;
+    this.calibrationChunks = 0;
 
     // Pipeline state
     this.isProcessing = false;
@@ -248,6 +274,7 @@ class CallSession {
 
     // Playback state
     this.isPlaying = false;
+    this._postPlaybackDelay = false;
     this.playbackStartedAt = 0;
     this.interruptVoiceChunks = 0;
     this._greetingStarted = false;
@@ -357,6 +384,14 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
   session.isPlaying = false;
   session.playbackStartedAt = 0;
   session.interruptVoiceChunks = 0;
+
+  // Wait 300ms before accepting audio again to prevent double-barge-in echo triggers
+  session._postPlaybackDelay = true;
+  setTimeout(() => {
+    if (session._playbackId === playbackId) {
+      session._postPlaybackDelay = false;
+    }
+  }, 300);
 }
 
 function clearPreSpeechCache(session) {
@@ -388,6 +423,12 @@ function flushPreSpeechCache(session) {
 async function maybeDeliverInitialGreeting(session, ws) {
   if (!session || session._greetingStarted || session._ended) return;
   if (!session.streamSid || ws.readyState !== 1) {
+    session._greetingPending = true;
+    return;
+  }
+
+  // Wait for calibration before speaking (Requirement #2)
+  if (!session.vadCalibrated) {
     session._greetingPending = true;
     return;
   }
@@ -486,11 +527,12 @@ module.exports = function setupWs(app) {
         await endCallGracefully(session, ws, langConfig.farewell);
       }, MAX_CALL_MS);
 
-      maybeDeliverInitialGreeting(session, ws).catch((e) => logger.warn('Greeting delivery failed', e.message));
+      // Do NOT maybeDeliverInitialGreeting here anymore.
+      // We must wait for VAD calibration chunks (500ms) to arrive first, which calls maybeDeliverInitialGreeting.
       return session;
     };
 
-    // Initialize as soon as WS is established so greeting doesn't wait for first media frame.
+    // Initialize as soon as WS is established so session is ready.
     if (queryCallUuid) {
       initializeSession({
         callUuid: queryCallUuid,
@@ -681,17 +723,42 @@ module.exports = function setupWs(app) {
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // PROCESS AUDIO CHUNK â€” Shared logic for both binary and JSON media
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+function shouldDetectSpeech(session) {
+  // Requirement #1 & #4: Disable VAD during TTS playback and post-delay cooldown
+  if (session.isPlaying) return false;
+  if (session._postPlaybackDelay) return false;
+  // Requirement #2: Do not detect speech before calibration completes
+  if (!session.vadCalibrated) return false;
+  return true;
+}
+
 function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms = 0) {
-  if (session._greetingPending && session.streamSid) {
-    maybeDeliverInitialGreeting(session, ws).catch((e) => logger.warn('Greeting delivery failed', e.message));
+  // Phase 1: Noise floor calibration happens first
+  if (!session.vadCalibrated) {
+    const floor = session.noiseFloorRms || (VAD_THRESHOLD * 0.6);
+    if (rms > 0 && rms < (VAD_THRESHOLD * 1.5)) {
+      session.noiseFloorRms = (floor * 0.95) + (rms * 0.05);
+    }
+    session.calibrationChunks++;
+
+    // Calibrate for ~500ms (25 chunks at 20ms each) before allowing greeting
+    if (session.calibrationChunks >= 25) {
+      logger.debug('VAD noise calibration complete', session.callSid, 'floor:', session.noiseFloorRms);
+      session.vadCalibrated = true;
+      if (session._greetingPending && session.streamSid) {
+        maybeDeliverInitialGreeting(session, ws).catch((e) => logger.warn('Greeting delivery failed', e.message));
+      }
+    }
+    return; // Ignore speech entirely during initial calibration
   }
 
-  const floor = session.noiseFloorRms || (VAD_THRESHOLD * 0.6);
-  if (rms > 0 && rms < (VAD_THRESHOLD * 1.2)) {
-    session.noiseFloorRms = (floor * 0.95) + (rms * 0.05);
+  // Check if we should ignore speech detection (because agent is speaking)
+  if (!shouldDetectSpeech(session)) {
+    return;
   }
 
-  const dynamicThreshold = Math.max(VAD_THRESHOLD * 0.6, (session.noiseFloorRms || floor) * 2.2);
+  const floor = session.noiseFloorRms;
+  const dynamicThreshold = Math.max(VAD_THRESHOLD * 0.6, floor * 2.2);
   const hasVoice = rms >= dynamicThreshold;
 
   if (hasVoice) {
@@ -707,29 +774,6 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms = 0) {
 
     if (session.isProcessing) {
       session.userSpeakingWhileProcessing = true;
-    }
-
-    // If agent is currently playing audio and user starts speaking -> interrupt fast.
-    if (session.isPlaying) {
-      const playbackMs = Date.now() - (session.playbackStartedAt || Date.now());
-      const strongSpeech = rms >= (dynamicThreshold * BARGE_IN_RMS_MULTIPLIER);
-
-      if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && (strongSpeech || session.speechChunkCount >= (SPEECH_START_CHUNKS + 1))) {
-        session.interruptVoiceChunks++;
-      } else {
-        session.interruptVoiceChunks = 0;
-      }
-
-      if (session.interruptVoiceChunks >= BARGE_IN_REQUIRED_CHUNKS) {
-        logger.log('User interrupted agent playback', session.callSid, { playbackMs, rms, dynamicThreshold });
-        try {
-          ws.send(JSON.stringify({ event: 'clearAudio' }));
-        } catch (e) { /* ignore */ }
-        session.isPlaying = false;
-        session.playbackStartedAt = 0;
-        session.interruptVoiceChunks = 0;
-        metrics.incrementInterrupt();
-      }
     }
 
     if (!session.isSpeaking && session.speechChunkCount >= SPEECH_START_CHUNKS) {
@@ -882,16 +926,17 @@ function clearBuffers(session) {
 async function processUtterance(session, pcmChunks, ws, pipelineId) {
   const pipelineStart = Date.now();
 
-  // 1) Convert PCM to WAV for Whisper
-  const pcmData = Buffer.concat(pcmChunks);
-  const wavBuffer = buildWavBuffer(pcmData);
+  // 1) Upsample 8kHz PCM to 16kHz for Whisper
+  const pcm8k = Buffer.concat(pcmChunks);
+  const pcm16k = resample8kTo16kLinear(pcm8k);
+  const wavBuffer = buildWavBuffer(pcm16k);
 
   // 2) Speech-to-Text
   const sttStart = Date.now();
   let sttResult = await stt.transcribe(wavBuffer, session.callSid, 'audio/wav', session.language);
 
   // Retry once with auto-language if we received empty text on a meaningful segment.
-  if ((sttResult.empty || !sttResult.text) && pcmData.length >= 9600) {
+  if ((sttResult.empty || !sttResult.text) && pcm8k.length >= 9600) {
     const retryStt = await stt.transcribe(wavBuffer, session.callSid, 'audio/wav', 'auto');
     if (!retryStt.empty && retryStt.text) sttResult = retryStt;
   }
