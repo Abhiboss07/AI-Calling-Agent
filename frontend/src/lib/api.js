@@ -5,15 +5,27 @@
 // contains '/api' the suffix is not duplicated.
 export const API_BASE = (() => {
     let base = '/api';
+
+    // Check for environment variables first
     if (typeof process !== 'undefined') {
         const configuredBase = process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_URL;
-        if (!configuredBase) return base;
-
-        base = configuredBase.replace(/\/+$/, '');
-        if (!base.match(/\/api(\/|$)/)) {
-            base = base + '/api';
+        if (configuredBase) {
+            base = configuredBase.replace(/\/+$/, '');
+            if (!base.match(/\/api(\/|$)/)) {
+                base = base + '/api';
+            }
+            return base;
         }
     }
+
+    // If no ENV is set, we must use an absolute URL during Server-Side Rendering (SSR)
+    // because Node.js fetch() cannot resolve relative paths like '/api'.
+    if (typeof window === 'undefined') {
+        // Fallback to localhost:3000 for local development SSR
+        return 'http://localhost:3000/api';
+    }
+
+    // Client-side can safely use relative paths
     return base;
 })();
 
