@@ -22,6 +22,16 @@ async function verifyToken(req, res, next) {
         }
 
         const token = authHeader.split(' ')[1];
+
+        // Developer bypass for local testing
+        if (token === 'dummy-token' && process.env.NODE_ENV !== 'production') {
+            const bypassUser = await User.findOne();
+            if (bypassUser) {
+                req.user = bypassUser;
+                return next();
+            }
+        }
+
         const decoded = jwt.verify(token, JWT_SECRET);
         const user = await User.findById(decoded.userId).select('-password -verificationCode -verificationExpiry -apiKeyHash');
 

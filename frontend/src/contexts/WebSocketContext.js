@@ -165,24 +165,19 @@ export function WebSocketProvider({ children }) {
   const maxReconnectAttempts = 50;
 
   const resolveWsUrl = useCallback(() => {
-    const configured = process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_URL || '';
-    const base = configured || API_BASE || '/api';
-    const normalized = base.replace(/\/+$/, '');
-    const withoutApiSuffix = normalized.replace(/\/api(\/v\d+)?$/i, '');
+    const base = process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+    let wsUrl = '';
 
-    if (withoutApiSuffix.startsWith('http://')) {
-      return `${withoutApiSuffix.replace(/^http:\/\//, 'ws://')}/monitor`;
-    }
-    if (withoutApiSuffix.startsWith('https://')) {
-      return `${withoutApiSuffix.replace(/^https:\/\//, 'wss://')}/monitor`;
+    // Explicit logic for local dev vs production WS routing
+    if (base.includes('localhost')) {
+      wsUrl = 'ws://localhost:3000/monitor';
+    } else {
+      // In production (e.g., https://api.admin.com/api) stip /api
+      const hostBase = base.replace(/\/api(\/v\d+)?$/i, '');
+      wsUrl = hostBase.replace(/^http/, 'ws') + '/monitor';
     }
 
-    if (typeof window !== 'undefined') {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
-      return `${protocol}//${host}/monitor`;
-    }
-    return 'ws://localhost:3000/monitor';
+    return wsUrl;
   }, []);
 
   // Connect to WebSocket
