@@ -240,10 +240,12 @@ class EnhancedCallSession {
 
     // Echo cool-down: discard audio for a brief period after playback ends
     this._echoCooldownUntil = 0;
-    // Noise calibration: after cool-down, sample audio to learn noise floor
-    // NOTE: starts at 0, only set after echo cool-down (not at session start,
-    // because early audio arrives during greeting playback = echo at full volume)
+
+    // Proper noise calibration system
     this._noiseCalibrationRemaining = 0;
+    this._calibrationSamples = 0;
+    this._frozenNoiseFloor = null;
+    this._calibrationStartedAt = 0;
 
     // RMS logging
     this._rmsLogCounter = 0;
