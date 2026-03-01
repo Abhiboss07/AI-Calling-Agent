@@ -124,19 +124,21 @@ function resample8kTo16kLinear(pcm8k) {
   if (numSamples === 0) return Buffer.alloc(0);
   const pcm16k = Buffer.alloc(numSamples * 4);
 
+  const clamp = (val) => Math.max(-32768, Math.min(32767, Math.round(val)));
+
   for (let i = 0; i < numSamples - 1; i++) {
     const s1 = pcm8k.readInt16LE(i * 2);
     const s2 = pcm8k.readInt16LE((i + 1) * 2);
     const interpolated = Math.floor((s1 + s2) / 2);
 
-    pcm16k.writeInt16LE(s1, i * 4);
-    pcm16k.writeInt16LE(interpolated, i * 4 + 2);
+    pcm16k.writeInt16LE(clamp(s1), i * 4);
+    pcm16k.writeInt16LE(clamp(interpolated), i * 4 + 2);
   }
 
   // Last sample duplicated
   const lastSample = pcm8k.readInt16LE((numSamples - 1) * 2);
-  pcm16k.writeInt16LE(lastSample, (numSamples - 1) * 4);
-  pcm16k.writeInt16LE(lastSample, (numSamples - 1) * 4 + 2);
+  pcm16k.writeInt16LE(clamp(lastSample), (numSamples - 1) * 4);
+  pcm16k.writeInt16LE(clamp(lastSample), (numSamples - 1) * 4 + 2);
 
   return pcm16k;
 }
@@ -758,68 +760,67 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms = 0) {
   }
 
   const floor = session.noiseFloorRms;
-  const dynamicThreshold = Math.max(VAD_THRESHOLD * 0.6, floor * 2.2);
-  const hasVoice = rms >= dynamicThreshold;
+  const dynamicThreshold = floor + 0.12; // Adjusted margin for PSTN fluctuations
 
-  if (hasVoice) {
-    session.speechChunkCount++;
-    session.silentChunkCount = 0;
-    session.lastVoiceActivityAt = Date.now();
+  // Buffer Pre-Speech immediately to prevent clipping the first syllable
+  if (!session.isSpeaking) {
+    rememberPreSpeechChunk(session, mulawBytes, pcmChunk);
+  }
 
-    let bufferedInPreSpeech = false;
-    if (!session.isSpeaking) {
-      rememberPreSpeechChunk(session, mulawBytes, pcmChunk);
-      bufferedInPreSpeech = true;
-    }
+  // Start Speech Debounce (200ms minimum threshold validation)
+  if (!session.isSpeaking) {
+    if (rms > dynamicThreshold) {
+      session.speechChunkCount++;
+      if (session.speechChunkCount * 20 >= 200) {
+        session.isSpeaking = true;
+        session.speechStartedAt = Date.now();
+        session.callState.silenceCount = 0;
+        logger.debug('Speech started (debounce 200ms met)', session.callSid);
+        clearTimeout(session.silenceTimer);
+        flushPreSpeechCache(session);
 
-    if (session.isProcessing) {
-      session.userSpeakingWhileProcessing = true;
-    }
-
-    if (!session.isSpeaking && session.speechChunkCount >= SPEECH_START_CHUNKS) {
-      session.isSpeaking = true;
-      session.speechStartedAt = Date.now();
-      session.callState.silenceCount = 0;
-      logger.debug('Speech started', session.callSid);
-      clearTimeout(session.silenceTimer);
-      flushPreSpeechCache(session);
-      bufferedInPreSpeech = false;
-    }
-
-    if (session.isSpeaking && !bufferedInPreSpeech) {
-      session.audioChunks.push(mulawBytes);
-      session.pcmBuffer.push(pcmChunk);
-      session.totalPcmBytes += pcmChunk.length;
-
-      if (session.totalPcmBytes > MAX_BUFFER_BYTES) {
-        logger.warn('Buffer overflow, forcing processing', session.callSid);
-        metrics.incrementBufferOverflow();
-        triggerProcessing(session, ws);
+        if (session.isProcessing) {
+          session.userSpeakingWhileProcessing = true;
+        }
       }
-    }
-    return;
-  }
-
-  session.silentChunkCount++;
-  session.speechChunkCount = 0;
-  session.interruptVoiceChunks = 0;
-
-  if (session.silentChunkCount >= 2) {
-    clearPreSpeechCache(session);
-  }
-
-  if (session.isSpeaking && session.silentChunkCount >= SPEECH_END_CHUNKS) {
-    session.isSpeaking = false;
-    logger.debug('Speech ended', session.callSid, session.totalPcmBytes, 'bytes');
-
-    const effectiveMinBytes = Math.max(800, Math.floor(MIN_UTTERANCE_BYTES * 0.6));
-    if (session.totalPcmBytes >= effectiveMinBytes) {
-      triggerProcessing(session, ws);
     } else {
-      clearBuffers(session);
+      session.speechChunkCount = 0; // Reset debounce if RMS drops below threshold
+    }
+  }
+
+  // While Speaking: Collect Audio and End Speech Debounce (600ms)
+  if (session.isSpeaking) {
+    session.audioChunks.push(mulawBytes);
+    session.pcmBuffer.push(pcmChunk);
+    session.totalPcmBytes += pcmChunk.length;
+
+    if (session.totalPcmBytes > MAX_BUFFER_BYTES) {
+      logger.warn('Buffer overflow, forcing processing', session.callSid);
+      metrics.incrementBufferOverflow();
+      triggerProcessing(session, ws);
+      return;
     }
 
-    startSilenceTimer(session, ws);
+    if (rms <= dynamicThreshold) {
+      session.silentChunkCount++;
+      if (session.silentChunkCount * 20 >= 600) { // 600ms silence timeout
+        session.isSpeaking = false;
+        logger.debug('Speech ended (600ms silence met)', session.callSid, session.totalPcmBytes, 'bytes');
+
+        const effectiveMinBytes = Math.max(800, Math.floor(MIN_UTTERANCE_BYTES * 0.6));
+        if (session.totalPcmBytes >= effectiveMinBytes) {
+          triggerProcessing(session, ws);
+        } else {
+          clearBuffers(session);
+        }
+
+        startSilenceTimer(session, ws);
+      }
+    } else {
+      // Speech sustained, reset silence counter
+      session.silentChunkCount = 0;
+      session.lastVoiceActivityAt = Date.now();
+    }
   }
 
   if (!session.isSpeaking && !session.silenceTimer) {
