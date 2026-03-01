@@ -28,8 +28,10 @@ async function verifyToken(req, res, next) {
             const bypassUser = await User.findOne();
             if (bypassUser) {
                 req.user = bypassUser;
-                return next();
+            } else {
+                req.user = { _id: 'dev-dummy-id', email: 'admin@local.test', role: 'admin', name: 'Admin Account' };
             }
+            return next();
         }
 
         const decoded = jwt.verify(token, JWT_SECRET);

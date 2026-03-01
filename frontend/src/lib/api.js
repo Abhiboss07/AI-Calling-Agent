@@ -143,11 +143,8 @@ export async function deleteAccount() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function fetchDocuments(category = 'All Documents') {
-    // Use URL to cleanly handle query params
-    const url = new URL(`${API_BASE}/v1/documents`, window.location.origin);
-    url.searchParams.append('category', category);
-
-    const res = await fetch(url.toString(), { cache: 'no-store', headers: getAuthHeaders() });
+    const query = new URLSearchParams({ category }).toString();
+    const res = await fetch(`${API_BASE}/v1/documents?${query}`, { cache: 'no-store', headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Failed to fetch documents');
     return res.json();
 }
