@@ -242,10 +242,10 @@ class EnhancedCallSession {
     this._echoCooldownUntil = 0;
 
     // Proper noise calibration system
-    this._noiseCalibrationRemaining = 0;
-    this._calibrationSamples = 0;
+    this.vadCalibrated = false;
+    this.calibrationChunks = 0;
     this._frozenNoiseFloor = null;
-    this._calibrationStartedAt = 0;
+    this.noiseFloorRms = 0;
 
     // RMS logging
     this._rmsLogCounter = 0;
@@ -517,10 +517,8 @@ module.exports = function setupWs(app) {
         await endCallGracefully(session, ws, getLanguage(session.language).farewell);
       }, MAX_CALL_MS);
 
-      // Attempt immediate greeting delivery
-      deliverInstantGreeting(session, ws).catch(e =>
-        logger.warn('Initial greeting failed', e.message)
-      );
+      // Greeting will be delivered automatically after VAD calibration inside processAudioChunk
+      session._greetingPending = true;
 
       return session;
     };
@@ -594,12 +592,9 @@ module.exports = function setupWs(app) {
 
           const sess = initializeSession({ callUuid, callerNumber, streamSid, language, direction });
 
-          // Explicitly try to deliver greeting after stream is established
+          // Stream established. Greeting stays pending until 500ms VAD calibration finishes.
           if (sess && streamSid) {
-            logger.log('Stream established, delivering greeting', { callSid: callUuid, streamSid });
-            deliverInstantGreeting(sess, ws).catch(e =>
-              logger.warn('Greeting delivery failed after stream start', e.message)
-            );
+            sess._greetingPending = true;
           }
           return;
         }
@@ -657,10 +652,33 @@ module.exports = function setupWs(app) {
 
 function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // ─────────────────────────────────────────────
-  // 0. Deliver pending greeting
+  // 0. INITIAL NOISE CALIBRATION (1st 500ms)
   // ─────────────────────────────────────────────
-  if (session._greetingPending && session.streamSid) {
-    deliverInstantGreeting(session, ws).catch(() => { });
+  if (!session.vadCalibrated) {
+    session.calibrationChunks++;
+
+    if (session.calibrationChunks === 1) {
+      session.noiseFloorRms = rms;
+    } else {
+      session.noiseFloorRms = session.noiseFloorRms * 0.8 + rms * 0.2;
+    }
+
+    if (session.calibrationChunks >= 25) { // 500ms of incoming audio
+      session.vadCalibrated = true;
+      if (session.noiseFloorRms < 0.001) session.noiseFloorRms = VAD_THRESHOLD * 0.5;
+      session._frozenNoiseFloor = session.noiseFloorRms;
+
+      logger.log('Initial calibration complete', {
+        callSid: session.callSid,
+        noiseFloor: session._frozenNoiseFloor.toFixed(4)
+      });
+
+      // Calibrated! Safe to deliver greeting now.
+      if (session._greetingPending && session.streamSid) {
+        deliverInstantGreeting(session, ws).catch(() => { });
+      }
+    }
+    return; // Block all processing and barge-in during calibration phase
   }
 
   // ─────────────────────────────────────────────
@@ -692,58 +710,16 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // ─────────────────────────────────────────────
   if (session._echoCooldownUntil) {
     if (Date.now() < session._echoCooldownUntil) return;
-
-    session._echoCooldownUntil = 0;
-    session._noiseCalibrationRemaining = NOISE_CALIBRATION_CHUNKS;
-    session._calibrationSamples = 0;
-    session._calibrationStartedAt = Date.now();
-    session.noiseFloorRms = 0;
+    session._echoCooldownUntil = 0; // Cooldown expired, resume normal listening
     return;
   }
 
   // ─────────────────────────────────────────────
-  // 3. NOISE CALIBRATION (FROZEN FLOOR)
+  // 3. FROZEN NOISE FLOOR THRESHOLD
   // ─────────────────────────────────────────────
-  if (session._noiseCalibrationRemaining > 0) {
-    session._noiseCalibrationRemaining--;
-    session._calibrationSamples++;
-
-    if (session._calibrationSamples === 1) {
-      session.noiseFloorRms = rms;
-    } else {
-      session.noiseFloorRms =
-        session.noiseFloorRms * 0.7 + rms * 0.3;
-    }
-
-    if (
-      session._noiseCalibrationRemaining === 0 ||
-      Date.now() - session._calibrationStartedAt > 3000
-    ) {
-      session._noiseCalibrationRemaining = 0;
-
-      if (session.noiseFloorRms < 0.001)
-        session.noiseFloorRms = VAD_THRESHOLD * 0.5;
-
-      session._frozenNoiseFloor = session.noiseFloorRms;
-
-      logger.log('Calibration complete', {
-        callSid: session.callSid,
-        noiseFloor: session._frozenNoiseFloor.toFixed(4)
-      });
-    }
-    return;
-  }
-
-  // ─────────────────────────────────────────────
-  // 4. FROZEN NOISE FLOOR (NO DRIFT)
-  // ─────────────────────────────────────────────
+  // Additive margin applied to frozen network floor
   const floor = session._frozenNoiseFloor || VAD_THRESHOLD * 0.6;
-
-  const dynamicThreshold = Math.max(
-    VAD_THRESHOLD,
-    floor + VOICE_MARGIN
-  );
-
+  const dynamicThreshold = Math.max(VAD_THRESHOLD, floor + VOICE_MARGIN);
   const hasVoice = rms >= dynamicThreshold;
 
   // ─────────────────────────────────────────────
