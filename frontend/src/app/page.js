@@ -1,6 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { fetchStats, fetchCalls, fetchWallet, fetchStartCall } from '../lib/api';
 
+// Force turbopack to invalidate and pick up new fetchWallet component
 export default function DashboardPage() {
   const [walletData, setWalletData] = useState(null);
   const [statsData, setStatsData] = useState(null);

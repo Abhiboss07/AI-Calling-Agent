@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { fetchStats, fetchCalls } from '../../lib/api';
+import { fetchStats, fetchCalls, fetchWallet } from '../../lib/api';
 
 export default function LiveMonitorPage() {
   const [statsData, setStatsData] = useState(null);
+  const [walletData, setWalletData] = useState(null);
   const [activeCalls, setActiveCalls] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -13,14 +14,16 @@ export default function LiveMonitorPage() {
 
     async function fetchData() {
       try {
-        const [statsRes, activeRes] = await Promise.all([
+        const [statsRes, activeRes, walletRes] = await Promise.all([
           fetchStats().catch(() => null),
-          fetchCalls({ status: 'in-progress' }).catch(() => ({ data: [] }))
+          fetchCalls({ status: 'in-progress' }).catch(() => ({ data: [] })),
+          fetchWallet().catch(() => null)
         ]);
 
         if (isMounted) {
           if (statsRes) setStatsData(statsRes);
           if (activeRes) setActiveCalls(activeRes.data || []);
+          if (walletRes?.ok) setWalletData(walletRes.data);
           setLoading(false);
         }
       } catch (err) {
