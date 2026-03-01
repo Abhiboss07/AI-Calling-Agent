@@ -52,7 +52,7 @@ function wsReducer(state, action) {
         connecting: false,
         error: null
       };
-    
+
     case WS_ACTIONS.DISCONNECT:
       return {
         ...state,
@@ -60,7 +60,7 @@ function wsReducer(state, action) {
         connecting: false,
         activeCall: null
       };
-    
+
     case WS_ACTIONS.CALL_STARTED:
       const newCall = {
         id: action.payload.callUuid,
@@ -70,7 +70,7 @@ function wsReducer(state, action) {
         agent: 'Shubhi',
         direction: action.payload.direction || 'inbound'
       };
-      
+
       return {
         ...state,
         calls: [...state.calls, newCall],
@@ -81,12 +81,12 @@ function wsReducer(state, action) {
           activeCalls: state.metrics.activeCalls + 1
         }
       };
-    
+
     case WS_ACTIONS.CALL_ENDED:
       return {
         ...state,
-        calls: state.calls.map(call => 
-          call.id === action.payload.callUuid 
+        calls: state.calls.map(call =>
+          call.id === action.payload.callUuid
             ? { ...call, status: 'completed', endTime: new Date() }
             : call
         ),
@@ -96,7 +96,7 @@ function wsReducer(state, action) {
           activeCalls: Math.max(0, state.metrics.activeCalls - 1)
         }
       };
-    
+
     case WS_ACTIONS.TRANSCRIPT_UPDATED:
       return {
         ...state,
@@ -113,7 +113,7 @@ function wsReducer(state, action) {
           ]
         }
       };
-    
+
     case WS_ACTIONS.AGENT_SPEAKING:
       return {
         ...state,
@@ -123,7 +123,7 @@ function wsReducer(state, action) {
           customerSpeaking: false
         } : null
       };
-    
+
     case WS_ACTIONS.CUSTOMER_SPEAKING:
       return {
         ...state,
@@ -133,7 +133,7 @@ function wsReducer(state, action) {
           customerSpeaking: true
         } : null
       };
-    
+
     case WS_ACTIONS.METRICS_UPDATED:
       return {
         ...state,
@@ -142,14 +142,14 @@ function wsReducer(state, action) {
           ...action.payload
         }
       };
-    
+
     case WS_ACTIONS.ERROR:
       return {
         ...state,
         error: action.payload,
         connecting: false
       };
-    
+
     default:
       return state;
   }
@@ -193,9 +193,9 @@ export function WebSocketProvider({ children }) {
     }
 
     dispatch({ type: WS_ACTIONS.CONNECTING });
-    
+
     const wsUrl = resolveWsUrl();
-    
+
     try {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
@@ -204,7 +204,7 @@ export function WebSocketProvider({ children }) {
         console.log('WebSocket connected');
         dispatch({ type: WS_ACTIONS.CONNECT });
         reconnectAttempts.current = 0;
-        
+
         // Request initial state
         ws.send(JSON.stringify({ type: 'get_state' }));
 
@@ -220,61 +220,61 @@ export function WebSocketProvider({ children }) {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          
+
           switch (data.type) {
             case 'call_started':
-              dispatch({ 
-                type: WS_ACTIONS.CALL_STARTED, 
-                payload: data.payload 
+              dispatch({
+                type: WS_ACTIONS.CALL_STARTED,
+                payload: data.payload
               });
               break;
-            
+
             case 'call_ended':
-              dispatch({ 
-                type: WS_ACTIONS.CALL_ENDED, 
-                payload: data.payload 
+              dispatch({
+                type: WS_ACTIONS.CALL_ENDED,
+                payload: data.payload
               });
               break;
-            
+
             case 'transcript':
-              dispatch({ 
-                type: WS_ACTIONS.TRANSCRIPT_UPDATED, 
-                payload: data.payload 
+              dispatch({
+                type: WS_ACTIONS.TRANSCRIPT_UPDATED,
+                payload: data.payload
               });
               break;
-            
+
             case 'agent_speaking':
-              dispatch({ 
-                type: WS_ACTIONS.AGENT_SPEAKING 
+              dispatch({
+                type: WS_ACTIONS.AGENT_SPEAKING
               });
               break;
-            
+
             case 'customer_speaking':
-              dispatch({ 
-                type: WS_ACTIONS.CUSTOMER_SPEAKING 
+              dispatch({
+                type: WS_ACTIONS.CUSTOMER_SPEAKING
               });
               break;
-            
+
             case 'metrics':
-              dispatch({ 
-                type: WS_ACTIONS.METRICS_UPDATED, 
-                payload: data.payload 
+              dispatch({
+                type: WS_ACTIONS.METRICS_UPDATED,
+                payload: data.payload
               });
               break;
-            
+
             case 'state':
               // Initial state sync
-              dispatch({ 
-                type: WS_ACTIONS.METRICS_UPDATED, 
-                payload: { 
+              dispatch({
+                type: WS_ACTIONS.METRICS_UPDATED,
+                payload: {
                   totalCalls: data.payload.totalCalls,
-                  activeCalls: data.payload.activeCalls 
+                  activeCalls: data.payload.activeCalls
                 }
               });
               break;
             case 'pong':
               break;
-            
+
             default:
               console.log('Unknown WebSocket message:', data);
           }
@@ -290,12 +290,12 @@ export function WebSocketProvider({ children }) {
           clearInterval(pingIntervalRef.current);
           pingIntervalRef.current = null;
         }
-        
+
         // Attempt to reconnect
         if (reconnectAttempts.current < maxReconnectAttempts) {
           reconnectAttempts.current++;
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
-          
+
           reconnectTimeoutRef.current = setTimeout(() => {
             console.log(`Reconnecting... Attempt ${reconnectAttempts.current}`);
             connect();
@@ -304,17 +304,21 @@ export function WebSocketProvider({ children }) {
       };
 
       ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        dispatch({ 
-          type: WS_ACTIONS.ERROR, 
-          payload: 'WebSocket connection failed' 
+        // Prevent noisy {} error logs if the socket was intentionally closed during React Strict Mode unmount
+        if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) return;
+
+        console.error('WebSocket connection error:', error?.message || 'Connection refused or dropped.');
+        dispatch({
+          type: WS_ACTIONS.ERROR,
+          payload: 'WebSocket connection failed'
         });
       };
 
     } catch (error) {
-      dispatch({ 
-        type: WS_ACTIONS.ERROR, 
-        payload: `Failed to connect: ${error.message}` 
+      console.error('Failed to instantiate WebSocket:', error);
+      dispatch({
+        type: WS_ACTIONS.ERROR,
+        payload: `Failed to connect: ${error.message}`
       });
     }
   }, [resolveWsUrl]);
@@ -328,19 +332,19 @@ export function WebSocketProvider({ children }) {
       clearInterval(pingIntervalRef.current);
       pingIntervalRef.current = null;
     }
-    
+
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
-    
+
     dispatch({ type: WS_ACTIONS.DISCONNECT });
   }, []);
 
   // Auto-connect on mount
   useEffect(() => {
     connect();
-    
+
     return () => {
       disconnect();
     };
@@ -372,10 +376,10 @@ export function useWebSocket() {
 // Hook for call-specific data
 export function useCallData(callUuid) {
   const { calls, transcripts, activeCall } = useWebSocket();
-  
+
   const call = calls.find(c => c.id === callUuid) || activeCall;
   const transcript = transcripts[callUuid] || [];
-  
+
   return { call, transcript };
 }
 
