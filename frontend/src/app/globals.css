@@ -11,7 +11,13 @@
   --font-display: "Inter", sans-serif;
 }
 
-/* Removed force dark mode, using Tailwind dark: variant on root instead */
+/* Force dark mode globally */
+html,
+body {
+  background-color: #101622;
+  color: #e2e8f0;
+}
+
 /* ===== Custom Utility Classes from Design ===== */
 
 .glass {
@@ -35,7 +41,25 @@
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar globally */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #232f48;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-corner {
+  background: rgba(0, 0, 0, 0.1);
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
 }

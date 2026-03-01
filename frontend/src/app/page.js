@@ -1,7 +1,5 @@
 'use client';
-
 import { useState, useEffect } from 'react';
-import { fetchWallet, fetchStats, fetchCalls } from '../lib/api';
 
 export default function DashboardPage() {
   const [walletData, setWalletData] = useState(null);
@@ -9,6 +7,32 @@ export default function DashboardPage() {
   const [activeCalls, setActiveCalls] = useState([]);
   const [standbyCount, setStandbyCount] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  // Manual Dispatch State
+  const [dispatchNumber, setDispatchNumber] = useState('');
+  const [dispatchStatus, setDispatchStatus] = useState({ loading: false, error: null, success: false });
+
+  const handleManualDispatch = async () => {
+    if (!dispatchNumber || dispatchNumber.trim() === '') {
+      setDispatchStatus({ loading: false, error: 'Enter a valid phone number', success: false });
+      return;
+    }
+
+    setDispatchStatus({ loading: true, error: null, success: false });
+
+    // Assume 'default' campaign for quick testing based on the route
+    try {
+      await fetchStartCall('default', dispatchNumber.trim(), 'en');
+      setDispatchStatus({ loading: false, error: null, success: true });
+      setDispatchNumber(''); // Clear on success
+
+      setTimeout(() => {
+        setDispatchStatus(prev => ({ ...prev, success: false }));
+      }, 3000);
+    } catch (err) {
+      setDispatchStatus({ loading: false, error: err.message, success: false });
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -223,6 +247,69 @@ export default function DashboardPage() {
                 })}
               </div>
             )}
+          </div>
+
+          {/* Make a Call Action Block */}
+          <div className="glass p-6 rounded-xl border border-primary/30 bg-primary/5 relative overflow-hidden group">
+            <div className="absolute -right-10 -bottom-10 opacity-10 group-hover:opacity-20 transition-opacity">
+              <span className="material-symbols-outlined text-[120px] text-primary">phone_in_talk</span>
+            </div>
+            <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+              <div>
+                <h3 className="font-black text-xl text-slate-100 mb-1 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary">dialpad</span>
+                  Manual Agent Dispatch
+                </h3>
+                <p className="text-sm text-slate-400">Instantly deploy an AI agent to dial any requested number for immediate testing or hot leads.</p>
+              </div>
+              <div className="flex flex-col w-full md:w-auto">
+                <div className="flex w-full md:w-auto items-center gap-2 bg-slate-900 border border-slate-700/50 rounded-xl p-1.5 shadow-inner">
+                  <div className="relative flex-1 md:w-48">
+                    <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-[18px]">call</span>
+                    <input
+                      type="tel"
+                      placeholder="+1 (555) 000-0000"
+                      value={dispatchNumber}
+                      onChange={(e) => setDispatchNumber(e.target.value)}
+                      className={`w-full bg-transparent border-none text-sm font-medium text-slate-200 placeholder:text-slate-600 focus:ring-0 pl-10 py-2.5 ${dispatchStatus.error ? 'text-red-400' : ''}`}
+                      disabled={dispatchStatus.loading || dispatchStatus.success}
+                    />
+                  </div>
+                  <button
+                    onClick={handleManualDispatch}
+                    disabled={dispatchStatus.loading || dispatchStatus.success || !dispatchNumber}
+                    className={`font-bold text-sm px-6 py-2.5 rounded-lg shadow-lg transition-all flex items-center gap-2 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed
+                            ${dispatchStatus.success ? 'bg-emerald-500 text-white shadow-emerald-500/20' :
+                        dispatchStatus.error ? 'bg-red-500 text-white shadow-red-500/20 hover:bg-red-600' :
+                          'bg-primary hover:bg-primary/90 text-white shadow-primary/20'}
+                        `}
+                  >
+                    {dispatchStatus.loading ? (
+                      <>
+                        <span className="material-symbols-outlined text-[18px] animate-spin">sync</span>
+                        Calling...
+                      </>
+                    ) : dispatchStatus.success ? (
+                      <>
+                        <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                        Dispatched
+                      </>
+                    ) : (
+                      <>
+                        Call Now
+                        <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                {dispatchStatus.error && (
+                  <p className="text-xs text-red-400 mt-2 font-medium px-2 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px]">error</span>
+                    {dispatchStatus.error}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 

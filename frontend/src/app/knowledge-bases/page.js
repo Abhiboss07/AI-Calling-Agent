@@ -4,7 +4,7 @@ export default function KnowledgeBasePage() {
     return (
         <div className="flex flex-1 overflow-hidden h-full">
             {/* Left Sidebar: Actions & Controls */}
-            <aside className="w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-background-dark p-6 flex flex-col gap-8">
+            <aside className="w-64 border-r border-slate-200 dark:border-slate-800 bg-background-light dark:bg-background-dark p-6 flex flex-col gap-8">
                 <div>
                     <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">Ingestion</h3>
                     <div className="space-y-2">
@@ -72,7 +72,7 @@ export default function KnowledgeBasePage() {
                     </div>
 
                     {/* Table Container */}
-                    <div className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                    <div className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
@@ -218,7 +218,7 @@ export default function KnowledgeBasePage() {
             </main>
 
             {/* Right Sidebar: Test Chat */}
-            <aside className="w-80 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-background-dark flex flex-col overflow-hidden">
+            <aside className="w-80 border-l border-slate-200 dark:border-slate-800 bg-background-light dark:bg-background-dark flex flex-col overflow-hidden">
                 <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/30">
                     <div className="flex items-center justify-between mb-1">
                         <h3 className="text-sm font-bold text-slate-900 dark:text-white">Test Knowledge</h3>

@@ -3,13 +3,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from './AuthProvider';
-import { useTheme } from '../contexts/ThemeContext';
 import { fetchWallet } from '../lib/api';
 
 export default function TopBar() {
     const { user, logout } = useAuth();
     const router = useRouter();
-    const { theme, toggleTheme } = useTheme();
 
     const [balance, setBalance] = useState(null);
     const [prevBalance, setPrevBalance] = useState(null);
@@ -92,13 +90,17 @@ export default function TopBar() {
                 )}
 
                 <div className="flex items-center gap-4 border-r border-slate-800 pr-6">
-                    <button className="relative text-slate-400 hover:text-slate-100 transition-colors">
-                        <span className="material-symbols-outlined">notifications</span>
-                        <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border-2 border-background-dark"></span>
-                    </button>
-                    <button className="text-slate-400 hover:text-slate-100 transition-colors">
-                        <span className="material-symbols-outlined">chat_bubble</span>
-                    </button>
+                    <a
+                        href="https://workabhi.com"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 group hover:bg-slate-800/50 py-1.5 px-3 rounded-lg transition-colors border border-transparent hover:border-slate-700"
+                    >
+                        <div className="w-6 h-6 rounded bg-primary/20 flex items-center justify-center">
+                            <span className="text-primary font-black text-xs">W</span>
+                        </div>
+                        <span className="text-sm font-bold text-slate-300 group-hover:text-white transition-colors">workabhi</span>
+                    </a>
                 </div>
 
                 {/* User Profile & Dropdown */}
@@ -140,21 +142,6 @@ export default function TopBar() {
                                 <span className="material-symbols-outlined text-[20px]">person</span>
                                 Profile Settings
                             </button>
-
-                            <button
-                                onClick={toggleTheme}
-                                className="w-full flex items-center justify-between px-4 py-2.5 text-sm text-slate-300 hover:text-slate-100 hover:bg-slate-800/50 transition-colors"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <span className="material-symbols-outlined text-[20px]">{theme === 'dark' ? 'dark_mode' : 'light_mode'}</span>
-                                    {theme === 'dark' ? 'Dark Theme' : 'Light Theme'}
-                                </div>
-                                <div className={`w-8 h-4 rounded-full relative transition-colors ${theme === 'dark' ? 'bg-primary' : 'bg-slate-500'}`}>
-                                    <div className={`w-3 h-3 bg-white rounded-full absolute top-0.5 transition-all ${theme === 'dark' ? 'right-0.5' : 'left-0.5'}`}></div>
-                                </div>
-                            </button>
-
-                            <div className="h-px bg-slate-800/80 my-1"></div>
 
                             <button
                                 onClick={() => { setIsDropdownOpen(false); logout(); }}

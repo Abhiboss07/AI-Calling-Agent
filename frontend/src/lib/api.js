@@ -62,6 +62,26 @@ export async function fetchWallet() {
     return res.json();
 }
 
+export async function fetchStartCall(campaignId, phoneNumber, language = 'en') {
+    const res = await fetch(`${API_BASE}/v1/calls/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ campaignId, phoneNumber, language })
+    });
+
+    // Check for conflict (409) or other errors to throw a descriptive issue
+    if (!res.ok) {
+        let errStr = "Failed to start call";
+        try {
+            const errData = await res.json();
+            if (errData.error) errStr = errData.error;
+        } catch (e) { }
+        throw new Error(errStr);
+    }
+
+    return res.json();
+}
+
 export async function fetchTranscript(id) {
     const res = await fetch(`${API_BASE}/v1/calls/${id}/transcript`, { cache: 'no-store', headers: getAuthHeaders() });
     if (!res.ok) {
