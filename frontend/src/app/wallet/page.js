@@ -1,6 +1,45 @@
 'use client';
 
+import { useState, useEffect } from 'react';
+import { fetchWallet } from '../../lib/api';
+
 export default function WalletPage() {
+  const [walletData, setWalletData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadWallet() {
+      try {
+        const res = await fetchWallet();
+        if (isMounted && res.ok) {
+          setWalletData(res.data);
+        }
+      } catch (err) {
+        console.error("Failed to load wallet data:", err);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    loadWallet();
+  }, []);
+
+  // Compute values with fallbacks
+  const currentBalance = walletData?.currentBalance || 0;
+  const creditsString = `~${Math.round(currentBalance * 20).toLocaleString()} credits`; // assuming $0.05/credit
+  const totalSpend = walletData?.totalSpend || 0;
+  const spendChange = walletData?.spendChange || 0;
+  const avgCost = walletData?.totalCalls > 0 ? (totalSpend / walletData.totalCalls).toFixed(2) : '0.00';
+
+  // Format daily breakdown for chart
+  const dailyBreakdown = walletData?.dailyBreakdown || [];
+  // Ensure we always have 7 days for the visualizer to look good, pad with 0s if needed
+  const chartData = [...dailyBreakdown].slice(-7);
+  while (chartData.length < 7) {
+    chartData.unshift({ date: '', spend: 0, calls: 0 });
+  }
+  const maxSpend = Math.max(...chartData.map(d => d.spend), 1);
+
   return (
     <div className="flex flex-1 justify-center py-8">
       <div className="flex flex-col max-w-[1024px] flex-1 px-4 md:px-10 gap-8">
@@ -18,29 +57,41 @@ export default function WalletPage() {
 
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
-            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Current Balance</p>
-            <div className="flex items-baseline gap-2">
-              <p className="text-slate-900 dark:text-white text-3xl font-bold">$425.50</p>
-              <span className="text-emerald-500 text-xs font-bold px-1.5 py-0.5 bg-emerald-500/10 rounded">~8,510 credits</span>
+          <div className="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden">
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium z-10">Current Balance</p>
+            <div className="flex items-baseline gap-2 z-10">
+              <p className="text-slate-900 dark:text-white text-3xl font-bold">
+                {loading ? <span className="animate-pulse bg-slate-700 text-transparent rounded">$00.00</span> : `$${currentBalance.toFixed(2)}`}
+              </p>
+              {!loading && <span className="text-emerald-500 text-xs font-bold px-1.5 py-0.5 bg-emerald-500/10 rounded">{creditsString}</span>}
             </div>
-            <p className="text-emerald-500 text-xs font-medium flex items-center gap-1">
+            <p className="text-emerald-500 text-xs font-medium flex items-center gap-1 z-10">
               <span className="material-symbols-outlined text-[14px]">trending_up</span>
-              Last top up 2 days ago
+              Real-time available funds
             </p>
           </div>
-          <div className="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
-            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Total Spent (30d)</p>
-            <p className="text-slate-900 dark:text-white text-3xl font-bold">$1,240.00</p>
-            <p className="text-rose-500 text-xs font-medium flex items-center gap-1">
-              <span className="material-symbols-outlined text-[14px]">trending_up</span>
-              12% more than last month
+
+          <div className="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden">
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium z-10">Total Spent (Today)</p>
+            <p className="text-slate-900 dark:text-white text-3xl font-bold z-10">
+              {loading ? <span className="animate-pulse bg-slate-700 text-transparent rounded">$0.00</span> : `$${totalSpend.toFixed(2)}`}
             </p>
+            {!loading && (
+              <p className={`${spendChange > 0 ? 'text-rose-500' : 'text-emerald-500'} text-xs font-medium flex items-center gap-1 z-10`}>
+                <span className="material-symbols-outlined text-[14px]">{spendChange > 0 ? 'trending_up' : 'trending_down'}</span>
+                {Math.abs(spendChange)}% {spendChange > 0 ? 'more' : 'less'} than yesterday
+              </p>
+            )}
           </div>
-          <div className="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
-            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Avg. Cost Per Call</p>
-            <p className="text-slate-900 dark:text-white text-3xl font-bold">$0.14</p>
-            <p className="text-slate-500 dark:text-slate-400 text-xs font-medium">Based on 8,857 calls</p>
+
+          <div className="flex flex-col gap-2 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden">
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium z-10">Avg. Cost Per Call</p>
+            <p className="text-slate-900 dark:text-white text-3xl font-bold z-10">
+              {loading ? <span className="animate-pulse bg-slate-700 text-transparent rounded">$0.00</span> : `$${avgCost}`}
+            </p>
+            <p className="text-slate-500 dark:text-slate-400 text-xs font-medium z-10">
+              Based on {walletData?.totalCalls || 0} calls
+            </p>
           </div>
         </div>
 
@@ -56,23 +107,27 @@ export default function WalletPage() {
               </select>
             </div>
             <div className="flex items-end justify-between h-48 gap-2 pt-4 px-2">
-              {[
-                { h: '45%', label: 'MON' },
-                { h: '60%', label: 'TUE' },
-                { h: '85%', label: 'WED', active: true },
-                { h: '35%', label: 'THU' },
-                { h: '55%', label: 'FRI' },
-                { h: '20%', label: 'SAT' },
-                { h: '40%', label: 'SUN' },
-              ].map((bar, i) => (
-                <div key={i} className="group relative flex flex-1 flex-col items-center gap-2">
-                  <div
-                    className={`w-full rounded-t-sm ${bar.active ? 'bg-primary' : 'bg-primary/20 group-hover:bg-primary/40'} transition-colors`}
-                    style={{ height: bar.h }}
-                  ></div>
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold">{bar.label}</span>
+              {loading ? (
+                <div className="w-full h-full flex items-center justify-center -ml-2">
+                  <span className="text-slate-500 text-sm animate-pulse font-medium">Loading history...</span>
                 </div>
-              ))}
+              ) : chartData.map((day, i) => {
+                const heightPct = Math.max((day.spend / maxSpend) * 100, 5);
+                const dateObj = new Date(day.date);
+                const dayLabel = day.date ? ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][dateObj.getDay()] : '-';
+                const isToday = i === chartData.length - 1;
+
+                return (
+                  <div key={i} className="group relative flex flex-1 flex-col items-center gap-2">
+                    <div
+                      className={`w-full rounded-t-sm transition-all ${isToday ? 'bg-primary' : 'bg-primary/20 group-hover:bg-primary/40'}`}
+                      style={{ height: `${heightPct}%` }}
+                      title={`$${day.spend.toFixed(2)} (${day.calls} calls)`}
+                    ></div>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold">{dayLabel}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -111,7 +166,7 @@ export default function WalletPage() {
         </div>
 
         {/* Usage History Table */}
-        <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm">
+        <div className="flex flex-col gap-4 rounded-xl p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm mb-12">
           <div className="flex justify-between items-center">
             <h3 className="text-slate-900 dark:text-white text-lg font-bold">Call Usage History</h3>
             <button className="text-primary text-sm font-bold flex items-center gap-1 hover:underline">
@@ -122,59 +177,74 @@ export default function WalletPage() {
             <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-700">
-                  <th className="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Agent / Call ID</th>
+                  <th className="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Description</th>
                   <th className="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Date &amp; Time</th>
                   <th className="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Duration</th>
-                  <th className="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Cost</th>
-                  <th className="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="py-4 pl-2 text-xs font-bold text-slate-500 uppercase tracking-wider">Cost</th>
+                  <th className="py-4 pl-2 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
-                {[
-                  { agent: 'Listing Inquiry Bot', id: '#48592-CL', date: 'Oct 24, 2:15 PM', duration: '4m 32s', cost: '$0.64', status: 'Success' },
-                  { agent: 'Listing Inquiry Bot', id: '#48588-CL', date: 'Oct 24, 1:40 PM', duration: '1m 15s', cost: '$0.20', status: 'Success' },
-                  { agent: 'Outbound Prospecting', id: '#48582-CL', date: 'Oct 24, 11:12 AM', duration: '0m 45s', cost: '$0.15', status: 'No Answer' },
-                  { agent: 'Listing Inquiry Bot', id: '#48575-CL', date: 'Oct 24, 9:05 AM', duration: '8m 10s', cost: '$1.12', status: 'Success' },
-                ].map((row, i) => (
-                  <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
-                    <td className="py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="size-8 rounded bg-primary/10 flex items-center justify-center">
-                          <span className="material-symbols-outlined text-primary text-[18px]">support_agent</span>
+                {loading ? (
+                  <tr>
+                    <td colSpan="5" className="py-8 text-center text-slate-500 text-sm">Loading transactions...</td>
+                  </tr>
+                ) : walletData?.transactions && walletData.transactions.length > 0 ? (
+                  walletData.transactions.map((tx, i) => (
+                    <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                      <td className="py-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`size-8 rounded ${tx.type === 'call' ? 'bg-primary/10' : 'bg-slate-500/10'} flex items-center justify-center`}>
+                            <span className={`material-symbols-outlined ${tx.type === 'call' ? 'text-primary' : 'text-slate-400'} text-[18px]`}>
+                              {tx.type === 'call' ? 'support_agent' : 'payments'}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-slate-900 dark:text-white">{tx.description}</p>
+                            <p className="text-xs text-slate-500 font-mono" title={tx.id}>
+                              {tx.id ? `#${tx.id.substring(tx.id.length - 6).toUpperCase()}` : ''}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-bold text-slate-900 dark:text-white">{row.agent}</p>
-                          <p className="text-xs text-slate-500">{row.id}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-4">
-                      <p className="text-sm text-slate-700 dark:text-slate-300">{row.date}</p>
-                    </td>
-                    <td className="py-4">
-                      <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">{row.duration}</p>
-                    </td>
-                    <td className="py-4">
-                      <p className="text-sm font-bold text-slate-900 dark:text-white">{row.cost}</p>
-                    </td>
-                    <td className="py-4">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${row.status === 'Success'
+                      </td>
+                      <td className="py-4">
+                        <p className="text-sm text-slate-700 dark:text-slate-300">
+                          {new Date(tx.time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </td>
+                      <td className="py-4">
+                        <p className="text-sm text-slate-700 dark:text-slate-300 font-medium">
+                          {tx.duration || '-'}
+                        </p>
+                      </td>
+                      <td className="py-4 pl-2">
+                        <p className={`text-sm font-bold ${tx.amount < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                          {tx.amount < 0 ? '-' : '+'}${Math.abs(tx.amount).toFixed(2)}
+                        </p>
+                      </td>
+                      <td className="py-4 pl-2">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${tx.status === 'completed'
                           ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
                           : 'bg-slate-100 dark:bg-slate-900/50 text-slate-600 dark:text-slate-400'
-                        }`}>{row.status}</span>
-                    </td>
+                          }`}>{tx.status === 'completed' ? 'Charged' : tx.status}</span>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="5" className="py-8 text-center text-slate-500 text-sm">No transaction history found.</td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
           <div className="flex items-center justify-center mt-2">
-            <button className="px-4 py-2 text-sm font-bold text-slate-500 hover:text-primary transition-colors">Load more history</button>
+            <button className="px-4 py-2 text-sm font-bold text-slate-500 hover:text-primary transition-colors disabled:opacity-50">Log Complete</button>
           </div>
         </div>
 
         {/* Footer */}
-        <footer className="mt-auto border-t border-slate-200 dark:border-slate-800 py-6 text-center">
+        <footer className="border-t border-slate-200 dark:border-slate-800 py-6 text-center">
           <p className="text-xs text-slate-500 dark:text-slate-400">© 2024 AI Call Agent Technologies Inc. All transactions are encrypted and secured.</p>
         </footer>
       </div>

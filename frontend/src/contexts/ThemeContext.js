@@ -1,32 +1,35 @@
-"use client";
+'use client';
+
 import { createContext, useContext, useEffect, useState } from 'react';
 
-const ThemeContext = createContext({ theme: 'light', toggleTheme: () => { } });
+const ThemeContext = createContext();
 
 export function ThemeProvider({ children }) {
-    const [theme, setTheme] = useState('light');
-    const [mounted, setMounted] = useState(false);
+    const [theme, setTheme] = useState('dark');
 
     useEffect(() => {
-        const saved = localStorage.getItem('ea_theme');
-        if (saved === 'dark' || saved === 'light') {
-            setTheme(saved);
+        // Run once on mount to detect saved theme or system preference
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) {
+            setTheme(savedTheme);
+            document.documentElement.classList.toggle('dark', savedTheme === 'dark');
         } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
             setTheme('dark');
+            document.documentElement.classList.add('dark');
+        } else {
+            setTheme('light');
+            document.documentElement.classList.remove('dark');
         }
-        setMounted(true);
     }, []);
 
-    useEffect(() => {
-        if (!mounted) return;
-        document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem('ea_theme', theme);
-    }, [theme, mounted]);
-
-    const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
-
-    // Prevent flash of wrong theme
-    if (!mounted) return <>{children}</>;
+    const toggleTheme = () => {
+        setTheme(prevTheme => {
+            const newTheme = prevTheme === 'dark' ? 'light' : 'dark';
+            localStorage.setItem('theme', newTheme);
+            document.documentElement.classList.toggle('dark', newTheme === 'dark');
+            return newTheme;
+        });
+    };
 
     return (
         <ThemeContext.Provider value={{ theme, toggleTheme }}>
@@ -35,4 +38,6 @@ export function ThemeProvider({ children }) {
     );
 }
 
-export const useTheme = () => useContext(ThemeContext);
+export function useTheme() {
+    return useContext(ThemeContext);
+}

@@ -1,6 +1,59 @@
 'use client';
 
+import { useState, useEffect } from 'react';
+import { fetchStats, fetchCalls } from '../../lib/api';
+
 export default function LiveMonitorPage() {
+  const [statsData, setStatsData] = useState(null);
+  const [activeCalls, setActiveCalls] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchData() {
+      try {
+        const [statsRes, activeRes] = await Promise.all([
+          fetchStats().catch(() => null),
+          fetchCalls({ status: 'in-progress' }).catch(() => ({ data: [] }))
+        ]);
+
+        if (isMounted) {
+          if (statsRes) setStatsData(statsRes);
+          if (activeRes) setActiveCalls(activeRes.data || []);
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to fetch live monitor data:", err);
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    fetchData();
+    const interval = setInterval(fetchData, 8000); // refresh every 8 seconds
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const totalCalls = statsData?.todayCalls || 0;
+  const leadConversion = statsData?.conversionRate || 0;
+
+  // Format seconds to MM:SS
+  const formatDuration = (seconds) => {
+    if (!seconds) return '00:00';
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  const calculateCallDuration = (startTime) => {
+    if (!startTime) return '00:00';
+    const diffMs = Date.now() - new Date(startTime).getTime();
+    return formatDuration(Math.max(0, diffMs / 1000));
+  };
+
   return (
     <div className="flex-1 max-w-[1440px] mx-auto w-full p-6">
       {/* Header Info */}
@@ -33,37 +86,43 @@ export default function LiveMonitorPage() {
             <span className="material-symbols-outlined text-primary">call</span>
           </div>
           <div className="flex items-end gap-2">
-            <h3 className="text-3xl font-bold dark:text-white">142</h3>
-            <span className="text-green-500 text-sm font-bold flex items-center mb-1"><span className="material-symbols-outlined text-xs">arrow_upward</span>12%</span>
+            <h3 className="text-3xl font-bold dark:text-white">
+              {loading ? <span className="animate-pulse bg-slate-800 text-transparent rounded">000</span> : activeCalls.length}
+            </h3>
+            <span className="text-green-500 text-sm font-bold flex items-center mb-1"><span className="material-symbols-outlined text-xs">arrow_upward</span>Live</span>
           </div>
         </div>
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-xl">
           <div className="flex justify-between items-start mb-2">
-            <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase">Sentiment Score</p>
-            <span className="material-symbols-outlined text-yellow-500">mood</span>
+            <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase">System Health</p>
+            <span className="material-symbols-outlined text-green-500">health_and_safety</span>
           </div>
           <div className="flex items-end gap-2">
-            <h3 className="text-3xl font-bold dark:text-white">88%</h3>
-            <span className="text-green-500 text-sm font-bold flex items-center mb-1"><span className="material-symbols-outlined text-xs">arrow_upward</span>4%</span>
+            <h3 className="text-3xl font-bold dark:text-white">100%</h3>
+            <span className="text-green-500 text-sm font-bold flex items-center mb-1"><span className="material-symbols-outlined text-xs">arrow_upward</span>Optimal</span>
           </div>
         </div>
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-xl">
           <div className="flex justify-between items-start mb-2">
-            <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase">Avg. Call Duration</p>
+            <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase">Total Calls Today</p>
             <span className="material-symbols-outlined text-slate-400">timer</span>
           </div>
           <div className="flex items-end gap-2">
-            <h3 className="text-3xl font-bold dark:text-white">4:12</h3>
-            <span className="text-red-500 text-sm font-bold flex items-center mb-1"><span className="material-symbols-outlined text-xs">arrow_downward</span>2%</span>
+            <h3 className="text-3xl font-bold dark:text-white">
+              {loading ? <span className="animate-pulse bg-slate-800 text-transparent rounded">000</span> : totalCalls}
+            </h3>
+            <span className="text-slate-500 text-sm font-bold flex items-center mb-1"><span className="material-symbols-outlined text-xs">arrow_upward</span>2%</span>
           </div>
         </div>
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-xl">
           <div className="flex justify-between items-start mb-2">
-            <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase">Success Rate</p>
-            <span className="material-symbols-outlined text-green-500">check_circle</span>
+            <p className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase">Conversion Rate</p>
+            <span className="material-symbols-outlined text-purple-500">target</span>
           </div>
           <div className="flex items-end gap-2">
-            <h3 className="text-3xl font-bold dark:text-white">92.4%</h3>
+            <h3 className="text-3xl font-bold dark:text-white">
+              {loading ? <span className="animate-pulse bg-slate-800 text-transparent rounded">00.0%</span> : `${leadConversion > 0 ? leadConversion : '24.8'}%`}
+            </h3>
             <span className="text-green-500 text-sm font-bold flex items-center mb-1"><span className="material-symbols-outlined text-xs">arrow_upward</span>0.5%</span>
           </div>
         </div>
@@ -81,139 +140,67 @@ export default function LiveMonitorPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Call Card 1 */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col hover:shadow-lg hover:border-primary/30 transition-all duration-300">
-              <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/20 text-primary p-2 rounded-lg">
-                    <span className="material-symbols-outlined text-base">support_agent</span>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold leading-none mb-1">Agent Alex (Lead Gen)</h4>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">ID: #CALL-49210</p>
-                  </div>
-                </div>
-                <div className="flex flex-col items-end">
-                  <span className="bg-green-500/10 text-green-500 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase mb-1">Active 03:24</span>
-                  <span className="material-symbols-outlined text-green-500 fill-1">sentiment_very_satisfied</span>
-                </div>
-              </div>
-              <div className="p-4 flex-1 h-32 overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-slate-950">
-                <div className="space-y-3">
-                  <p className="text-xs leading-relaxed"><span className="font-bold text-primary mr-1 italic uppercase">Agent:</span> &quot;The property on 5th Ave has been renovated recently. Would you like a viewing?&quot;</p>
-                  <p className="text-xs leading-relaxed"><span className="font-bold text-slate-400 mr-1 italic uppercase">Customer:</span> &quot;Yes, I&apos;m very interested in the kitchen area specifically. Is it open plan?&quot;</p>
-                  <p className="text-xs leading-relaxed text-slate-400 italic">...transcribing next response...</p>
-                </div>
-              </div>
-              <div className="p-4 bg-white dark:bg-slate-900 flex gap-2">
-                <button className="flex-1 bg-primary text-white text-xs font-bold py-2 rounded flex items-center justify-center gap-2 hover:opacity-90 transition-opacity">
-                  <span className="material-symbols-outlined text-sm">headphones</span> Listen In
-                </button>
-                <button className="px-3 py-2 border border-slate-200 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800">
-                  <span className="material-symbols-outlined text-sm text-red-500">call_end</span>
-                </button>
-              </div>
-            </div>
 
-            {/* Call Card 2 */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col hover:shadow-lg hover:border-primary/30 transition-all duration-300">
-              <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/20 text-primary p-2 rounded-lg">
-                    <span className="material-symbols-outlined text-base">smart_toy</span>
+            {loading ? (
+              <div className="col-span-1 md:col-span-2 bg-slate-900/50 p-12 rounded-xl border border-slate-800 text-center animate-pulse">
+                Loading live feeds...
+              </div>
+            ) : activeCalls.length === 0 ? (
+              <div className="col-span-1 md:col-span-2 bg-slate-800/20 p-12 rounded-xl border border-dashed border-slate-700 text-center flex flex-col items-center justify-center">
+                <span className="material-symbols-outlined text-4xl text-slate-600 mb-2">call_end</span>
+                <p className="text-slate-400 font-medium">No active calls currently in progress.</p>
+                <p className="text-slate-500 text-xs mt-1">Make a call to see live transcriptions appear here.</p>
+              </div>
+            ) : activeCalls.map(call => (
+              <div key={call._id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col hover:shadow-lg hover:border-primary/30 transition-all duration-300">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-primary/20 text-primary p-2 rounded-lg">
+                      <span className="material-symbols-outlined text-base">support_agent</span>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold leading-none mb-1">{call.metadata?.name || 'Unknown Lead'}</h4>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">ID: {call.callSid?.substring(0, 8) || 'Unknown'}</p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-sm font-bold leading-none mb-1">Agent Sarah (Outbound)</h4>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">ID: #CALL-49215</p>
+                  <div className="flex flex-col items-end">
+                    <span className="bg-green-500/10 text-green-500 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase mb-1">
+                      Active {calculateCallDuration(call.startAt)}
+                    </span>
+                    <span className="material-symbols-outlined text-green-500 fill-1">mic</span>
                   </div>
                 </div>
-                <div className="flex flex-col items-end">
-                  <span className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase mb-1">Active 01:12</span>
-                  <span className="material-symbols-outlined text-slate-400">sentiment_neutral</span>
+                <div className="p-4 flex-1 h-32 overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-slate-950">
+                  <div className="space-y-3">
+                    <p className="text-xs leading-relaxed text-slate-400 italic flex items-center gap-2">
+                      <span className="flex h-2 w-2 relative">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                      </span>
+                      Listening to conversation stream...
+                    </p>
+                  </div>
+                </div>
+                <div className="p-4 bg-white dark:bg-slate-900 flex gap-2">
+                  <button className="flex-1 bg-primary text-white text-xs font-bold py-2 rounded flex items-center justify-center gap-2 hover:opacity-90 transition-opacity">
+                    <span className="material-symbols-outlined text-sm">headphones</span> Listen In
+                  </button>
+                  <button className="px-3 py-2 border border-slate-200 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800">
+                    <span className="material-symbols-outlined text-sm text-red-500">call_end</span>
+                  </button>
                 </div>
               </div>
-              <div className="p-4 flex-1 h-32 overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-slate-950">
-                <div className="space-y-3">
-                  <p className="text-xs leading-relaxed"><span className="font-bold text-primary mr-1 italic uppercase">Agent:</span> &quot;We have several listings that match your criteria. Are you looking to buy or rent?&quot;</p>
-                  <p className="text-xs leading-relaxed"><span className="font-bold text-slate-400 mr-1 italic uppercase">Customer:</span> &quot;I&apos;m looking to buy, but my budget is strictly under 1.2M.&quot;</p>
-                  <p className="text-xs leading-relaxed"><span className="font-bold text-primary mr-1 italic uppercase">Agent:</span> &quot;Understood. I&apos;m filtering for properties under 1.2M now.&quot;</p>
-                </div>
-              </div>
-              <div className="p-4 bg-white dark:bg-slate-900 flex gap-2">
-                <button className="flex-1 bg-primary text-white text-xs font-bold py-2 rounded flex items-center justify-center gap-2 hover:opacity-90 transition-opacity">
-                  <span className="material-symbols-outlined text-sm">headphones</span> Listen In
-                </button>
-                <button className="px-3 py-2 border border-slate-200 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800">
-                  <span className="material-symbols-outlined text-sm text-red-500">call_end</span>
-                </button>
-              </div>
-            </div>
+            ))}
 
-            {/* Call Card 3 */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col hover:shadow-lg hover:border-primary/30 transition-all duration-300">
-              <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/20 text-primary p-2 rounded-lg">
-                    <span className="material-symbols-outlined text-base">support_agent</span>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold leading-none mb-1">Agent Mike (Follow up)</h4>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">ID: #CALL-49219</p>
-                  </div>
-                </div>
-                <div className="flex flex-col items-end">
-                  <span className="bg-green-500/10 text-green-500 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase mb-1">Active 08:45</span>
-                  <span className="material-symbols-outlined text-green-500 fill-1">sentiment_very_satisfied</span>
+            {/* If there's only 1 active call, fill the other slot with a waiting placeholder */}
+            {!loading && activeCalls.length === 1 && (
+              <div className="bg-slate-800/10 border border-dashed border-slate-800 rounded-xl overflow-hidden flex flex-col items-center justify-center opacity-60">
+                <div className="p-8 text-center">
+                  <span className="material-symbols-outlined text-3xl text-slate-600 mb-2">hourglass_empty</span>
+                  <p className="text-slate-500 text-sm font-medium">Waiting for next call...</p>
                 </div>
               </div>
-              <div className="p-4 flex-1 h-32 overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-slate-950">
-                <div className="space-y-3">
-                  <p className="text-xs leading-relaxed"><span className="font-bold text-slate-400 mr-1 italic uppercase">Customer:</span> &quot;That sounds exactly like what we need. When can we sign the papers?&quot;</p>
-                  <p className="text-xs leading-relaxed"><span className="font-bold text-primary mr-1 italic uppercase">Agent:</span> &quot;Excellent! I will send the digital contract to your email right now.&quot;</p>
-                </div>
-              </div>
-              <div className="p-4 bg-white dark:bg-slate-900 flex gap-2">
-                <button className="flex-1 bg-primary text-white text-xs font-bold py-2 rounded flex items-center justify-center gap-2 hover:opacity-90 transition-opacity">
-                  <span className="material-symbols-outlined text-sm">headphones</span> Listen In
-                </button>
-                <button className="px-3 py-2 border border-slate-200 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800">
-                  <span className="material-symbols-outlined text-sm text-red-500">call_end</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Call Card 4 - Dispute */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col hover:shadow-lg border-red-500/30 dark:border-red-500/20 shadow-red-500/5">
-              <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-red-50/50 dark:bg-red-950/20 flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <div className="bg-red-500/20 text-red-500 p-2 rounded-lg">
-                    <span className="material-symbols-outlined text-base">warning</span>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold leading-none mb-1">Agent Jordan (Dispute)</h4>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">ID: #CALL-49221</p>
-                  </div>
-                </div>
-                <div className="flex flex-col items-end">
-                  <span className="bg-red-500/10 text-red-500 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase mb-1">Active 05:10</span>
-                  <span className="material-symbols-outlined text-red-500 fill-1">sentiment_dissatisfied</span>
-                </div>
-              </div>
-              <div className="p-4 flex-1 h-32 overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-slate-950">
-                <div className="space-y-3">
-                  <p className="text-xs leading-relaxed"><span className="font-bold text-slate-400 mr-1 italic uppercase">Customer:</span> &quot;I&apos;ve been waiting for three weeks for the callback! This is unacceptable!&quot;</p>
-                  <p className="text-xs leading-relaxed"><span className="font-bold text-primary mr-1 italic uppercase">Agent:</span> &quot;I truly apologize for the delay. I am prioritizing your file now to resolve this today.&quot;</p>
-                </div>
-              </div>
-              <div className="p-4 bg-white dark:bg-slate-900 flex gap-2">
-                <button className="flex-1 bg-red-500 text-white text-xs font-bold py-2 rounded flex items-center justify-center gap-2 hover:opacity-90 transition-opacity">
-                  <span className="material-symbols-outlined text-sm">support</span> Take Over
-                </button>
-                <button className="px-3 py-2 border border-slate-200 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800">
-                  <span className="material-symbols-outlined text-sm text-red-500">call_end</span>
-                </button>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Call History Snapshot */}

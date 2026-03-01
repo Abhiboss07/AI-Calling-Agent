@@ -1,9 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/user.model');
-const { generateToken } = require('../middleware/auth');
+const { generateToken, verifyToken } = require('../middleware/auth');
 const { sendVerificationCode } = require('../services/mailer');
 const logger = require('../utils/logger');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const storageService = require('../services/storage');
 
 /**
  * Generate a 6-digit verification code
@@ -272,6 +275,109 @@ router.post('/resend-code', async (req, res) => {
     } catch (err) {
         logger.error('Resend code error', err.message);
         res.status(500).json({ ok: false, error: 'Failed to resend code' });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────
+// PUT /api/v1/auth/profile
+// ──────────────────────────────────────────────────────────────────
+router.put('/profile', verifyToken, async (req, res) => {
+    try {
+        const { name, phone } = req.body;
+        const user = req.user;
+
+        if (name) user.name = name.trim();
+        if (phone !== undefined) {
+            const cleanPhone = phone.replace(/[^+\d]/g, '');
+            if (user.phone !== cleanPhone) {
+                user.phone = cleanPhone;
+                user.phoneVerified = false; // Need to reverify if changed
+            }
+        }
+
+        await user.save();
+        res.json({ ok: true, user, message: 'Profile updated successfully' });
+    } catch (err) {
+        logger.error('Update profile error', err.message);
+        res.status(500).json({ ok: false, error: 'Failed to update profile' });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────
+// PUT /api/v1/auth/password
+// ──────────────────────────────────────────────────────────────────
+router.put('/password', verifyToken, async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        const user = req.user;
+
+        if (user.provider === 'google' && !user.password) {
+            return res.status(400).json({ ok: false, error: 'Cannot change password for Google-linked account without setting one first' });
+        }
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ ok: false, error: 'Current and new passwords are required' });
+        }
+
+        if (newPassword.length < 8) {
+            return res.status(400).json({ ok: false, error: 'New password must be at least 8 characters long' });
+        }
+
+        const isMatch = await user.comparePassword(currentPassword);
+        if (!isMatch) {
+            return res.status(401).json({ ok: false, error: 'Incorrect current password' });
+        }
+
+        user.password = newPassword;
+        await user.save();
+
+        res.json({ ok: true, message: 'Password changed successfully' });
+    } catch (err) {
+        logger.error('Change password error', err.message);
+        res.status(500).json({ ok: false, error: 'Failed to change password' });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────
+// POST /api/v1/auth/avatar
+// ──────────────────────────────────────────────────────────────────
+router.post('/avatar', verifyToken, upload.single('avatar'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ ok: false, error: 'No image file provided' });
+        }
+
+        if (!storageService.isConfigured()) {
+            return res.status(501).json({ ok: false, error: 'Storage service not configured on the server' });
+        }
+
+        const user = req.user;
+        const fileExt = req.file.originalname.split('.').pop() || 'png';
+        const key = `avatars/${user._id}-${Date.now()}.${fileExt}`;
+
+        const url = await storageService.uploadBuffer(req.file.buffer, key, req.file.mimetype);
+
+        user.avatar = url;
+        await user.save();
+
+        res.json({ ok: true, avatarUrl: url, message: 'Avatar updated successfully' });
+    } catch (err) {
+        logger.error('Avatar upload error', err.message);
+        res.status(500).json({ ok: false, error: 'Failed to upload avatar' });
+    }
+});
+
+// ──────────────────────────────────────────────────────────────────
+// DELETE /api/v1/auth/account
+// ──────────────────────────────────────────────────────────────────
+router.delete('/account', verifyToken, async (req, res) => {
+    try {
+        const user = req.user;
+        await User.findByIdAndDelete(user._id);
+        res.json({ ok: true, message: 'Account deleted successfully' });
+    } catch (err) {
+        logger.error('Delete account error', err.message);
+        res.status(500).json({ ok: false, error: 'Failed to delete account' });
     }
 });
 

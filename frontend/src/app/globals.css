@@ -11,13 +11,7 @@
   --font-display: "Inter", sans-serif;
 }
 
-/* Force dark mode globally */
-html,
-body {
-  background-color: #101622;
-  color: #e2e8f0;
-}
-
+/* Removed force dark mode, using Tailwind dark: variant on root instead */
 /* ===== Custom Utility Classes from Design ===== */
 
 .glass {

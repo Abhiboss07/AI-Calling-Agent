@@ -1,403 +1,431 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Bell, Camera, Check, Key, Lock, Save, Shield, Upload, UserCircle2, X, MapPin, Mail, Phone, Globe, Calendar } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../../components/AuthProvider';
+import { updateProfile, changePassword, updateAvatar, deleteAccount } from '../../lib/api';
 
 export default function ProfilePage() {
-  const { user } = useAuth();
-  const fileRef = useRef(null);
-  const coverRef = useRef(null);
-  const [form, setForm] = useState({
-    name: 'Abhishek Yadav',
-    email: 'abhicps19@gmail.com',
-    phone: '+919580818926',
-    title: 'Operations Manager',
-    timezone: 'Asia/Kolkata',
-    address: 'C/O: Awadhesh Yadav, 34, fatanpur, azamgarh',
-    city: 'Azamgarh',
-    state: 'Uttar Pradesh',
-    zipCode: '223227',
-    country: 'IN'
-  });
-  const [prefs, setPrefs] = useState({ alerts: true, digest: true, darkShift: false });
-  const [profileImage, setProfileImage] = useState('');
-  const [coverImage, setCoverImage] = useState('');
-  const [saved, setSaved] = useState(false);
-  const [activeTab, setActiveTab] = useState('profile');
-  const [passwordForm, setPasswordForm] = useState({ current: '', newPass: '', confirm: '' });
-  const [passwordMsg, setPasswordMsg] = useState('');
+  const { user, logout } = useAuth();
+  const fileInputRef = useRef(null);
 
+  const activeUser = user || { name: 'Admin', email: 'admin@vobiz.com', provider: 'local', phone: '' };
+
+  // Profile Form State
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [profileMsg, setProfileMsg] = useState({ text: '', type: '' });
+
+  // Password Form State
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [passwordMsg, setPasswordMsg] = useState({ text: '', type: '' });
+
+  // Avatar config
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+
+  // Delete config
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Sync user object to state when it loads
   useEffect(() => {
-    try {
-      const savedProfile = localStorage.getItem('ea_profile');
-      const savedPrefs = localStorage.getItem('ea_profile_prefs');
-      const savedImage = localStorage.getItem('ea_profile_image');
-      const savedCover = localStorage.getItem('ea_cover_image');
-      if (savedProfile) setForm(prev => ({ ...prev, ...JSON.parse(savedProfile) }));
-      if (savedPrefs) setPrefs(prev => ({ ...prev, ...JSON.parse(savedPrefs) }));
-      if (savedImage) setProfileImage(savedImage);
-      if (savedCover) setCoverImage(savedCover);
-    } catch { /* defaults */ }
-  }, []);
-
-  const onSave = () => {
-    localStorage.setItem('ea_profile', JSON.stringify(form));
-    localStorage.setItem('ea_profile_prefs', JSON.stringify(prefs));
-    if (profileImage) localStorage.setItem('ea_profile_image', profileImage);
-    if (coverImage) localStorage.setItem('ea_cover_image', coverImage);
-    window.dispatchEvent(new Event('ea-profile-updated'));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  const handleImageUpload = (event, type) => {
-    const file = event.target.files?.[0];
-    if (!file || !file.type.startsWith('image/')) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = typeof reader.result === 'string' ? reader.result : '';
-      if (!img) return;
-      if (type === 'profile') {
-        setProfileImage(img);
-        localStorage.setItem('ea_profile_image', img);
-      } else {
-        setCoverImage(img);
-        localStorage.setItem('ea_cover_image', img);
-      }
-      window.dispatchEvent(new Event('ea-profile-updated'));
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const removeImage = (type) => {
-    if (type === 'profile') {
-      setProfileImage('');
-      localStorage.removeItem('ea_profile_image');
-    } else {
-      setCoverImage('');
-      localStorage.removeItem('ea_cover_image');
+    if (activeUser) {
+      setName(activeUser.name || '');
+      setPhone(activeUser.phone || '');
     }
-    window.dispatchEvent(new Event('ea-profile-updated'));
+  }, [activeUser]);
+
+  const handleProfileSubmit = async (e) => {
+    e.preventDefault();
+    setIsUpdatingProfile(true);
+    setProfileMsg({ text: '', type: '' });
+
+    try {
+      const res = await updateProfile({ name, phone });
+      if (res.ok) {
+        setProfileMsg({ text: 'Profile updated successfully! Refreshing...', type: 'success' });
+        setTimeout(() => window.location.reload(), 1500);
+      } else {
+        setProfileMsg({ text: res.error || 'Failed to update profile', type: 'error' });
+      }
+    } catch (err) {
+      setProfileMsg({ text: 'A network error occurred', type: 'error' });
+    } finally {
+      setIsUpdatingProfile(false);
+      setTimeout(() => setProfileMsg({ text: '', type: '' }), 5000);
+    }
   };
 
-  const handlePasswordReset = () => {
-    if (!passwordForm.current) { setPasswordMsg('Enter current password'); return; }
-    if (passwordForm.newPass.length < 6) { setPasswordMsg('Min 6 characters'); return; }
-    if (passwordForm.newPass !== passwordForm.confirm) { setPasswordMsg('Passwords don\'t match'); return; }
-    setPasswordMsg('Password updated successfully!');
-    setPasswordForm({ current: '', newPass: '', confirm: '' });
-    setTimeout(() => setPasswordMsg(''), 3000);
+  const handlePasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      setPasswordMsg({ text: 'New passwords do not match', type: 'error' });
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+    setPasswordMsg({ text: '', type: '' });
+
+    try {
+      const res = await changePassword({ currentPassword, newPassword });
+      if (res.ok) {
+        setPasswordMsg({ text: 'Password changed successfully! Please log in again.', type: 'success' });
+        setTimeout(() => logout(), 2000);
+      } else {
+        setPasswordMsg({ text: res.error || 'Failed to change password', type: 'error' });
+      }
+    } catch (err) {
+      setPasswordMsg({ text: 'A network error occurred', type: 'error' });
+    } finally {
+      setIsUpdatingPassword(false);
+      setTimeout(() => setPasswordMsg({ text: '', type: '' }), 5000);
+    }
   };
 
-  const initials = form.name.split(' ').map(x => x[0]).join('').slice(0, 2).toUpperCase();
+  const handleAvatarSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  const tabs = [
-    { id: 'profile', label: 'User Profile' },
-    { id: 'security', label: 'Security' },
-    { id: 'notifications', label: 'Notifications' },
-  ];
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Image must be smaller than 5MB");
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    try {
+      const res = await updateAvatar(file);
+      if (res.ok) {
+        window.location.reload();
+      } else {
+        alert(res.error || "Failed to upload avatar");
+      }
+    } catch (err) {
+      alert("Error connecting to server to upload avatar.");
+    } finally {
+      setIsUploadingAvatar(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    try {
+      const res = await deleteAccount();
+      if (res.ok) {
+        logout();
+      } else {
+        alert(res.error || 'Failed to delete account');
+        setShowDeleteModal(false);
+      }
+    } catch (err) {
+      alert('Network error while deleting account');
+      setShowDeleteModal(false);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const isGoogleUser = activeUser.provider === 'google';
+
+  // UI Components
+  const MessageToast = ({ msg }) => {
+    if (!msg.text) return null;
+    return (
+      <div className={`p-4 rounded-xl flex items-center gap-3 text-sm font-medium mb-6 animate-in fade-in slide-in-from-top-2 ${msg.type === 'success' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-500 border border-rose-500/20'}`}>
+        <span className="material-symbols-outlined text-[20px]">
+          {msg.type === 'success' ? 'check_circle' : 'error'}
+        </span>
+        {msg.text}
+      </div>
+    );
+  };
 
   return (
-    <div>
-      {/* ── COVER PHOTO ── */}
-      <div style={{
-        height: 180, borderRadius: 'var(--radius-lg)', marginBottom: -60, position: 'relative', overflow: 'hidden',
-        background: coverImage
-          ? `url(${coverImage}) center/cover no-repeat`
-          : 'linear-gradient(135deg, var(--accent), var(--accent-hover), #C2410C)'
-      }}>
-        <input ref={coverRef} type="file" accept="image/*" style={{ display: 'none' }}
-          onChange={e => handleImageUpload(e, 'cover')} />
-        <button onClick={() => coverRef.current?.click()} style={{
-          position: 'absolute', bottom: 12, right: 12, display: 'flex', alignItems: 'center', gap: 6,
-          padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer',
-          background: 'rgba(0,0,0,0.5)', color: 'white', fontSize: 12, fontWeight: 500,
-          backdropFilter: 'blur(8px)'
-        }}>
-          <Camera size={14} /> Change Cover
-        </button>
-        {coverImage && (
-          <button onClick={() => removeImage('cover')} style={{
-            position: 'absolute', bottom: 12, right: 140, display: 'flex', alignItems: 'center',
-            gap: 4, padding: '6px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
-            background: 'rgba(0,0,0,0.5)', color: 'white', fontSize: 12
-          }}>
-            <X size={12} /> Remove
-          </button>
-        )}
+    <div className="flex-1 max-w-[1024px] mx-auto w-full p-6 pb-24">
+      {/* Header */}
+      <div className="mb-8">
+        <h1 className="text-3xl lg:text-4xl font-black text-slate-900 dark:text-white flex items-center gap-3 tracking-tight">
+          <span className="material-symbols-outlined text-4xl text-primary bg-primary/10 p-2 rounded-xl">account_circle</span>
+          Profile Settings
+        </h1>
+        <p className="text-slate-500 dark:text-slate-400 mt-3 sm:ml-[72px] text-base">Manage your account details, security credentials, and platform preferences.</p>
       </div>
 
-      {/* ── AVATAR + INFO ── */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20, padding: '0 24px', marginBottom: 24, position: 'relative', zIndex: 2 }}>
-        <div style={{ position: 'relative' }}>
-          <div style={{
-            width: 96, height: 96, borderRadius: '50%', border: '4px solid var(--bg-white)',
-            background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: 'white', fontSize: 28, fontWeight: 700, overflow: 'hidden', boxShadow: 'var(--shadow-lg)'
-          }}>
-            {profileImage ? (
-              <img src={profileImage} alt={form.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : initials}
-          </div>
-          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
-            onChange={e => handleImageUpload(e, 'profile')} />
-          <button onClick={() => fileRef.current?.click()} style={{
-            position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: '50%',
-            background: 'var(--accent)', border: '2px solid var(--bg-white)', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white'
-          }}>
-            <Camera size={12} />
-          </button>
-        </div>
-        <div style={{ paddingBottom: 8 }}>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{form.name}</h2>
-          <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: 13, color: 'var(--text-muted)' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Mail size={12} /> {form.email}</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Phone size={12} /> {form.phone}</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Globe size={12} /> {form.timezone}</span>
-          </div>
-        </div>
-      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-      {/* ── TAB NAV ── */}
-      <div style={{
-        display: 'flex', gap: 0, borderBottom: '2px solid var(--border)', marginBottom: 24
-      }}>
-        {tabs.map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
-            padding: '10px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-            background: 'none', border: 'none',
-            color: activeTab === tab.id ? 'var(--accent)' : 'var(--text-muted)',
-            borderBottom: activeTab === tab.id ? '2px solid var(--accent)' : '2px solid transparent',
-            marginBottom: -2, transition: 'all 0.2s'
-          }}>
-            {tab.label}
-          </button>
-        ))}
-      </div>
+        {/* Left Column: Avatar & Danger Zone */}
+        <div className="space-y-6">
 
-      {/* ── PROFILE TAB ── */}
-      {activeTab === 'profile' && (
-        <div className="card-grid-2">
-          {/* Basic Information */}
-          <div className="card">
-            <h3>Basic Information</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <div>
-                <label style={labelStyle}>Full Name</label>
-                <input style={inputStyle} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-              </div>
-              <div>
-                <label style={labelStyle}>Job Title</label>
-                <input style={inputStyle} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
-              </div>
-              <div>
-                <label style={labelStyle}>Email</label>
-                <input style={inputStyle} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
-              </div>
-              <div>
-                <label style={labelStyle}>Phone</label>
-                <input style={inputStyle} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
-              </div>
-              <div>
-                <label style={labelStyle}>Timezone</label>
-                <input style={inputStyle} value={form.timezone} onChange={e => setForm({ ...form, timezone: e.target.value })} />
-              </div>
-            </div>
-            <div style={{ marginTop: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button className="btn btn-primary" onClick={onSave} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Save size={14} /> Save Changes
-              </button>
-              {saved && <span style={{ fontSize: 12, color: 'var(--success)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}><Check size={14} /> Saved!</span>}
-            </div>
-          </div>
+          {/* Avatar Section */}
+          <div className="glass border border-slate-200 dark:border-slate-800/50 rounded-2xl p-6 text-center">
+            <h2 className="font-bold text-slate-900 dark:text-white mb-6 text-lg">Profile Picture</h2>
 
-          {/* Address & Company */}
-          <div className="card">
-            <h3>Address & Company</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <div style={{ gridColumn: '1 / -1' }}>
-                <label style={labelStyle}>Address</label>
-                <input style={inputStyle} value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
-              </div>
-              <div>
-                <label style={labelStyle}>City</label>
-                <input style={inputStyle} value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} />
-              </div>
-              <div>
-                <label style={labelStyle}>State</label>
-                <input style={inputStyle} value={form.state} onChange={e => setForm({ ...form, state: e.target.value })} />
-              </div>
-              <div>
-                <label style={labelStyle}>ZIP Code</label>
-                <input style={inputStyle} value={form.zipCode} onChange={e => setForm({ ...form, zipCode: e.target.value })} />
-              </div>
-              <div>
-                <label style={labelStyle}>Country</label>
-                <input style={inputStyle} value={form.country} onChange={e => setForm({ ...form, country: e.target.value })} />
-              </div>
-            </div>
-            <div style={{ marginTop: 16 }}>
-              <button className="btn btn-outline" onClick={onSave} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <MapPin size={14} /> Update Address
-              </button>
-            </div>
-          </div>
+            <div className="relative inline-block mb-6 group">
+              <div className="w-32 h-32 rounded-full border-4 border-white dark:border-slate-800 bg-slate-100 dark:bg-slate-800/50 overflow-hidden flex items-center justify-center mx-auto shadow-xl relative transition-transform group-hover:scale-105 duration-300">
+                {activeUser.avatar ? (
+                  <img src={activeUser.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-4xl font-black text-slate-400 dark:text-slate-500">{activeUser.name?.charAt(0).toUpperCase() || 'U'}</span>
+                )}
 
-          {/* Account Status */}
-          <div className="card" style={{ gridColumn: '1 / -1' }}>
-            <h3>Account Status</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-              {[
-                { label: 'Account Type', value: 'Standard', color: 'var(--text-primary)' },
-                { label: 'Auth ID', value: 'MA_2LNXPSWI', color: 'var(--accent)' },
-                { label: 'Status', value: 'Active', color: 'var(--success)' },
-                { label: 'Email Verified', value: 'Yes', color: 'var(--success)' },
-                { label: 'KYC Status', value: 'Verified', color: 'var(--success)' },
-                { label: 'Last Login', value: new Date().toLocaleDateString(), color: 'var(--text-secondary)' },
-              ].map((item, i) => (
-                <div key={i} style={{
-                  padding: 16, borderRadius: 8, background: 'var(--bg-primary)',
-                  border: '1px solid var(--border-light)'
-                }}>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{item.label}</div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: item.color }}>{item.value}</div>
+                {/* Upload Overlay */}
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer text-white"
+                >
+                  <span className="material-symbols-outlined mb-1 text-2xl">photo_camera</span>
+                  <span className="text-xs font-bold uppercase tracking-wider">Change</span>
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── SECURITY TAB ── */}
-      {activeTab === 'security' && (
-        <div className="card-grid-2">
-          <div className="card">
-            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Key size={16} style={{ color: 'var(--accent)' }} /> Reset Password
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div>
-                <label style={labelStyle}>Current Password</label>
-                <input type="password" style={inputStyle} value={passwordForm.current}
-                  onChange={e => setPasswordForm({ ...passwordForm, current: e.target.value })}
-                  placeholder="Enter current password" />
               </div>
-              <div>
-                <label style={labelStyle}>New Password</label>
-                <input type="password" style={inputStyle} value={passwordForm.newPass}
-                  onChange={e => setPasswordForm({ ...passwordForm, newPass: e.target.value })}
-                  placeholder="Enter new password (min 6 chars)" />
-              </div>
-              <div>
-                <label style={labelStyle}>Confirm Password</label>
-                <input type="password" style={inputStyle} value={passwordForm.confirm}
-                  onChange={e => setPasswordForm({ ...passwordForm, confirm: e.target.value })}
-                  placeholder="Confirm new password" />
-              </div>
-              <button className="btn btn-primary" onClick={handlePasswordReset}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start' }}>
-                <Lock size={14} /> Update Password
-              </button>
-              {passwordMsg && (
-                <span style={{
-                  fontSize: 12, fontWeight: 600,
-                  color: passwordMsg.includes('success') ? 'var(--success)' : 'var(--danger)'
-                }}>
-                  {passwordMsg}
-                </span>
-              )}
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleAvatarSelect}
+                className="hidden"
+                accept="image/png, image/jpeg, image/webp"
+              />
             </div>
-          </div>
 
-          <div className="card">
-            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Shield size={16} style={{ color: 'var(--accent)' }} /> Security Settings
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {[
-                { label: 'Two-Factor Authentication', desc: 'Add an extra layer of security', status: 'Available' },
-                { label: 'Session Management', desc: '2 active sessions', status: 'Active' },
-                { label: 'API Key Rotation', desc: 'Last rotated 21 days ago', status: 'Due' },
-              ].map((item, i) => (
-                <div key={i} style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '14px 16px', borderRadius: 8, background: 'var(--bg-primary)',
-                  border: '1px solid var(--border-light)'
-                }}>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{item.label}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.desc}</div>
-                  </div>
-                  <span style={{
-                    padding: '4px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600,
-                    background: item.status === 'Active' ? 'var(--success-light)' : 'var(--warning-light)',
-                    color: item.status === 'Active' ? 'var(--success)' : 'var(--warning)'
-                  }}>{item.status}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── NOTIFICATIONS TAB ── */}
-      {activeTab === 'notifications' && (
-        <div className="card">
-          <h3>Notification Preferences</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <ToggleRow label="Incident Alerts" desc="Notify immediately for call failures and downtime."
-              checked={prefs.alerts} onChange={v => setPrefs({ ...prefs, alerts: v })} />
-            <ToggleRow label="Daily Performance Digest" desc="Get a summary of calls, conversions, and quality trends."
-              checked={prefs.digest} onChange={v => setPrefs({ ...prefs, digest: v })} />
-            <ToggleRow label="Late-Night Quiet Mode" desc="Suppress non-critical notifications outside business hours."
-              checked={prefs.darkShift} onChange={v => setPrefs({ ...prefs, darkShift: v })} />
-          </div>
-          <div style={{ marginTop: 16 }}>
-            <button className="btn btn-primary" onClick={onSave} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Save size={14} /> Save Preferences
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploadingAvatar}
+              className="w-full px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-2 border border-transparent dark:hover:border-slate-600 disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[20px]">
+                {isUploadingAvatar ? 'hourglass_empty' : 'upload'}
+              </span>
+              {isUploadingAvatar ? 'Uploading...' : 'Upload New Avatar'}
             </button>
-            {saved && <span style={{ fontSize: 12, color: 'var(--success)', marginLeft: 12 }}>Saved!</span>}
+            <p className="text-[11px] text-slate-500 dark:text-slate-500 max-w-xs mx-auto mt-4 font-medium leading-relaxed">Allowed formats: JPEG, PNG or WEBP.<br />Maximum file size: 5MB.</p>
+          </div>
+
+          {/* Danger Zone */}
+          <div className="bg-white dark:bg-slate-900 border border-rose-500/20 rounded-2xl p-6 shadow-sm shadow-rose-500/5 relative overflow-hidden group">
+            <div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div>
+            <h2 className="font-bold text-rose-500 flex items-center gap-2 mb-3 text-lg relative z-10">
+              <span className="material-symbols-outlined">warning</span>
+              Danger Zone
+            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mb-6 font-medium leading-relaxed relative z-10">
+              Deleting your account is permanent. This action instantly removes all your data, call history, and active agents.
+            </p>
+            <button
+              onClick={() => setShowDeleteModal(true)}
+              className="w-full px-4 py-3 bg-rose-500/10 hover:bg-rose-500 text-rose-600 dark:text-rose-400 hover:text-white rounded-xl text-sm font-bold transition-all relative z-10 group-hover:border-rose-500/50 border border-transparent"
+            >
+              Delete Account
+            </button>
+            <span className="material-symbols-outlined absolute -bottom-4 -right-4 text-9xl text-rose-500/5 transform rotate-12 transition-transform group-hover:scale-110 duration-500">delete_forever</span>
+          </div>
+
+        </div>
+
+        {/* Right Column: Forms */}
+        <div className="lg:col-span-2 space-y-6">
+
+          {/* Personal Info */}
+          <div className="glass border border-slate-200 dark:border-slate-800/50 rounded-2xl p-6 md:p-8 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
+
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800/80 pb-4 mb-8">Personal Details</h2>
+
+            <MessageToast msg={profileMsg} />
+
+            <form onSubmit={handleProfileSubmit} className="space-y-6 relative z-10">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Full Name</label>
+                  <div className="relative">
+                    <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-[20px]">person</span>
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/80 rounded-xl py-3 pl-12 pr-4 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors placeholder:text-slate-400"
+                      placeholder="John Doe"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Email Address</label>
+                  <div className="relative">
+                    <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-slate-400/50 text-[20px]">mail</span>
+                    <input
+                      type="email"
+                      value={activeUser.email}
+                      disabled
+                      className="w-full bg-slate-100 dark:bg-slate-800/30 border border-slate-200 dark:border-slate-800/50 rounded-xl py-3 pl-12 pr-4 text-sm font-medium text-slate-500 cursor-not-allowed opacity-70"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-500 mt-2 ml-1 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px]">lock</span>
+                    Email is tied to your billing identity.
+                  </p>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Phone Number</label>
+                  <div className="relative">
+                    <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-[20px]">phone</span>
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/80 rounded-xl py-3 pl-12 pr-4 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors placeholder:text-slate-400"
+                      placeholder="+1 (555) 000-0000"
+                    />
+                  </div>
+                  {activeUser.phone && !activeUser.phoneVerified && (
+                    <div className="mt-3 ml-1 flex items-start sm:items-center gap-2 text-yellow-600 dark:text-yellow-500 bg-yellow-500/10 py-2 px-3 rounded-lg border border-yellow-500/20 inline-flex">
+                      <span className="material-symbols-outlined text-[18px]">verified_user</span>
+                      <span className="text-xs font-bold font-medium leading-tight">Phone number requires verification for SMS alerts.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-4 border-t border-slate-100 dark:border-slate-800/80">
+                <button
+                  type="submit"
+                  disabled={isUpdatingProfile}
+                  className="px-8 py-3 bg-primary text-white rounded-xl text-sm font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:hover:translate-y-0 flex items-center gap-2"
+                >
+                  {isUpdatingProfile ? (
+                    <><span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span> Saving changes...</>
+                  ) : (
+                    'Save Profile Changes'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Security / Change Password */}
+          <div className="glass border border-slate-200 dark:border-slate-800/50 rounded-2xl p-6 md:p-8">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800/80 pb-4 mb-8 flex items-center gap-3">
+              <span className="material-symbols-outlined text-slate-400">shield_lock</span>
+              Security & Authentication
+            </h2>
+
+            {isGoogleUser && !activeUser.password ? (
+              <div className="bg-primary/5 border border-primary/20 rounded-xl p-6 flex flex-col sm:flex-row items-start gap-4">
+                <div className="bg-white dark:bg-slate-800 p-2 rounded-full shadow-sm">
+                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-base font-bold text-slate-900 dark:text-white mb-2">Google Login Active</h4>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed font-medium">You are authenticated via Google Workspace. You do not have a standard password set. To utilize email and password login in the future, please invoke the reset password flow from the login page.</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <MessageToast msg={passwordMsg} />
+                <form onSubmit={handlePasswordSubmit} className="space-y-6">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Current Password</label>
+                    <input
+                      type="password"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      required
+                      className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/80 rounded-xl py-3 px-4 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors placeholder:text-slate-400"
+                      placeholder="••••••••"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">New Password</label>
+                      <input
+                        type="password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        required
+                        minLength={8}
+                        className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/80 rounded-xl py-3 px-4 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors placeholder:text-slate-400"
+                        placeholder="••••••••"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Confirm New Password</label>
+                      <input
+                        type="password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        required
+                        className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/80 rounded-xl py-3 px-4 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors placeholder:text-slate-400"
+                        placeholder="••••••••"
+                      />
+                    </div>
+                    <div className="md:col-span-2 pt-2">
+                      <div className="bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800 rounded-lg p-3">
+                        <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Password Requirements</h4>
+                        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-500 dark:text-slate-400 font-medium">
+                          <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-[14px] text-emerald-500">check</span> Minimum 8 characters</li>
+                          <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-[14px]">remove</span> 1 uppercase letter</li>
+                          <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-[14px]">remove</span> 1 special character</li>
+                          <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-[14px]">remove</span> 1 number</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-slate-100 dark:border-slate-800/80 flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={isUpdatingPassword}
+                      className="px-8 py-3 bg-slate-800 hover:bg-slate-900 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 rounded-xl text-sm font-bold shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {isUpdatingPassword ? (
+                        <><span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span> Updating Security...</>
+                      ) : (
+                        'Update Password'
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 rounded-full bg-rose-500/10 text-rose-500 flex items-center justify-center mb-6 mx-auto">
+              <span className="material-symbols-outlined text-3xl">warning</span>
+            </div>
+            <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-3 text-center tracking-tight">Erase Reality</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mb-8 font-medium leading-relaxed text-center">
+              This is the event horizon. Deleting your account irrecoverably destroys all data, configurations, unspent credits, and analytics.
+            </p>
+
+            <div className="flex flex-col-reverse sm:flex-row justify-center gap-3">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                disabled={isDeleting}
+                className="w-full sm:w-auto px-6 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-sm font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+              >
+                Keep my account
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={isDeleting}
+                className="w-full sm:w-auto px-6 py-3 bg-rose-500 hover:bg-rose-600 border border-transparent hover:border-rose-400/50 text-white rounded-xl text-sm font-bold shadow-lg shadow-rose-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <><span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span> Deleting...</>
+                ) : (
+                  'Yes, delete everything'
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-const labelStyle = {
-  display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
-  marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em'
-};
-
-const inputStyle = {
-  width: '100%', padding: '10px 14px', borderRadius: 'var(--radius-sm)',
-  border: '1px solid var(--border)', background: 'var(--bg-primary)',
-  color: 'var(--text-primary)', fontSize: 14, outline: 'none', fontFamily: 'inherit',
-  transition: 'border-color 0.2s'
-};
-
-function ToggleRow({ label, desc, checked, onChange }) {
-  return (
-    <div style={{
-      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      padding: '14px 0', borderBottom: '1px solid var(--border-light)'
-    }}>
-      <div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{label}</div>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{desc}</div>
-      </div>
-      <button onClick={() => onChange(!checked)} style={{
-        width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer', position: 'relative',
-        background: checked ? 'var(--accent)' : 'var(--border)', transition: 'background 0.2s'
-      }}>
-        <span style={{
-          position: 'absolute', top: 2, left: checked ? 22 : 2,
-          width: 20, height: 20, borderRadius: '50%', background: 'white',
-          transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
-        }} />
-      </button>
     </div>
   );
 }

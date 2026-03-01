@@ -31,6 +31,12 @@ export async function fetchMetrics() {
     return res.json();
 }
 
+export async function fetchStats() {
+    const res = await fetch(`${API_BASE}/v1/stats`, { cache: 'no-store', headers: getAuthHeaders() });
+    if (!res.ok) throw new Error('Failed to fetch stats');
+    return res.json();
+}
+
 export async function fetchClients(page = 1, perPage = 20) {
     const res = await fetch(`${API_BASE}/v1/clients?page=${page}&perPage=${perPage}`, { cache: 'no-store', headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Failed to fetch clients');
@@ -50,6 +56,12 @@ export async function fetchCallDetails(id) {
     return res.json();
 }
 
+export async function fetchWallet() {
+    const res = await fetch(`${API_BASE}/v1/wallet`, { cache: 'no-store', headers: getAuthHeaders() });
+    if (!res.ok) throw new Error('Failed to fetch wallet info');
+    return res.json();
+}
+
 export async function fetchTranscript(id) {
     const res = await fetch(`${API_BASE}/v1/calls/${id}/transcript`, { cache: 'no-store', headers: getAuthHeaders() });
     if (!res.ok) {
@@ -66,5 +78,42 @@ export async function uploadCSV(csvText, campaignId = 'default', mode = 'append'
         body: csvText
     });
     if (!res.ok) throw new Error('Failed to upload CSV');
+    return res.json();
+}
+
+export async function updateProfile(data) {
+    const res = await fetch(`${API_BASE}/v1/auth/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify(data)
+    });
+    return res.json();
+}
+
+export async function changePassword(data) {
+    const res = await fetch(`${API_BASE}/v1/auth/password`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify(data)
+    });
+    return res.json();
+}
+
+export async function updateAvatar(file) {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    const res = await fetch(`${API_BASE}/v1/auth/avatar`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: formData
+    });
+    return res.json();
+}
+
+export async function deleteAccount() {
+    const res = await fetch(`${API_BASE}/v1/auth/account`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+    });
     return res.json();
 }
