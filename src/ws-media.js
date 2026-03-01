@@ -276,7 +276,7 @@ class CallSession {
 
     // Playback state
     this.isPlaying = false;
-    this._postPlaybackDelay = false;
+    this._echoCooldownUntil = 0;
     this.playbackStartedAt = 0;
     this.interruptVoiceChunks = 0;
     this._greetingStarted = false;
@@ -387,13 +387,9 @@ async function sendAudioThroughStream(session, ws, mulawBuffer) {
   session.playbackStartedAt = 0;
   session.interruptVoiceChunks = 0;
 
-  // Wait 300ms before accepting audio again to prevent double-barge-in echo triggers
-  session._postPlaybackDelay = true;
-  setTimeout(() => {
-    if (session._playbackId === playbackId) {
-      session._postPlaybackDelay = false;
-    }
-  }, 300);
+  // Wait 1500ms before accepting audio again to completely dodge PSTN echo
+  session._echoCooldownUntil = Date.now() + 1500;
+  logger.debug('Playback ended, echo cool-down started', { callSid: session.callSid, cooldownMs: 1500 });
 }
 
 function clearPreSpeechCache(session) {
@@ -726,9 +722,15 @@ module.exports = function setupWs(app) {
 // PROCESS AUDIO CHUNK â€” Shared logic for both binary and JSON media
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function shouldDetectSpeech(session) {
-  // Requirement #1 & #4: Disable VAD during TTS playback and post-delay cooldown
+  // Requirement #1 & #4: Disable VAD during TTS playback and echo cooldown duration
   if (session.isPlaying) return false;
-  if (session._postPlaybackDelay) return false;
+  if (session._echoCooldownUntil && Date.now() < session._echoCooldownUntil) return false;
+
+  // Cleanup expired cooldown flag to keep logs clean
+  if (session._echoCooldownUntil && Date.now() >= session._echoCooldownUntil) {
+    session._echoCooldownUntil = 0;
+  }
+
   // Requirement #2: Do not detect speech before calibration completes
   if (!session.vadCalibrated) return false;
   return true;
