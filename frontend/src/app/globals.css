@@ -2122,18 +2122,45 @@ label {
   }
 }
 
-/* Voice visualizer animation */
-@keyframes waveBar {
-  0%, 100% {
-    height: 30%;
-  }
-  50% {
-    height: 100%;
-  }
+/* Voice Configuration Page Styles */
+.voice-visualizer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 96px;
+  margin-bottom: 24px;
+  position: relative;
+  z-index: 10;
 }
 
-.wave-bar {
+.voice-bar {
+  width: 4px;
+  background: linear-gradient(to top, var(--primary), rgba(19, 91, 236, 0.2));
+  border-radius: 2px;
   animation: waveBar 1.2s ease-in-out infinite;
+}
+
+.voice-bar:nth-child(1) { animation-delay: 0s; height: 30%; }
+.voice-bar:nth-child(2) { animation-delay: 0.1s; height: 50%; }
+.voice-bar:nth-child(3) { animation-delay: 0.2s; height: 70%; }
+.voice-bar:nth-child(4) { animation-delay: 0.3s; height: 90%; }
+.voice-bar:nth-child(5) { animation-delay: 0.4s; height: 100%; }
+.voice-bar:nth-child(6) { animation-delay: 0.5s; height: 80%; }
+.voice-bar:nth-child(7) { animation-delay: 0.6s; height: 60%; }
+.voice-bar:nth-child(8) { animation-delay: 0.7s; height: 40%; }
+.voice-bar:nth-child(9) { animation-delay: 0.8s; height: 50%; }
+.voice-bar:nth-child(10) { animation-delay: 0.9s; height: 70%; }
+.voice-bar:nth-child(11) { animation-delay: 1.0s; height: 90%; }
+.voice-bar:nth-child(12) { animation-delay: 1.1s; height: 60%; }
+
+@keyframes waveBar {
+  0%, 100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
 }
 
 /* Stagger animation for cards */
