@@ -601,6 +601,9 @@ module.exports = function setupWs(app) {
 
         // Media event
         if (msg.event === 'media' || msg.event === 'audio') {
+          // If bidirectional stream returns our own outbound audio, ignore it completely
+          if (msg.media && msg.media.track && msg.media.track === 'outbound') return;
+
           const callUuid = msg.callSid || msg.callUuid || queryCallUuid;
           const payload = msg.media?.payload || msg.payload;
           if (!payload) return;
@@ -755,9 +758,14 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
 
       session.audioChunks.push(...session.preSpeechMulaw);
       session.pcmBuffer.push(...session.preSpeechPcm);
+      // Fix missing totalPcmBytes accumulation
+      session.totalPcmBytes += session.preSpeechPcm.reduce((acc, chunk) => acc + chunk.length, 0);
 
       session.preSpeechMulaw = [];
       session.preSpeechPcm = [];
+
+      // The current chunk was already added via preSpeechPcm, so return early to avoid duplicating it
+      return;
     }
 
     if (session.isSpeaking) {
