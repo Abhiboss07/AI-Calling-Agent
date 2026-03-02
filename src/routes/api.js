@@ -600,8 +600,9 @@ router.get('/v1/clients', async (req, res) => {
     const skip = (pg - 1) * pp;
 
     const clients = await Call.aggregate([
-      { $group: { _id: '$phoneNumber', totalCalls: { $sum: 1 }, totalDuration: { $sum: '$durationSec' }, lastCall: { $max: '$createdAt' } } },
-      { $project: { phoneNumber: '$_id', totalCalls: 1, totalDuration: 1, lastCall: 1, _id: 0 } },
+      { $sort: { createdAt: -1 } },
+      { $group: { _id: '$phoneNumber', totalCalls: { $sum: 1 }, totalDuration: { $sum: '$durationSec' }, lastCall: { $first: '$createdAt' }, lastCallId: { $first: '$_id' } } },
+      { $project: { phoneNumber: '$_id', totalCalls: 1, totalDuration: 1, lastCall: 1, lastCallId: 1, _id: 0 } },
       { $sort: { lastCall: -1 } },
       { $skip: skip },
       { $limit: pp }
@@ -807,8 +808,19 @@ router.put('/v1/leads/:id', express.json(), async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// TRANSCRIPTS & RECORDINGS
+// TRANSCRIPTS & RECORDINGS & LOGS
 // ──────────────────────────────────────────────────────────────────────────
+
+router.get('/v1/system/logs', (req, res) => {
+  try {
+    const { getSystemLogs } = require('../utils/logger');
+    const logs = getSystemLogs();
+    res.json({ ok: true, data: logs });
+  } catch (err) {
+    logger.error('Log fetch error', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 router.get('/v1/calls/:id/transcript', async (req, res) => {
   try {

@@ -1,6 +1,6 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { fetchStats, fetchCalls, fetchWallet, fetchStartCall } from '../lib/api';
+import { useState, useEffect, useRef } from 'react';
+import { fetchStats, fetchCalls, fetchWallet, fetchStartCall, fetchSystemLogs } from '../lib/api';
 
 // Force turbopack to invalidate and pick up new fetchWallet component
 export default function DashboardPage() {
@@ -9,6 +9,8 @@ export default function DashboardPage() {
   const [activeCalls, setActiveCalls] = useState([]);
   const [standbyCount, setStandbyCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [systemLogs, setSystemLogs] = useState([]);
+  const logsEndRef = useRef(null);
 
   // Manual Dispatch State
   const [dispatchNumber, setDispatchNumber] = useState('');
@@ -41,16 +43,18 @@ export default function DashboardPage() {
 
     async function loadDashboardData() {
       try {
-        const [walletRes, statsRes, activeRes, queuedRes] = await Promise.all([
+        const [walletRes, statsRes, activeRes, queuedRes, logsRes] = await Promise.all([
           fetchWallet().catch(() => null),
           fetchStats().catch(() => null),
           fetchCalls({ status: 'in-progress' }).catch(() => ({ data: [], total: 0 })),
-          fetchCalls({ status: 'queued' }).catch(() => ({ total: 0 }))
+          fetchCalls({ status: 'queued' }).catch(() => ({ total: 0 })),
+          fetchSystemLogs().catch(() => ({ data: [] }))
         ]);
 
         if (isMounted) {
           if (walletRes?.ok) setWalletData(walletRes.data);
           if (statsRes) setStatsData(statsRes);
+          if (logsRes?.ok) setSystemLogs(logsRes.data || []);
 
           setActiveCalls(activeRes?.data || []);
           setStandbyCount(queuedRes?.total || 0);
@@ -69,6 +73,12 @@ export default function DashboardPage() {
       clearInterval(intervalId);
     };
   }, []);
+
+  useEffect(() => {
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [systemLogs]);
 
   // Use real data where possible, fallback to 0 or placeholders
   const totalCalls = walletData?.totalCalls || 0;
@@ -214,41 +224,42 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Call Volume Trends Chart */}
-          <div className="glass p-6 rounded-xl h-64 flex flex-col justify-between">
-            <div className="flex justify-between items-center">
-              <h3 className="font-bold text-slate-100">Call Volume Trends</h3>
-              <div className="flex gap-2">
-                <button className="px-3 py-1 bg-primary text-white text-xs rounded-full font-bold">7D</button>
-                <button className="px-3 py-1 bg-slate-800 text-slate-400 text-xs rounded-full font-bold">30D</button>
+          {/* Live System Logs Terminal */}
+          <div className="glass p-6 rounded-xl h-64 flex flex-col bg-slate-950 border border-slate-800 shadow-inner">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-mono font-bold text-slate-300 text-sm flex items-center gap-2">
+                <span className="material-symbols-outlined text-[16px]">terminal</span>
+                Backend Runtime Logs
+              </h3>
+              <div className="flex gap-1">
+                <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
+                <div className="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+                <div className="w-3 h-3 rounded-full bg-green-500/80"></div>
               </div>
             </div>
 
-            {loading ? (
-              <div className="flex-1 flex items-center justify-center pt-4">
-                <span className="text-slate-500 text-sm animate-pulse">Loading trend chart...</span>
-              </div>
-            ) : (
-              <div className="flex-1 flex items-end gap-2 pt-4">
-                {/* Dynamically render bars if wallet daily breakdown is available, else mock visually */}
-                {(walletData?.dailyBreakdown?.length > 0 ? walletData.dailyBreakdown : [
-                  { calls: 40 }, { calls: 65 }, { calls: 55 }, { calls: 80 }, { calls: 95 }, { calls: 85 }, { calls: 60 }
-                ]).map((day, idx, arr) => {
-                  const maxCalls = Math.max(...arr.map(d => d.calls || 1), 100);
-                  const heightPct = Math.max((day.calls / maxCalls) * 100, 5);
-                  const isToday = idx === arr.length - 1;
-
-                  return (
-                    <div
-                      key={idx}
-                      className={`w-full rounded-t-lg transition-all cursor-pointer ${isToday ? 'bg-primary' : 'bg-primary/20 hover:bg-primary/60'}`}
-                      style={{ height: `${heightPct}%` }}
-                      title={`${day.calls || 0} calls`}
-                    ></div>
-                  );
-                })}
-              </div>
-            )}
+            <div className="flex-1 overflow-y-auto font-mono text-[11px] leading-relaxed text-slate-400 p-2 bg-black/40 rounded border border-slate-800/60 custom-scrollbar">
+              {systemLogs.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-slate-600 animate-pulse">
+                  Listening for system events...
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {systemLogs.slice().reverse().map((log, i) => (
+                    <div key={i} className="flex gap-3 hover:bg-slate-800/40 px-1 py-0.5 rounded break-all">
+                      <span className="text-slate-600 shrink-0">[{new Date(log.ts).toLocaleTimeString()}]</span>
+                      <span className={`shrink-0 font-bold ${log.level === 'ERROR' ? 'text-red-400' : log.level === 'WARN' ? 'text-yellow-400' : log.level === 'DEBUG' ? 'text-purple-400' : 'text-primary'}`}>
+                        {log.level.padEnd(5)}
+                      </span>
+                      <span className={log.level === 'ERROR' ? 'text-red-300' : log.level === 'WARN' ? 'text-yellow-200' : 'text-slate-300'}>
+                        {log.msg || String(log.text || '')} {log.callSid && <span className="text-slate-500 ml-1">({log.callSid.substring(0, 8)})</span>}
+                      </span>
+                    </div>
+                  ))}
+                  <div ref={logsEndRef} />
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Make a Call Action Block */}

@@ -6,6 +6,21 @@ const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 const CURRENT_LEVEL = LOG_LEVELS[process.env.LOG_LEVEL || 'info'] || 1;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
+// In-memory log buffer for the dashboard viewer
+const MAX_LOGS = 200;
+const logBuffer = [];
+
+function prependLog(entry) {
+  logBuffer.unshift(entry);
+  if (logBuffer.length > MAX_LOGS) {
+    logBuffer.pop();
+  }
+}
+
+function getSystemLogs() {
+  return logBuffer;
+}
+
 function formatArgs(args) {
   return args.map(a => {
     if (a === null || a === undefined) return String(a);
@@ -50,8 +65,11 @@ function humanLog(level, args) {
 
 function log(...args) {
   if (CURRENT_LEVEL > LOG_LEVELS.info) return;
+  const json = jsonLog('INFO', args);
+  prependLog(JSON.parse(json));
+
   if (IS_PRODUCTION) {
-    console.log(jsonLog('INFO', args));
+    console.log(json);
   } else {
     console.log(humanLog('INFO', args));
   }
@@ -59,8 +77,11 @@ function log(...args) {
 
 function debug(...args) {
   if (CURRENT_LEVEL > LOG_LEVELS.debug) return;
+  const json = jsonLog('DEBUG', args);
+  prependLog(JSON.parse(json));
+
   if (IS_PRODUCTION) {
-    console.log(jsonLog('DEBUG', args));
+    console.log(json);
   } else {
     console.log(humanLog('DEBUG', args));
   }
@@ -68,19 +89,25 @@ function debug(...args) {
 
 function warn(...args) {
   if (CURRENT_LEVEL > LOG_LEVELS.warn) return;
+  const json = jsonLog('WARN', args);
+  prependLog(JSON.parse(json));
+
   if (IS_PRODUCTION) {
-    console.warn(jsonLog('WARN', args));
+    console.warn(json);
   } else {
     console.warn(humanLog('WARN', args));
   }
 }
 
 function error(...args) {
+  const json = jsonLog('ERROR', args);
+  prependLog(JSON.parse(json));
+
   if (IS_PRODUCTION) {
-    console.error(jsonLog('ERROR', args));
+    console.error(json);
   } else {
     console.error(humanLog('ERROR', args));
   }
 }
 
-module.exports = { log, debug, warn, error };
+module.exports = { log, debug, warn, error, getSystemLogs };

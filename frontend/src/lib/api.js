@@ -150,6 +150,12 @@ export async function deleteAccount() {
     return res.json();
 }
 
+export async function fetchSystemLogs() {
+    const res = await fetch(`${API_BASE}/v1/system/logs`, { cache: 'no-store', headers: getAuthHeaders() });
+    if (!res.ok) throw new Error('Failed to fetch system logs');
+    return res.json();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // KNOWLEDGE BASE (DOCUMENTS)
 // ─────────────────────────────────────────────────────────────────────────────
