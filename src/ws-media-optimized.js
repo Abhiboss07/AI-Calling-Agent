@@ -109,7 +109,7 @@ const VAD_THRESHOLD = config.pipeline.vadThreshold;
 const SPEECH_START_CHUNKS = config.pipeline.speechStartChunks;
 const SPEECH_END_CHUNKS = config.pipeline.speechEndChunks;
 const BARGE_IN_MIN_PLAYBACK_MS = config.pipeline.bargeInMinPlaybackMs;
-const BARGE_IN_REQUIRED_CHUNKS = config.pipeline.bargeInRequiredChunks;
+const BARGE_IN_REQUIRED_CHUNKS = 5; // Increased to prevent false positives from line noise
 const BARGE_IN_RMS_MULTIPLIER = config.pipeline.bargeInRmsMultiplier;
 const MIN_UTTERANCE_BYTES = config.pipeline.minUtteranceBytes;
 const MAX_BUFFER_BYTES = config.pipeline.maxBufferBytes;
@@ -655,6 +655,16 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // 0. INITIAL NOISE CALIBRATION (1st 500ms)
   // ─────────────────────────────────────────────
   if (!session.vadCalibrated) {
+    // Skip calibration ENTIRELY on outbound calls so greeting plays INSTANTLY
+    if (session.direction === 'outbound') {
+      session.vadCalibrated = true;
+      session._frozenNoiseFloor = VAD_THRESHOLD * 0.8;
+      if (session._greetingPending && session.streamSid) {
+        deliverInstantGreeting(session, ws).catch(() => { });
+      }
+      return;
+    }
+
     session.calibrationChunks++;
 
     if (session.calibrationChunks === 1) {
@@ -686,7 +696,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // ─────────────────────────────────────────────
   if (session.isPlaying) {
     const playbackMs = Date.now() - session.playbackStartedAt;
-    const bargeThreshold = 0.15;
+    const bargeThreshold = 0.22; // Increased to prevent line noise interrupting TTS
 
     if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && rms >= bargeThreshold) {
       session.interruptVoiceChunks++;
