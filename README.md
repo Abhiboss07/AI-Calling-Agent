@@ -28,7 +28,7 @@ The system consists of two main parts:
 ### 1. Backend (`/src`)
 - **Express Server:** Handles API endpoints and Plivo webhooks.
 - **WebSocket Server:** Manages real-time audio streams (`/stream`).
-- **Services:** Modular services for STT, LLM, TTS, Storage (S3/R2), and Database (MongoDB).
+- **Services:** Modular services for STT, LLM, TTS, Storage (S3), and Database (MongoDB).
 - **Worker:** Processes background tasks (optional, strictly speaking this is monolithic async).
 
 ### 2. Frontend (`/frontend`)
@@ -44,7 +44,7 @@ The system consists of two main parts:
 - **MongoDB** v6+ (Local or Atlas)
 - **Plivo Account** (Auth ID, Auth Token, Phone Number)
 - **OpenAI API Key**
-- **AWS S3** or **Cloudflare R2** bucket (for recordings/logs)
+- **AWS S3** bucket (for recordings/logs)
 
 ---
 
@@ -82,10 +82,9 @@ The system consists of two main parts:
     # OpenAI
     OPENAI_API_KEY=sk-...
 
-    # Storage (S3 or Cloudflare R2)
+    # Storage (AWS S3)
     S3_BUCKET=my-bucket
-    S3_REGION=auto
-    S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
+    S3_REGION=us-east-1
     S3_ACCESS_KEY=...
     S3_SECRET_KEY=...
     S3_PUBLIC_URL=https://pub-domain.com  # Required for public access

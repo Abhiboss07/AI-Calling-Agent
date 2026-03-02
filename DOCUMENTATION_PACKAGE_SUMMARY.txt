@@ -57,7 +57,7 @@ Each document contains the same comprehensive information covering:
 ✅ How calls work (step-by-step flow)
 ✅ Technology stack used
 ✅ System architecture (how everything connects)
-✅ Storage system (MongoDB + Cloudflare R2)
+✅ Storage system (MongoDB + AWS S3)
 ✅ AI & LLM explained (Whisper, GPT, TTS)
 ✅ Parallel calling & scaling
 ✅ Important components (Circuit Breaker, Cost Control, etc.)
@@ -246,8 +246,6 @@ Section 17:  Quick summary (10 key points to remember)
 ═══════════════════════════════════════════════════════════════════════════
 
 Documentation:
-├─ S3_CLOUDFLARE_R2_MIGRATION_REPORT.md (Storage backend details)
-├─ R2_QUICK_REFERENCE.md (Quick start guide)
 ├─ DEPLOYMENT.md (How to deploy to production)
 ├─ COST_OPTIMIZATION.md (Cost reduction strategies)
 ├─ QA_CHECKLIST.md (Quality assurance checklist)
