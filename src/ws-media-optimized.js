@@ -138,10 +138,20 @@ class StrictCallSession {
   }
 }
 
-async function sendRawAudioToWS(session, ws, mulawBuffer) {
+function chunkBuffer(buffer, chunkSize) {
+  const chunks = [];
+  for (let i = 0; i < buffer.length; i += chunkSize) {
+    chunks.push(buffer.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+async function sendRawAudioToWS(session, ws, fullMulawBuffer) {
   if (!session || ws.readyState !== 1) return;
 
-  session.audioOutputQueue.push(mulawBuffer);
+  const CHUNK_SIZE = 3200;
+  const chunks = chunkBuffer(fullMulawBuffer, CHUNK_SIZE);
+  session.audioOutputQueue.push(...chunks);
 
   if (!session.isOutputStreaming) {
     session.isOutputStreaming = true;
@@ -175,10 +185,13 @@ async function sendRawAudioToWS(session, ws, mulawBuffer) {
     session.isOutputStreaming = false;
     session.abortedOutput = false;
 
-    // If we just finished speaking (and it wasn't aborted midway), go back to listening mode
-    if (session.callState.stage === 'speak' || session.callState.stage === 'intro') {
-      session.callState.stage = 'listen';
-      resetSilenceTimers(session, ws);
+    // Only resume listening if all queued LLM audio sentences have finished generating
+    if (session.callState.isReplyComplete) {
+      if (session.callState.stage === 'speak' || session.callState.stage === 'intro') {
+        session.callState.stage = 'listen';
+        resetSilenceTimers(session, ws);
+      }
+      session.callState.isReplyComplete = false;
     }
   }
 }
@@ -296,24 +309,29 @@ async function triggerSTTPipeline(session, ws) {
     let finalAction = null;
     let isFirstSentence = true;
 
+    session.callState.isReplyComplete = false;
+
     for await (const chunk of replyStream) {
       if (pipelineId !== session.activePipelines) break; // Interrupted
 
       if (chunk.type === 'sentence') {
         fullSentence += chunk.text + ' ';
-        const ttsStream = tts.synthesizeStream(chunk.text, session.callSid, session.language);
+        const ttsResult = await tts.synthesizeRaw(chunk.text, session.callSid, session.language);
 
-        // Send each chunk produced directly to websocket output queue
-        (async () => {
-          for await (const mulawChunk of ttsStream) {
-            if (pipelineId === session.activePipelines) {
-              await sendRawAudioToWS(session, ws, mulawChunk);
-            }
-          }
-        })();
+        if (ttsResult && ttsResult.mulawBuffer && pipelineId === session.activePipelines) {
+          await sendRawAudioToWS(session, ws, ttsResult.mulawBuffer);
+        }
         isFirstSentence = false;
       } else {
         finalAction = chunk.action;
+      }
+    }
+
+    session.callState.isReplyComplete = true;
+    if (!session.isOutputStreaming && session.audioOutputQueue.length === 0) {
+      if (session.callState.stage === 'speak') {
+        session.callState.stage = 'listen';
+        resetSilenceTimers(session, ws);
       }
     }
 
@@ -377,11 +395,17 @@ async function deliverAgentIntro(session, ws) {
   logger.log(`[INTRO] Generated intro: ${introText}`);
 
   try {
-    const ttsStream = tts.synthesizeStream(introText, session.callSid, session.language);
-    for await (const mulawChunk of ttsStream) {
-      if (ws.readyState === 1 && !session.abortedOutput) {
-        await sendRawAudioToWS(session, ws, mulawChunk);
-      }
+    session.callState.isReplyComplete = false;
+    const ttsResult = await tts.synthesizeRaw(introText, session.callSid, session.language);
+
+    if (ttsResult && ttsResult.mulawBuffer && ws.readyState === 1 && !session.abortedOutput) {
+      await sendRawAudioToWS(session, ws, ttsResult.mulawBuffer);
+    }
+
+    session.callState.isReplyComplete = true;
+    if (!session.isOutputStreaming && session.audioOutputQueue.length === 0) {
+      session.callState.stage = 'listen';
+      resetSilenceTimers(session, ws);
     }
   } catch (e) {
     logger.error('Intro delivery failed', e);

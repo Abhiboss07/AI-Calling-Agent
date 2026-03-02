@@ -153,71 +153,10 @@ async function prewarmPhrases(phrases, language = 'en-IN') {
   return { attempted: unique.length, warmed };
 }
 
-// ── Streaming TTS ───────────────────────────────────────────────────────────
-
-async function* synthesizeStream(text, callSid, language = 'en-IN') {
-  if (!text || text.trim().length === 0) return;
-
-  const cleanText = text.trim();
-  const startMs = Date.now();
-
-  try {
-    metrics.incrementTtsRequest(true);
-
-    const langConfig = getLanguage(language);
-    const voice = langConfig.ttsVoice || 'alloy';
-
-    // Call the streaming endpoint from our openaiClient
-    const stream = await openai.ttsSynthesizeStream(cleanText, voice, 'mp3');
-
-    // Pipe the stream into ffmpeg instead of handling raw byte chunks manually
-    const pcmStream = ffmpeg(stream)
-      .inputFormat('mp3')
-      .audioFrequency(8000)
-      .audioChannels(1)
-      .audioCodec('pcm_s16le')
-      .format('s16le')
-      .on('error', err => logger.error('ffmpeg stream conversion error:', err.message));
-
-    // We yield 8000Hz PCM 16-bit explicitly as requested by the user, chunks of ~100ms
-    const CHUNK_SIZE = 1600; // 100ms of 8000Hz 16-bit 1-channel audio (1600 bytes)
-    let buffer = Buffer.alloc(0);
-
-    for await (const chunk of pcmStream) {
-      buffer = Buffer.concat([buffer, chunk]);
-
-      while (buffer.length >= CHUNK_SIZE) {
-        const processBuf = buffer.subarray(0, CHUNK_SIZE);
-        buffer = buffer.subarray(CHUNK_SIZE);
-
-        // Convert to mu-law explicitly for Vobiz
-        const mulawBuffer = pcmBufferToMulaw(processBuf);
-        yield mulawBuffer;
-      }
-    }
-
-    if (buffer.length > 0) {
-      const extra = buffer.length % 2;
-      const safeBuffer = extra === 0 ? buffer : buffer.subarray(0, buffer.length - extra);
-      if (safeBuffer.length > 0) {
-        const mulawBuffer = pcmBufferToMulaw(safeBuffer);
-        yield mulawBuffer;
-      }
-    }
-
-    const synthMs = Date.now() - startMs;
-    if (callSid) costControl.addTtsUsage(callSid, cleanText.length);
-    logger.debug(`TTS stream complete: ${cleanText.length} chars (${synthMs}ms)`);
-
-  } catch (err) {
-    logger.error('TTS stream error:', err.message || err);
-    metrics.incrementTtsRequest(false);
-  }
-}
+// Removed Streaming TTS as instructed to avoid node ffmpeg iterable bugs
 
 module.exports = {
   synthesizeRaw,
-  synthesizeStream,
   prewarmPhrases,
   pcm16ToMulaw,
   pcmBufferToMulaw
