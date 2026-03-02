@@ -25,6 +25,9 @@ function cacheKey(text, language) {
 const MULAW_BIAS = 0x84;
 const MULAW_CLIP = 32635;
 
+const getStream = require('get-stream');
+const ffmpeg = require('fluent-ffmpeg');
+
 function pcm16ToMulaw(sample) {
   if (sample > MULAW_CLIP) sample = MULAW_CLIP;
   if (sample < -MULAW_CLIP) sample = -MULAW_CLIP;
@@ -52,48 +55,19 @@ function pcmBufferToMulaw(pcmBuffer) {
   return mulaw;
 }
 
-// Fast telephony-oriented downsampling: 24kHz -> 8kHz (3:1).
-// This is significantly faster than sinc and keeps enough quality for phone calls.
-function downsample24kTo8kFast(pcm24kBuffer) {
-  const inputSamples = Math.floor(pcm24kBuffer.length / 2);
-  const outputSamples = Math.floor(inputSamples / 3);
-  const out = Buffer.alloc(outputSamples * 2);
+// Convert audio stream to 8kHz PCM using ffmpeg instead of fast downsampling
+async function convertTo8kPcm(audioStream) {
+  const pcmStream = ffmpeg(audioStream)
+    .inputFormat('mp3')
+    .audioFrequency(8000)
+    .audioChannels(1)
+    .audioCodec('pcm_s16le')
+    .format('s16le')
+    .on('error', err => logger.error('ffmpeg conversion error:', err.message))
+    .pipe();
 
-  for (let i = 0; i < outputSamples; i++) {
-    const idx = i * 3;
-    const s1 = pcm24kBuffer.readInt16LE(idx * 2);
-    const s2 = pcm24kBuffer.readInt16LE((idx + 1) * 2);
-    const s3 = pcm24kBuffer.readInt16LE((idx + 2) * 2);
-    const avg = Math.round((s1 + s2 + s3) / 3);
-    out.writeInt16LE(avg, i * 2);
-  }
-
-  return out;
-}
-
-function resample24kTo8k(pcm24kBuffer) {
-  const mode = String(config.tts?.resampleMode || 'fast').toLowerCase();
-  if (mode !== 'sinc') {
-    return downsample24kTo8kFast(pcm24kBuffer);
-  }
-
-  try {
-    // Lazy require so startup is lightweight when running in fast mode.
-    const { WaveFile } = require('wavefile');
-    const samples = new Int16Array(
-      pcm24kBuffer.buffer,
-      pcm24kBuffer.byteOffset,
-      Math.floor(pcm24kBuffer.length / 2)
-    );
-    const wav = new WaveFile();
-    wav.fromScratch(1, 24000, '16', samples);
-    wav.toSampleRate(8000, { method: 'sinc' });
-    const resampled = wav.getSamples(false, Int16Array);
-    return Buffer.from(resampled.buffer, resampled.byteOffset, resampled.byteLength);
-  } catch (err) {
-    logger.warn('TTS sinc resample failed, falling back to fast mode', err.message || err);
-    return downsample24kTo8kFast(pcm24kBuffer);
-  }
+  const buffer = await getStream.buffer(pcmStream);
+  return buffer;
 }
 
 function addToCache(key, value) {
@@ -129,7 +103,8 @@ async function synthesizeRaw(text, callSid, language = 'en-IN') {
 
     const langConfig = getLanguage(language);
     const voice = langConfig.ttsVoice || 'alloy';
-    const rawBuffer = await openai.ttsSynthesize(cleanText, voice, 'pcm');
+    // Use MP3 generation for better ffmpeg compatibility and smaller transfer size
+    const rawBuffer = await openai.ttsSynthesize(cleanText, voice, 'mp3');
     const synthMs = Date.now() - startMs;
 
     if (!rawBuffer || rawBuffer.length === 0) {
@@ -137,8 +112,11 @@ async function synthesizeRaw(text, callSid, language = 'en-IN') {
       return null;
     }
 
-    // OpenAI PCM output is 24kHz 16-bit mono; Vobiz playback needs 8kHz mu-law.
-    const pcm8k = resample24kTo8k(Buffer.from(rawBuffer));
+    const { PassThrough } = require('stream');
+    const bStream = new PassThrough();
+    bStream.end(Buffer.from(rawBuffer));
+
+    const pcm8k = await convertTo8kPcm(bStream);
     const mulawBuffer = pcmBufferToMulaw(pcm8k);
 
     if (callSid) costControl.addTtsUsage(callSid, cleanText.length);
@@ -190,41 +168,39 @@ async function* synthesizeStream(text, callSid, language = 'en-IN') {
     const voice = langConfig.ttsVoice || 'alloy';
 
     // Call the streaming endpoint from our openaiClient
-    const stream = await openai.ttsSynthesizeStream(cleanText, voice, 'pcm');
+    const stream = await openai.ttsSynthesizeStream(cleanText, voice, 'mp3');
 
-    // We expect 24kHz 16-bit PCM mono from OpenAI
-    // We need to chunk it, resample to 8kHz, convert to mu-law, and yield.
-    // Optimal chunk size for resampling is important. 
-    // Let's use 4800 bytes of 24kHz = 2400 samples = 100ms of audio.
-    const CHUNK_SIZE = 4800;
+    // Pipe the stream into ffmpeg instead of handling raw byte chunks manually
+    const pcmStream = ffmpeg(stream)
+      .inputFormat('mp3')
+      .audioFrequency(8000)
+      .audioChannels(1)
+      .audioCodec('pcm_s16le')
+      .format('s16le')
+      .on('error', err => logger.error('ffmpeg stream conversion error:', err.message));
+
+    // We yield 8000Hz PCM 16-bit explicitly as requested by the user, chunks of ~100ms
+    const CHUNK_SIZE = 1600; // 100ms of 8000Hz 16-bit 1-channel audio (1600 bytes)
     let buffer = Buffer.alloc(0);
 
-    for await (const chunk of stream) {
+    for await (const chunk of pcmStream) {
       buffer = Buffer.concat([buffer, chunk]);
 
       while (buffer.length >= CHUNK_SIZE) {
-        // Take a complete chunk
         const processBuf = buffer.subarray(0, CHUNK_SIZE);
         buffer = buffer.subarray(CHUNK_SIZE);
 
-        // Resample 24kHz -> 8kHz (use fast downsampling to avoid sinc boundary artifacts on chunks)
-        const pcm8k = downsample24kTo8kFast(processBuf);
-
         // Convert to mu-law explicitly for Vobiz
-        const mulawBuffer = pcmBufferToMulaw(pcm8k);
-
+        const mulawBuffer = pcmBufferToMulaw(processBuf);
         yield mulawBuffer;
       }
     }
 
-    // Process any remaining bytes at the end of the stream
     if (buffer.length > 0) {
-      // Ensure we have an even number of bytes for 16-bit PCM and divisible by 6 for 3:1 average downsampling
-      const extra = buffer.length % 6;
+      const extra = buffer.length % 2;
       const safeBuffer = extra === 0 ? buffer : buffer.subarray(0, buffer.length - extra);
       if (safeBuffer.length > 0) {
-        const pcm8k = downsample24kTo8kFast(safeBuffer);
-        const mulawBuffer = pcmBufferToMulaw(pcm8k);
+        const mulawBuffer = pcmBufferToMulaw(safeBuffer);
         yield mulawBuffer;
       }
     }
@@ -244,6 +220,5 @@ module.exports = {
   synthesizeStream,
   prewarmPhrases,
   pcm16ToMulaw,
-  pcmBufferToMulaw,
-  downsample24kTo8kFast
+  pcmBufferToMulaw
 };
