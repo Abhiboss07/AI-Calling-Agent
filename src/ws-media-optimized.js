@@ -592,9 +592,14 @@ module.exports = function setupWs(app) {
 
           const sess = initializeSession({ callUuid, callerNumber, streamSid, language, direction });
 
-          // Stream established. Greeting stays pending until 500ms VAD calibration finishes.
           if (sess && streamSid) {
             sess._greetingPending = true;
+            // Immediate Delivery on Outbound Connected (do not wait for first incoming audio chunk)
+            if (sess.direction === 'outbound') {
+              sess.vadCalibrated = true;
+              sess._frozenNoiseFloor = VAD_THRESHOLD * 0.8;
+              deliverInstantGreeting(sess, ws).catch(() => { });
+            }
           }
           return;
         }
