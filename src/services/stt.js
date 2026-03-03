@@ -54,32 +54,37 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') 
 
     const resp = await openai.transcribeAudio(buffer, mime, whisperLang);
     const latencyMs = Date.now() - startMs;
-    const text = normalizeTranscriptText(resp.text || '');
+    const rawText = String(resp.text || '').trim();
+    const text = normalizeTranscriptText(rawText);
+
+    // Log raw Whisper output BEFORE any filtering (critical for debugging)
+    logger.log(`STT raw (${latencyMs}ms, ${durationSec.toFixed(1)}s audio): "${rawText}"`, { callSid });
 
     if (callSid) costControl.addSttUsage(callSid, durationSec);
 
     // Filter noise-only transcriptions
-    const noisePattern = /^[.\s...]+$/i;
+    const noisePattern = /^[.\s…]+$/i;
     if (!text || text.length < 2 || noisePattern.test(text)) {
-      logger.debug(`STT: noise filtered "${text}" (${latencyMs}ms)`);
+      logger.log(`STT: noise filtered "${text}"`, { callSid, latencyMs });
       return { text: '', confidence: 0, empty: true };
     }
 
     // Filter known Whisper hallucination phrases (produced on noise/silence input)
+    // NOTE: Only include phrases that are NEVER real caller speech
     const WHISPER_HALLUCINATIONS = new Set([
-      'blooper', 'bloopers', 'you', 'bye', 'the end', 'thanks for watching',
+      'blooper', 'bloopers', 'the end', 'thanks for watching',
       'thank you for watching', 'subscribe', 'like and subscribe',
       'please subscribe', 'subtitles by', 'amara.org', 'transcribed by',
       'music', 'applause', 'laughter', 'silence', 'inaudible',
-      'foreign', 'sigh', 'cough', 'hmm', 'mhm', 'uh', 'um'
+      'foreign', 'sigh', 'cough'
     ]);
     const lowerText = text.toLowerCase().trim();
     if (WHISPER_HALLUCINATIONS.has(lowerText)) {
-      logger.debug(`STT: hallucination filtered "${text}" (${latencyMs}ms)`);
+      logger.log(`STT: hallucination filtered "${text}"`, { callSid, latencyMs });
       return { text: '', confidence: 0, empty: true };
     }
 
-    logger.debug(`STT: "${text}" (${latencyMs}ms, ${durationSec.toFixed(1)}s audio)`);
+    logger.log(`STT: "${text}" (${latencyMs}ms, ${durationSec.toFixed(1)}s audio)`, { callSid });
 
     return {
       text,
