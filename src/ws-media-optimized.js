@@ -716,16 +716,6 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // 0. INITIAL NOISE CALIBRATION (1st 500ms)
   // ─────────────────────────────────────────────
   if (!session.vadCalibrated) {
-    // Skip calibration ENTIRELY on outbound calls so greeting plays INSTANTLY
-    if (session.direction === 'outbound') {
-      session.vadCalibrated = true;
-      session._frozenNoiseFloor = VAD_THRESHOLD * 0.8;
-      if (session._greetingPending && session.streamSid) {
-        deliverInstantGreeting(session, ws).catch(() => { });
-      }
-      return;
-    }
-
     session.calibrationChunks++;
 
     if (session.calibrationChunks === 1) {
@@ -763,7 +753,9 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     }
 
     const playbackMs = Date.now() - session.playbackStartedAt;
-    const bargeThreshold = 0.22; // Increased to prevent line noise interrupting TTS
+    // Dynamic barge-in threshold based on measured line noise
+    const floor = session._frozenNoiseFloor || VAD_THRESHOLD * 0.6;
+    const bargeThreshold = Math.max(0.15, floor + (VOICE_MARGIN * 1.5));
 
     if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && rms >= bargeThreshold) {
       session.interruptVoiceChunks++;
