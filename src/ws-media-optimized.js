@@ -118,8 +118,8 @@ const MAX_CALL_MS = config.callMaxMinutes * 60 * 1000;
 const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize || 160;
 const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs || 20;
 const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
-const ECHO_COOLDOWN_MS = 1500;  // Discard audio for 1500ms after playback ends (Vobiz has no AEC)
-const MAX_SPEECH_DURATION_MS = 8000; // Force processing after 8s of continuous speech
+const ECHO_COOLDOWN_MS = 800;   // Discard audio for 800ms after playback ends (Vobiz has no AEC)
+const MAX_SPEECH_DURATION_MS = 4000; // Force processing after 4s of continuous speech for fast responses
 const NOISE_CALIBRATION_CHUNKS = 25; // ~500ms of audio to calibrate noise floor after cool-down
 const VOICE_MARGIN = 0.08; // Voice must exceed noise floor by this ADDITIVE margin
 const PRE_SPEECH_CHUNKS = config.pipeline.preSpeechChunks || 6;
@@ -242,7 +242,7 @@ class EnhancedCallSession {
     this.interruptVoiceChunks = 0;
     this.speechChunkCount = 0;
     this.silentChunkCount = 0;
-    this.speechStartedAt = 0;
+    this.speechStartedAt = null;  // null (not 0!) so we can distinguish 'not speaking' from timestamp
 
     // Pipeline cancellation
     this.abortController = null;
@@ -802,7 +802,9 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session.totalPcmBytes += pcmChunk.length;
 
       // Force processing if buffer is too large OR speech has lasted too long
-      const speechDurationMs = Date.now() - (session.speechStartedAt || Date.now());
+      const speechDurationMs = session.speechStartedAt !== null
+        ? Date.now() - session.speechStartedAt
+        : 0;
       if (session.totalPcmBytes > MAX_BUFFER_BYTES || speechDurationMs > MAX_SPEECH_DURATION_MS) {
         if (speechDurationMs > MAX_SPEECH_DURATION_MS) {
           logger.debug('Max speech duration reached, forcing processing', {
@@ -812,6 +814,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
           });
         }
         session.isSpeaking = false;
+        session.speechStartedAt = null;
         triggerProcessing(session, ws);
       }
     }
@@ -827,6 +830,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
 
   if (session.isSpeaking && session.silentChunkCount >= SPEECH_END_CHUNKS) {
     session.isSpeaking = false;
+    session.speechStartedAt = null;
 
     if (session.totalPcmBytes >= MIN_UTTERANCE_BYTES * 0.6) {
       triggerProcessing(session, ws);
