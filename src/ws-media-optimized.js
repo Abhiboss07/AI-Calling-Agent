@@ -269,6 +269,8 @@ class EnhancedCallSession {
     this.vadCalibrated = false;
     this.calibrationChunks = 0;
     this._frozenNoiseFloor = null;
+    this._needsPostGreetingCal = false;  // True after outbound greeting to recalibrate
+    this._postGreetingCalChunks = 0;
     this.noiseFloorRms = 0;
 
     // RMS logging
@@ -716,6 +718,20 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // 0. INITIAL NOISE CALIBRATION (1st 500ms)
   // ─────────────────────────────────────────────
   if (!session.vadCalibrated) {
+    // For outbound calls, skip calibration — the first 500ms contains connection
+    // beeps/tones (RMS ~0.76) that would poison the noise floor. Instead, use a
+    // conservative default and recalibrate AFTER the greeting plays.
+    if (session.direction === 'outbound') {
+      session.vadCalibrated = true;
+      session._frozenNoiseFloor = 0.01; // Conservative default
+      session._needsPostGreetingCal = true; // Will recalibrate after greeting
+      if (session._greetingPending && session.streamSid) {
+        deliverInstantGreeting(session, ws).catch(() => { });
+      }
+      return;
+    }
+
+    // Inbound: measure 500ms of audio for noise floor
     session.calibrationChunks++;
 
     if (session.calibrationChunks === 1) {
@@ -727,7 +743,8 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     if (session.calibrationChunks >= 25) { // 500ms of incoming audio
       session.vadCalibrated = true;
       if (session.noiseFloorRms < 0.001) session.noiseFloorRms = VAD_THRESHOLD * 0.5;
-      session._frozenNoiseFloor = session.noiseFloorRms;
+      // Cap at 0.15 to prevent tones from poisoning the floor
+      session._frozenNoiseFloor = Math.min(session.noiseFloorRms, 0.15);
 
       logger.log('Initial calibration complete', {
         callSid: session.callSid,
@@ -778,8 +795,30 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // 2. ECHO COOLDOWN AFTER PLAYBACK
   // ─────────────────────────────────────────────
   if (session._echoCooldownUntil) {
-    if (Date.now() < session._echoCooldownUntil) return;
+    if (Date.now() < session._echoCooldownUntil) {
+      // Use echo cooldown audio for post-greeting recalibration
+      if (session._needsPostGreetingCal) {
+        session._postGreetingCalChunks++;
+        if (session._postGreetingCalChunks === 1) {
+          session.noiseFloorRms = rms;
+        } else {
+          session.noiseFloorRms = session.noiseFloorRms * 0.8 + rms * 0.2;
+        }
+        if (session._postGreetingCalChunks >= 25) {
+          session._needsPostGreetingCal = false;
+          if (session.noiseFloorRms < 0.001) session.noiseFloorRms = VAD_THRESHOLD * 0.5;
+          // Cap at 0.15 to prevent residual echo from poisoning the floor
+          session._frozenNoiseFloor = Math.min(session.noiseFloorRms, 0.15);
+          logger.log('Post-greeting recalibration complete', {
+            callSid: session.callSid,
+            noiseFloor: session._frozenNoiseFloor.toFixed(4)
+          });
+        }
+      }
+      return;
+    }
     session._echoCooldownUntil = 0; // Cooldown expired, resume normal listening
+    session._needsPostGreetingCal = false; // Stop recalibration if not done
     return;
   }
 
