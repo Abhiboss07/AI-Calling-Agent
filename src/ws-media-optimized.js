@@ -119,7 +119,7 @@ const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize || 160;
 const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs || 20;
 const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
 const ECHO_COOLDOWN_MS = 800;   // Discard audio for 800ms after playback ends (Vobiz has no AEC)
-const MAX_SPEECH_DURATION_MS = 4000; // Force processing after 4s of continuous speech for fast responses
+const MAX_SPEECH_DURATION_MS = 3000; // Force processing after 3s of continuous speech for fast responses
 const NOISE_CALIBRATION_CHUNKS = 25; // ~500ms of audio to calibrate noise floor after cool-down
 const VOICE_MARGIN = 0.08; // Voice must exceed noise floor by this ADDITIVE margin
 const PRE_SPEECH_CHUNKS = config.pipeline.preSpeechChunks || 6;
@@ -313,19 +313,29 @@ class EnhancedCallSession {
 // ═════════════════════════════════════════════════════════════════════════════
 
 async function sendAudioThroughStream(session, ws, mulawBuffer, options = {}) {
-  enqueueAudio(session, ws, mulawBuffer);
-  return true;
+  return new Promise((resolve) => {
+    enqueueAudio(session, ws, mulawBuffer, resolve);
+  });
 }
 
-function enqueueAudio(session, ws, mulawBuffer) {
-  if (!session || ws.readyState !== 1) return;
+function enqueueAudio(session, ws, mulawBuffer, onComplete) {
+  if (!session || ws.readyState !== 1) {
+    if (onComplete) onComplete(false);
+    return;
+  }
   session.playbackQueue.push(mulawBuffer);
   if (!session.playbackLoopRunning) {
-    runPlaybackLoop(session, ws).catch(e => logger.error('Playback loop error', e.message));
+    runPlaybackLoop(session, ws, onComplete).catch(e => {
+      logger.error('Playback loop error', e.message);
+      if (onComplete) onComplete(false);
+    });
+  } else if (onComplete) {
+    // Loop already running, will complete when queue drains — store callback
+    session._playbackCompleteCallback = onComplete;
   }
 }
 
-async function runPlaybackLoop(session, ws) {
+async function runPlaybackLoop(session, ws, onComplete) {
   session.playbackLoopRunning = true;
   session.isPlaying = true;
   session.playbackStartedAt = Date.now();
@@ -383,6 +393,11 @@ async function runPlaybackLoop(session, ws) {
       // Start echo cool-down: discard audio for ECHO_COOLDOWN_MS after playback ends
       session._echoCooldownUntil = Date.now() + ECHO_COOLDOWN_MS;
       logger.debug('Playback ended, echo cool-down started', { callSid: session.callSid, cooldownMs: ECHO_COOLDOWN_MS });
+      if (onComplete) onComplete(true);
+      if (session._playbackCompleteCallback) {
+        session._playbackCompleteCallback(true);
+        session._playbackCompleteCallback = null;
+      }
       try {
         ws.send(JSON.stringify({ event: 'checkpoint', name: `speech_${Date.now()}` }));
       } catch (e) { /* ignore */ }
@@ -404,6 +419,14 @@ async function deliverInstantGreeting(session, ws) {
 
   session._greetingStarted = true;
   session._greetingPending = false;
+
+  // CRITICAL: Clear any audio that accumulated before the greeting started
+  // (media events may arrive before the 'start' event, causing noise to buffer)
+  clearBuffers(session);
+  session.isSpeaking = false;
+  session.speechStartedAt = null;
+  session.speechChunkCount = 0;
+  session.silentChunkCount = 0;
 
   const cacheKey = `${session.language}:${session.direction}`;
   const cached = greetingCache.get(cacheKey);
@@ -938,7 +961,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   const sttLatency = Date.now() - sttStart;
 
   if (sttResult.empty || !sttResult.text) {
-    logger.debug('STT returned empty, skipping', session.callSid);
+    logger.log('STT returned empty — skipping pipeline', { callSid: session.callSid, pcmBytes: pcmData.length });
     return;
   }
 
