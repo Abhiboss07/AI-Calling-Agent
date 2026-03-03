@@ -257,6 +257,7 @@ class EnhancedCallSession {
     // Flags
     this._greetingStarted = false;
     this._greetingPending = false;
+    this._greetingPlayback = false; // True while greeting is actively playing — blocks barge-in
     this._ended = false;
     this._finalized = false;
     this._lastPong = Date.now();
@@ -470,11 +471,17 @@ async function deliverInstantGreeting(session, ws) {
   // Calculate duration
   const greetingDurationMs = Math.max(800, Math.round((mulawBuffer.length / 8000) * 1000));
 
-  // Send audio immediately - use moderate pacing for clean playback
+  // Block barge-in during greeting — Indian PSTN line noise triggers false interrupts
+  session._greetingPlayback = true;
+
+  // Send and WAIT for complete playback
   const completed = await sendAudioThroughStream(session, ws, mulawBuffer, {
     fastStart: true
     // Let pacing happen naturally at 10ms per chunk for clean audio
   });
+
+  // Greeting finished playing — re-enable barge-in for subsequent TTS
+  session._greetingPlayback = false;
 
   // Record transcript
   session.transcriptEntries.push({
@@ -490,7 +497,7 @@ async function deliverInstantGreeting(session, ws) {
     session.fsm.transition('intro_complete');
   }
 
-  // Start silence timer
+  // Start silence timer AFTER greeting finishes
   startSilenceTimer(session, ws);
 
   logger.log('Greeting delivered', {
@@ -749,6 +756,12 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // 1. BARGE-IN DURING PLAYBACK
   // ─────────────────────────────────────────────
   if (session.isPlaying) {
+    // NEVER allow barge-in during the initial greeting — line noise on Indian PSTN
+    // causes false positives that cut the greeting after just "Hello"
+    if (session._greetingPlayback) {
+      return; // Completely block barge-in during greeting
+    }
+
     const playbackMs = Date.now() - session.playbackStartedAt;
     const bargeThreshold = 0.22; // Increased to prevent line noise interrupting TTS
 
