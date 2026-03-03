@@ -488,7 +488,10 @@ module.exports = function setupWs(app) {
 
     const queryCallUuid = req.query?.callUuid;
     const queryCallerNumber = req.query?.callerNumber || '';
-    const queryLanguage = req.query?.language || config.language?.default || 'en-IN';
+    // Normalize language at parse time: 'en' → 'en-IN', 'hi' → 'hi-IN', etc.
+    const BARE_LANG_MAP = { 'en': 'en-IN', 'hi': 'hi-IN', 'ta': 'ta-IN', 'te': 'te-IN', 'bn': 'bn-IN', 'mr': 'mr-IN', 'kn': 'kn-IN', 'gu': 'gu-IN', 'ml': 'ml-IN' };
+    const rawLang = (req.query?.language || config.language?.default || 'en-IN').trim().toLowerCase();
+    const queryLanguage = BARE_LANG_MAP[rawLang] || rawLang;
     const queryDirection = req.query?.direction === 'outbound' ? 'outbound' : 'inbound';
 
     // Initialize session
@@ -509,7 +512,7 @@ module.exports = function setupWs(app) {
         if (callerNumber && !session.callerNumber) {
           session.callerNumber = callerNumber;
         }
-        session.language = language || session.language;
+        // Don't overwrite normalized language with raw value
         session.direction = direction || session.direction;
 
         // Try to deliver greeting if pending
@@ -798,7 +801,16 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session.pcmBuffer.push(pcmChunk);
       session.totalPcmBytes += pcmChunk.length;
 
-      if (session.totalPcmBytes > MAX_BUFFER_BYTES) {
+      // Force processing if buffer is too large OR speech has lasted too long
+      const speechDurationMs = Date.now() - (session.speechStartedAt || Date.now());
+      if (session.totalPcmBytes > MAX_BUFFER_BYTES || speechDurationMs > MAX_SPEECH_DURATION_MS) {
+        if (speechDurationMs > MAX_SPEECH_DURATION_MS) {
+          logger.debug('Max speech duration reached, forcing processing', {
+            callSid: session.callSid,
+            durationMs: speechDurationMs,
+            pcmBytes: session.totalPcmBytes
+          });
+        }
         session.isSpeaking = false;
         triggerProcessing(session, ws);
       }
