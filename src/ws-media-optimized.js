@@ -124,6 +124,29 @@ const NOISE_CALIBRATION_CHUNKS = 25; // ~500ms of audio to calibrate noise floor
 const VOICE_MARGIN = 0.08; // Voice must exceed noise floor by this ADDITIVE margin
 const PRE_SPEECH_CHUNKS = config.pipeline.preSpeechChunks || 6;
 
+// ═════════════════════════════════════════════════════════════════════════════
+// FSM STATE → LLM SCRIPT STEP MAPPING
+// The FSM tracks high-level conversation states (INTRODUCING, QUALIFYING_LEAD,
+// etc.) but the LLM's deterministic turn logic expects script steps
+// (availability_check, purpose, etc.). This bridge function maps between them.
+// ═════════════════════════════════════════════════════════════════════════════
+function mapFsmStateToStep(fsmState, direction) {
+  const stateMap = {
+    'INIT': direction === 'outbound' ? 'availability_check' : 'inbound_assist',
+    'INTRODUCING': direction === 'outbound' ? 'availability_check' : 'inbound_assist',
+    'WAITING_CONFIRMATION': direction === 'outbound' ? 'availability_check' : 'purpose',
+    'QUALIFYING_LEAD': 'purpose',
+    'HANDLING_OBJECTION': 'handle',
+    'BOOKING_SITE_VISIT': 'book_visit',
+    'CLOSING': 'close',
+    'END_CALL': 'close',
+    'LISTENING': direction === 'outbound' ? 'availability_check' : 'handle',
+    'PROCESSING': 'handle',
+    'SPEAKING': 'handle'
+  };
+  return stateMap[fsmState] || 'handle';
+}
+
 // Session management
 const sessions = new Map();
 const activePipelines = new Map(); // Track active LLM calls for cancellation
@@ -262,7 +285,9 @@ class EnhancedCallSession {
     if (!language) return config.language?.default || 'en-IN';
     const raw = String(language).trim().toLowerCase();
     if (raw === 'hinglish' || raw === 'hi-en' || raw === 'en-hi') return 'hinglish';
-    return language;
+    // Map bare codes to full Indian locale codes
+    const BARE_MAP = { 'en': 'en-IN', 'hi': 'hi-IN', 'ta': 'ta-IN', 'te': 'te-IN', 'bn': 'bn-IN', 'mr': 'mr-IN', 'kn': 'kn-IN', 'gu': 'gu-IN', 'ml': 'ml-IN' };
+    return BARE_MAP[raw] || language;
   }
 
   // Cancel any ongoing pipeline operations
@@ -921,10 +946,20 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   }
 
   // 3. LLM with FSM context (Streaming)
+  // Bridge FSM state → script step for deterministic turn logic in LLM
+  const fsmContext = session.fsm.getLLMContext();
+  const callState = {
+    ...fsmContext,
+    step: fsmContext.step || mapFsmStateToStep(session.fsm.getState(), session.direction),
+    turnCount: session.fsm.turnCount,
+    direction: session.direction
+  };
+
   const llmStart = Date.now();
+  logger.log('LLM pipeline starting', { callSid: session.callSid, step: callState.step, fsmState: session.fsm.getState(), direction: session.direction });
 
   const replyStream = llm.generateReplyStream({
-    callState: session.fsm.getLLMContext(),
+    callState,
     script: { companyName: config.companyName },
     lastTranscript: sttResult.text,
     customerName: session.fsm.leadData.name || session.callerNumber,

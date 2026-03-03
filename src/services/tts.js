@@ -52,20 +52,32 @@ function pcmBufferToMulaw(pcmBuffer) {
   return mulaw;
 }
 
-// Fast telephony-oriented downsampling: 24kHz -> 8kHz (3:1).
-// This is significantly faster than sinc and keeps enough quality for phone calls.
+// Telephony-oriented downsampling: 24kHz -> 8kHz (3:1) with anti-aliasing.
+// Uses a 5-tap triangular low-pass filter [1,2,3,2,1]/9 to attenuate
+// frequencies above ~3.5kHz before decimation, preventing aliasing noise.
 function downsample24kTo8kFast(pcm24kBuffer) {
   const inputSamples = Math.floor(pcm24kBuffer.length / 2);
   const outputSamples = Math.floor(inputSamples / 3);
   const out = Buffer.alloc(outputSamples * 2);
 
+  // Helper to safely read a sample (returns 0 for out-of-bounds)
+  const readSample = (idx) => {
+    if (idx < 0 || idx >= inputSamples) return 0;
+    return pcm24kBuffer.readInt16LE(idx * 2);
+  };
+
+  // Triangular kernel: [1, 2, 3, 2, 1] / 9
   for (let i = 0; i < outputSamples; i++) {
-    const idx = i * 3;
-    const s1 = pcm24kBuffer.readInt16LE(idx * 2);
-    const s2 = pcm24kBuffer.readInt16LE((idx + 1) * 2);
-    const s3 = pcm24kBuffer.readInt16LE((idx + 2) * 2);
-    const avg = Math.round((s1 + s2 + s3) / 3);
-    out.writeInt16LE(avg, i * 2);
+    const center = i * 3 + 1; // center of the 3-sample window
+    const filtered = (
+      readSample(center - 2) * 1 +
+      readSample(center - 1) * 2 +
+      readSample(center) * 3 +
+      readSample(center + 1) * 2 +
+      readSample(center + 2) * 1
+    ) / 9;
+    const clamped = Math.max(-32768, Math.min(32767, Math.round(filtered)));
+    out.writeInt16LE(clamped, i * 2);
   }
 
   return out;

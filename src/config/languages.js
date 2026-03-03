@@ -96,13 +96,28 @@ const LANGUAGES = {
     }
 };
 
+// Map bare language codes to full Indian locale codes
+const LOCALE_ALIASES = {
+    'en': 'en-IN',
+    'hi': 'hi-IN',
+    'ta': 'ta-IN',
+    'te': 'te-IN',
+    'bn': 'bn-IN',
+    'mr': 'mr-IN',
+    'kn': 'kn-IN',
+    'gu': 'gu-IN',
+    'ml': 'ml-IN'
+};
+
 /**
  * Get language config by locale code. Falls back to en-IN.
- * @param {string} locale - Locale code like 'hi-IN'
+ * Supports bare codes like 'en' → 'en-IN', 'hi' → 'hi-IN'.
+ * @param {string} locale - Locale code like 'hi-IN' or 'hi'
  * @returns {Object} Language config object
  */
 function getLanguage(locale) {
-    return LANGUAGES[locale] || LANGUAGES['en-IN'];
+    const normalized = LOCALE_ALIASES[locale] || locale;
+    return LANGUAGES[normalized] || LANGUAGES['en-IN'];
 }
 
 /**

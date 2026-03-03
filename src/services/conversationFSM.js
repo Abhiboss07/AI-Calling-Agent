@@ -113,11 +113,11 @@ class ConversationFSM {
     this.direction = direction;
     this.language = language;
     this.config = config;
-    
+
     this.state = States.INIT;
     this.previousState = null;
     this.stateHistory = [];
-    
+
     this.leadData = {
       name: null,
       phone: null,
@@ -130,25 +130,25 @@ class ConversationFSM {
       objections: [],
       availabilityConfirmed: false
     };
-    
+
     this.turnCount = 0;
     this.lastIntent = null;
     this.silenceCount = 0;
     this.interruptCount = 0;
-    
+
     // Intent detection confidence
     this.intentConfidence = 0;
-    
+
     // Conversation context for LLM
     this.context = {
       topic: null,
       lastQuestion: null,
       pendingAnswer: null
     };
-    
+
     this.createdAt = Date.now();
     this.lastActivity = Date.now();
-    
+
     // Pre-generated responses cache
     this.responseCache = new Map();
   }
@@ -175,7 +175,7 @@ class ConversationFSM {
     const newState = Transitions[this.state].transitions[event];
     this.previousState = this.state;
     this.state = newState;
-    
+
     this.stateHistory.push({
       from: this.previousState,
       to: newState,
@@ -183,26 +183,26 @@ class ConversationFSM {
       timestamp: Date.now(),
       data
     });
-    
+
     this.lastActivity = Date.now();
     this.turnCount++;
-    
+
     // Update lead data if provided
     if (data.leadData) {
       Object.assign(this.leadData, data.leadData);
     }
-    
+
     logger.debug(`FSM Transition: ${this.previousState} --${event}--> ${newState}`, {
       sessionId: this.sessionId,
       turnCount: this.turnCount
     });
-    
+
     // Execute onEnter action if defined
     const onEnter = Transitions[newState]?.onEnter;
-    
-    return { 
-      success: true, 
-      state: newState, 
+
+    return {
+      success: true,
+      state: newState,
       previousState: this.previousState,
       action: onEnter,
       data
@@ -213,7 +213,7 @@ class ConversationFSM {
   classifyIntent(transcript) {
     const text = String(transcript || '').toLowerCase().trim();
     if (!text) return { intent: 'silence', confidence: 0 };
-    
+
     // Availability check responses
     if (this.state === States.WAITING_CONFIRMATION || this.state === States.INTRODUCING) {
       if (/\b(yes|haan|haan ji|sure|ok|okay|go ahead|boliye|bolo|theek hai|thik hai|baat karo)\b/i.test(text)) {
@@ -229,7 +229,7 @@ class ConversationFSM {
         return { intent: 'confused', confidence: 0.7 };
       }
     }
-    
+
     // Qualification intents
     const intents = {
       price_inquiry: /\b(price|cost|rate|kitna|price kya|kimat|budget kitna|how much)\b/i,
@@ -245,23 +245,23 @@ class ConversationFSM {
       confused: /\b(confused|samajh nahi|kya|what|repeat|fir se|dubara)\b/i,
       end_call: /\b(bye|goodbye|thanks|thank you|dhanyavaad|dhanyaawad|bas| enough|hang up|disconnect)\b/i
     };
-    
+
     for (const [intent, pattern] of Object.entries(intents)) {
       if (pattern.test(text)) {
         const leadData = {};
         if (intent === 'buy_intent') leadData.intent = 'buy';
         if (intent === 'rent_intent') leadData.intent = 'rent';
         if (intent === 'invest_intent') leadData.intent = 'invest';
-        
+
         return { intent, confidence: 0.8, leadData };
       }
     }
-    
+
     // Default to qualifying if we're in qualification state
     if (this.state === States.QUALIFYING_LEAD) {
       return { intent: 'continue_qualification', confidence: 0.6 };
     }
-    
+
     return { intent: 'unknown', confidence: 0.3 };
   }
 
@@ -270,7 +270,7 @@ class ConversationFSM {
     const classification = this.classifyIntent(transcript);
     this.lastIntent = classification.intent;
     this.intentConfidence = classification.confidence;
-    
+
     // Map intent to event
     const intentToEvent = {
       'yes': 'yes',
@@ -291,23 +291,23 @@ class ConversationFSM {
       'unknown': 'user_speaking',
       'continue_qualification': 'user_speaking'
     };
-    
+
     const event = intentToEvent[classification.intent] || 'user_speaking';
-    
+
     // Try to transition
     if (this.canTransition(event)) {
-      return this.transition(event, { 
+      return this.transition(event, {
         leadData: classification.leadData,
         transcript,
         intent: classification.intent,
         confidence: classification.confidence
       });
     }
-    
+
     // If can't transition, stay in current state
-    return { 
-      success: false, 
-      state: this.state, 
+    return {
+      success: false,
+      state: this.state,
       error: 'No valid transition for intent',
       intent: classification.intent,
       data: classification
@@ -317,32 +317,51 @@ class ConversationFSM {
   // Handle interruption
   handleInterrupt() {
     this.interruptCount++;
-    
+
     if (this.state === States.SPEAKING || this.state === States.INTRODUCING) {
       return this.transition('user_interrupted', { interruptCount: this.interruptCount });
     }
-    
+
     return { success: false, state: this.state };
   }
 
   // Handle silence timeout
   handleSilence() {
     this.silenceCount++;
-    
+
     if (this.silenceCount >= 2 && this.state !== States.CLOSING && this.state !== States.END_CALL) {
       return this.transition('silence_timeout', { silenceCount: this.silenceCount });
     }
-    
+
     return { success: false, state: this.state, silenceCount: this.silenceCount };
+  }
+
+  // Map FSM state to script step for LLM deterministic logic
+  _mapStateToStep() {
+    const stateStepMap = {
+      'INIT': this.direction === 'outbound' ? 'availability_check' : 'inbound_assist',
+      'INTRODUCING': this.direction === 'outbound' ? 'availability_check' : 'inbound_assist',
+      'WAITING_CONFIRMATION': this.direction === 'outbound' ? 'availability_check' : 'purpose',
+      'QUALIFYING_LEAD': 'purpose',
+      'HANDLING_OBJECTION': 'handle',
+      'BOOKING_SITE_VISIT': 'book_visit',
+      'CLOSING': 'close',
+      'END_CALL': 'close',
+      'LISTENING': this.direction === 'outbound' ? 'availability_check' : 'handle',
+      'PROCESSING': 'handle',
+      'SPEAKING': 'handle'
+    };
+    return stateStepMap[this.state] || 'handle';
   }
 
   // Get conversation summary for LLM context
   getLLMContext() {
     const recentHistory = this.stateHistory.slice(-5);
-    
+
     return {
       currentState: this.state,
       previousState: this.previousState,
+      step: this._mapStateToStep(),
       turnCount: this.turnCount,
       direction: this.direction,
       language: this.language,
@@ -366,14 +385,14 @@ class ConversationFSM {
       [States.PROCESSING]: null, // Processing
       [States.SPEAKING]: null // Speaking
     };
-    
+
     return responses[this.state];
   }
 
   getIntroText() {
     const company = this.config.companyName || 'our company';
     const agent = this.config.agentName || 'the assistant';
-    
+
     if (this.direction === 'outbound') {
       if (this.language === 'hi-IN') {
         return `नमस्ते, मैं ${company} से ${agent} बोल रही हूँ। क्या अभी बात करने का सही समय है?`;
@@ -383,7 +402,7 @@ class ConversationFSM {
       }
       return `Hello, this is ${agent} from ${company}. Is this a good time to talk?`;
     }
-    
+
     // Inbound
     if (this.language === 'hi-IN') {
       return `नमस्ते, ${company} में कॉल करने के लिए धन्यवाद। मैं आपकी कैसे मदद कर सकती हूँ?`;
@@ -404,7 +423,7 @@ class ConversationFSM {
       }
       return `Great. Are you looking to buy, rent, or invest?`;
     }
-    
+
     if (!this.leadData.propertyType) {
       if (this.language === 'hi-IN') {
         return `किस तरह की प्रॉपर्टी पसंद करेंगे? अपार्टमेंट, विला, या प्लॉट?`;
@@ -414,7 +433,7 @@ class ConversationFSM {
       }
       return `What type of property are you considering? Apartment, villa, or plot?`;
     }
-    
+
     if (!this.leadData.budget) {
       if (this.language === 'hi-IN') {
         return `क्या बजट रेंज बता सकते हैं?`;
@@ -424,7 +443,7 @@ class ConversationFSM {
       }
       return `What is your budget range?`;
     }
-    
+
     if (!this.leadData.location) {
       if (this.language === 'hi-IN') {
         return `किस लोकेशन में देख रहे हैं?`;
@@ -434,7 +453,7 @@ class ConversationFSM {
       }
       return `Which location are you looking at?`;
     }
-    
+
     // Ready for site visit
     if (this.language === 'hi-IN') {
       return `शानदार। क्या मैं आपके लिए साइट विजिट शेड्यूल कर दूँ?`;
@@ -475,7 +494,7 @@ class ConversationFSM {
       }
       return `Thank you. Our team member will call you shortly. Goodbye.`;
     }
-    
+
     if (this.language === 'hi-IN') {
       return `धन्यवाद आपके समय के लिए। अच्छा दिन रहे।`;
     }
@@ -496,13 +515,13 @@ class ConversationFSM {
   getCachedResponse(key) {
     const cached = this.responseCache.get(key);
     if (!cached) return null;
-    
+
     // Cache expiry: 5 minutes
     if (Date.now() - cached.timestamp > 5 * 60 * 1000) {
       this.responseCache.delete(key);
       return null;
     }
-    
+
     return cached.buffer;
   }
 
