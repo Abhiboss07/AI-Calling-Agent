@@ -795,31 +795,31 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // 2. ECHO COOLDOWN AFTER PLAYBACK
   // ─────────────────────────────────────────────
   if (session._echoCooldownUntil) {
-    if (Date.now() < session._echoCooldownUntil) {
-      // Use echo cooldown audio for post-greeting recalibration
-      if (session._needsPostGreetingCal) {
-        session._postGreetingCalChunks++;
-        if (session._postGreetingCalChunks === 1) {
-          session.noiseFloorRms = rms;
-        } else {
-          session.noiseFloorRms = session.noiseFloorRms * 0.8 + rms * 0.2;
-        }
-        if (session._postGreetingCalChunks >= 25) {
-          session._needsPostGreetingCal = false;
-          if (session.noiseFloorRms < 0.001) session.noiseFloorRms = VAD_THRESHOLD * 0.5;
-          // Cap at 0.15 to prevent residual echo from poisoning the floor
-          session._frozenNoiseFloor = Math.min(session.noiseFloorRms, 0.15);
-          logger.log('Post-greeting recalibration complete', {
-            callSid: session.callSid,
-            noiseFloor: session._frozenNoiseFloor.toFixed(4)
-          });
-        }
-      }
-      return;
+    if (Date.now() < session._echoCooldownUntil) return; // Discard dying echo
+    session._echoCooldownUntil = 0; // Cooldown expired
+    // Fall through to post-greeting recal or normal processing
+  }
+
+  // ─────────────────────────────────────────────
+  // 2b. POST-GREETING RECALIBRATION (AFTER echo dies)
+  // ─────────────────────────────────────────────
+  if (session._needsPostGreetingCal) {
+    session._postGreetingCalChunks++;
+    if (session._postGreetingCalChunks === 1) {
+      session.noiseFloorRms = rms;
+    } else {
+      session.noiseFloorRms = session.noiseFloorRms * 0.8 + rms * 0.2;
     }
-    session._echoCooldownUntil = 0; // Cooldown expired, resume normal listening
-    session._needsPostGreetingCal = false; // Stop recalibration if not done
-    return;
+    if (session._postGreetingCalChunks >= 25) { // 500ms of TRUE line noise
+      session._needsPostGreetingCal = false;
+      if (session.noiseFloorRms < 0.001) session.noiseFloorRms = VAD_THRESHOLD * 0.5;
+      session._frozenNoiseFloor = session.noiseFloorRms;
+      logger.log('Post-greeting recalibration complete', {
+        callSid: session.callSid,
+        noiseFloor: session._frozenNoiseFloor.toFixed(4)
+      });
+    }
+    return; // Block processing during recalibration
   }
 
   // ─────────────────────────────────────────────
