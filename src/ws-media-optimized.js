@@ -47,6 +47,41 @@ function mulawToPcm16(mulawBuffer) {
   return pcm;
 }
 
+// A-LAW decode table (ITU-T G.711 A-law — used by Indian/European PSTN)
+const ALAW_DECODE = new Int16Array(256);
+(function buildAlawTable() {
+  for (let i = 0; i < 256; i++) {
+    let val = i ^ 0x55;
+    let sign = val & 0x80;
+    let exponent = (val >> 4) & 0x07;
+    let mantissa = val & 0x0F;
+    let sample;
+    if (exponent === 0) {
+      sample = (mantissa << 4) + 8;
+    } else {
+      sample = ((mantissa << 4) + 0x108) << (exponent - 1);
+    }
+    ALAW_DECODE[i] = sign ? -sample : sample;
+  }
+})();
+
+function alawToPcm16(alawBuffer) {
+  const pcm = Buffer.alloc(alawBuffer.length * 2);
+  for (let i = 0; i < alawBuffer.length; i++) {
+    const sample = ALAW_DECODE[alawBuffer[i]];
+    pcm.writeInt16LE(sample, i * 2);
+  }
+  return pcm;
+}
+
+// Generic decoder that picks the right codec
+function decodeToPcm16(audioBuffer, encoding) {
+  if (encoding === 'alaw' || encoding === 'audio/x-alaw' || encoding === 'PCMA') {
+    return alawToPcm16(audioBuffer);
+  }
+  return mulawToPcm16(audioBuffer); // default to mulaw
+}
+
 function buildWavBuffer(pcmData) {
   const header = Buffer.alloc(44);
   const dataSize = pcmData.length;
@@ -620,11 +655,11 @@ module.exports = function setupWs(app) {
           initializeSession({ mode: 'binary' });
           if (!session) return;
 
-          const mulawBytes = msgStr;
-          const pcmChunk = mulawToPcm16(mulawBytes);
+          const rawBytes = msgStr;
+          const pcmChunk = decodeToPcm16(rawBytes, session?._audioEncoding);
           const rms = computeRms(pcmChunk);
 
-          processAudioChunk(session, ws, mulawBytes, pcmChunk, rms);
+          processAudioChunk(session, ws, rawBytes, pcmChunk, rms);
           return;
         }
 
@@ -638,6 +673,9 @@ module.exports = function setupWs(app) {
 
         // Start event
         if (msg.event === 'start' || msg.event === 'streamStart') {
+          // Log full start event to capture encoding format
+          logger.log('WS stream start', JSON.stringify(msg).substring(0, 500));
+
           const callUuid = msg.start?.callSid || msg.start?.callUuid || queryCallUuid;
           const callerNumber = msg.start?.customParameters?.callerNumber ||
             msg.start?.customParameters?.from ||
@@ -650,11 +688,23 @@ module.exports = function setupWs(app) {
           const language = msg.start?.customParameters?.language || queryLanguage;
           const direction = msg.start?.customParameters?.direction || queryDirection;
 
+          // Detect audio encoding from start event
+          const encoding = msg.start?.mediaFormat?.encoding
+            || msg.start?.mediaFormat?.codec
+            || msg.media_format?.encoding
+            || msg.encoding
+            || msg.start?.encoding
+            || 'audio/x-mulaw'; // default
+
           const sess = initializeSession({ callUuid, callerNumber, streamSid, language, direction });
 
-          // Stream established. Greeting stays pending until 500ms VAD calibration finishes.
-          if (sess && streamSid) {
-            sess._greetingPending = true;
+          if (sess) {
+            sess._audioEncoding = encoding;
+            logger.log('Audio encoding detected', { callSid: sess.callSid, encoding });
+            // Stream established. Greeting stays pending until 500ms VAD calibration finishes.
+            if (streamSid) {
+              sess._greetingPending = true;
+            }
           }
           return;
         }
@@ -671,11 +721,11 @@ module.exports = function setupWs(app) {
           initializeSession({ callUuid, mode: 'media' });
           if (!session) return;
 
-          const mulawBytes = Buffer.from(payload, 'base64');
-          const pcmChunk = mulawToPcm16(mulawBytes);
+          const rawBytes = Buffer.from(payload, 'base64');
+          const pcmChunk = decodeToPcm16(rawBytes, session?._audioEncoding);
           const rms = computeRms(pcmChunk);
 
-          processAudioChunk(session, ws, mulawBytes, pcmChunk, rms);
+          processAudioChunk(session, ws, rawBytes, pcmChunk, rms);
           return;
         }
 
@@ -805,18 +855,50 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // ─────────────────────────────────────────────
   if (session._needsPostGreetingCal) {
     session._postGreetingCalChunks++;
+
+    // Store first chunk for encoding auto-detection
     if (session._postGreetingCalChunks === 1) {
+      session._calSampleRaw = mulawBytes; // save raw bytes for re-decode test
       session.noiseFloorRms = rms;
     } else {
       session.noiseFloorRms = session.noiseFloorRms * 0.8 + rms * 0.2;
     }
+
     if (session._postGreetingCalChunks >= 25) { // 500ms of TRUE line noise
       session._needsPostGreetingCal = false;
+
+      // AUTO-DETECT ENCODING: if noise floor is absurdly high, try alternate codec
+      if (session.noiseFloorRms > 0.50 && session._calSampleRaw) {
+        const currentEnc = session._audioEncoding || 'audio/x-mulaw';
+        const isCurrentMulaw = !currentEnc.includes('alaw') && currentEnc !== 'PCMA';
+        const altDecoder = isCurrentMulaw ? alawToPcm16 : mulawToPcm16;
+        const altName = isCurrentMulaw ? 'audio/x-alaw' : 'audio/x-mulaw';
+        const altPcm = altDecoder(session._calSampleRaw);
+        const altRms = computeRms(altPcm);
+
+        logger.log('Encoding auto-detect', {
+          callSid: session.callSid,
+          currentEncoding: currentEnc,
+          currentRms: session.noiseFloorRms.toFixed(4),
+          altEncoding: altName,
+          altRms: altRms.toFixed(4)
+        });
+
+        if (altRms < session.noiseFloorRms * 0.5) {
+          // Alternate encoding is significantly quieter => switch!
+          session._audioEncoding = altName;
+          session.noiseFloorRms = altRms;
+          logger.log('Switched audio encoding', { callSid: session.callSid, to: altName, newRms: altRms.toFixed(4) });
+        }
+      }
+      delete session._calSampleRaw;
+
       if (session.noiseFloorRms < 0.001) session.noiseFloorRms = VAD_THRESHOLD * 0.5;
       session._frozenNoiseFloor = session.noiseFloorRms;
       logger.log('Post-greeting recalibration complete', {
         callSid: session.callSid,
-        noiseFloor: session._frozenNoiseFloor.toFixed(4)
+        noiseFloor: session._frozenNoiseFloor.toFixed(4),
+        encoding: session._audioEncoding
       });
     }
     return; // Block processing during recalibration
