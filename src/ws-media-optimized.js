@@ -76,16 +76,9 @@ function alawToPcm16(alawBuffer) {
 
 // Generic decoder that picks the right codec
 function decodeToPcm16(audioBuffer, encoding) {
-  // LINEAR PCM (16-bit) — already PCM, just needs big-endian → little-endian byte swap
+  // LINEAR PCM (16-bit) - Vobiz sends little-endian L16 (native byte order)
   if (encoding === 'audio/x-l16' || encoding === 'l16' || encoding === 'linear16') {
-    // RFC 3551: audio/x-l16 is big-endian (network byte order)
-    // Our WAV/RMS functions expect little-endian, so swap bytes
-    const pcm = Buffer.alloc(audioBuffer.length);
-    for (let i = 0; i < audioBuffer.length - 1; i += 2) {
-      pcm[i] = audioBuffer[i + 1];
-      pcm[i + 1] = audioBuffer[i];
-    }
-    return pcm;
+    return audioBuffer; // Already correct little-endian PCM16
   }
   if (encoding === 'alaw' || encoding === 'audio/x-alaw' || encoding === 'PCMA') {
     return alawToPcm16(audioBuffer);
