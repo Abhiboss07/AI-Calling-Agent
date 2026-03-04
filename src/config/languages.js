@@ -96,17 +96,39 @@ const LANGUAGES = {
     }
 };
 
-// Map bare language codes to full Indian locale codes
+// Map common language inputs to supported locale codes.
 const LOCALE_ALIASES = {
     'en': 'en-IN',
+    'en-in': 'en-IN',
+    'english': 'en-IN',
     'hi': 'hi-IN',
+    'hi-in': 'hi-IN',
+    'hindi': 'hi-IN',
+    'hinglish': 'hinglish',
+    'hi-en': 'hinglish',
+    'en-hi': 'hinglish',
+    'hindi-english': 'hinglish',
     'ta': 'ta-IN',
+    'ta-in': 'ta-IN',
+    'tamil': 'ta-IN',
     'te': 'te-IN',
+    'te-in': 'te-IN',
+    'telugu': 'te-IN',
     'bn': 'bn-IN',
+    'bn-in': 'bn-IN',
+    'bengali': 'bn-IN',
     'mr': 'mr-IN',
+    'mr-in': 'mr-IN',
+    'marathi': 'mr-IN',
     'kn': 'kn-IN',
+    'kn-in': 'kn-IN',
+    'kannada': 'kn-IN',
     'gu': 'gu-IN',
-    'ml': 'ml-IN'
+    'gu-in': 'gu-IN',
+    'gujarati': 'gu-IN',
+    'ml': 'ml-IN',
+    'ml-in': 'ml-IN',
+    'malayalam': 'ml-IN'
 };
 
 /**
@@ -115,8 +137,24 @@ const LOCALE_ALIASES = {
  * @param {string} locale - Locale code like 'hi-IN' or 'hi'
  * @returns {Object} Language config object
  */
-function getLanguage(locale) {
-    const normalized = LOCALE_ALIASES[locale] || locale;
+function normalizeLanguageCode(locale, fallback = 'en-IN') {
+    const raw = String(locale || '').trim();
+    const fallbackRaw = String(fallback || 'en-IN').trim();
+
+    if (!raw) {
+        const normalizedFallback = LOCALE_ALIASES[fallbackRaw.toLowerCase()] || fallbackRaw;
+        return LANGUAGES[normalizedFallback] ? normalizedFallback : 'en-IN';
+    }
+
+    const normalized = LOCALE_ALIASES[raw.toLowerCase()] || raw;
+    if (LANGUAGES[normalized]) return normalized;
+
+    const normalizedFallback = LOCALE_ALIASES[fallbackRaw.toLowerCase()] || fallbackRaw;
+    return LANGUAGES[normalizedFallback] ? normalizedFallback : 'en-IN';
+}
+
+function getLanguage(locale, fallback = 'en-IN') {
+    const normalized = normalizeLanguageCode(locale, fallback);
     return LANGUAGES[normalized] || LANGUAGES['en-IN'];
 }
 
@@ -126,7 +164,10 @@ function getLanguage(locale) {
  * @returns {boolean}
  */
 function isSupported(locale) {
-    return !!LANGUAGES[locale];
+    const raw = String(locale || '').trim();
+    if (!raw) return false;
+    const normalized = LOCALE_ALIASES[raw.toLowerCase()] || raw;
+    return !!LANGUAGES[normalized];
 }
 
 /**
@@ -137,5 +178,5 @@ function getSupportedLocales() {
     return Object.keys(LANGUAGES);
 }
 
-module.exports = { LANGUAGES, getLanguage, isSupported, getSupportedLocales };
+module.exports = { LANGUAGES, getLanguage, isSupported, getSupportedLocales, normalizeLanguageCode };
 

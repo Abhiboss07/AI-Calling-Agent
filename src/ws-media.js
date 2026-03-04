@@ -11,7 +11,7 @@ const metrics = require('./services/metrics');
 const costControl = require('./services/costControl');
 const storage = require('./services/storage');
 const { monitoringServer } = require('./services/monitoring');
-const { getLanguage } = require('./config/languages');
+const { getLanguage, normalizeLanguageCode: normalizeLanguageFromRegistry } = require('./config/languages');
 const { retry } = require('./utils/retry');
 
 function normalizeDirection(direction) {
@@ -19,10 +19,7 @@ function normalizeDirection(direction) {
 }
 
 function normalizeLanguageCode(language) {
-  const raw = String(language || '').trim().toLowerCase();
-  if (!raw) return 'en-IN';
-  if (raw === 'hinglish' || raw === 'hi-en' || raw === 'en-hi' || raw === 'hindi-english') return 'hinglish';
-  return language;
+  return normalizeLanguageFromRegistry(language, config.language?.default || 'en-IN');
 }
 
 function isHindiScript(text) {
@@ -1356,5 +1353,4 @@ setInterval(() => {
     logger.warn('Suspicious sessions count â€” possible leak', sessions.size);
   }
 }, 60000);
-
 

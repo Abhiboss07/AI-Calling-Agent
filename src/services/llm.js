@@ -5,7 +5,7 @@ const metrics = require('./metrics');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
-const { getLanguage } = require('../config/languages');
+const { getLanguage, normalizeLanguageCode } = require('../config/languages');
 
 let SYSTEM_PROMPT = '';
 try {
@@ -72,15 +72,6 @@ const FALLBACK_RESPONSE = {
   qualityScore: 0,
   reasoning: 'fallback'
 };
-
-function normalizeLanguageCode(language) {
-  if (!language) return config.language?.default || 'en-IN';
-  const raw = String(language).trim().toLowerCase();
-  if (raw === 'hinglish' || raw === 'hi-en' || raw === 'en-hi' || raw === 'hindi-english') {
-    return 'hinglish';
-  }
-  return language;
-}
 
 function normalizeHeardText(text = '') {
   const out = String(text || '').trim().toLowerCase();

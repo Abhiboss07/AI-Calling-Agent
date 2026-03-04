@@ -2,6 +2,7 @@ const openai = require('./openaiClient');
 const logger = require('../utils/logger');
 const metrics = require('./metrics');
 const costControl = require('./costControl');
+const { getLanguage, normalizeLanguageCode } = require('../config/languages');
 
 function normalizeTranscriptText(text) {
   let out = String(text || '').trim();
@@ -22,7 +23,7 @@ function normalizeTranscriptText(text) {
 }
 
 // Input: WAV buffer (8kHz mono 16-bit PCM with proper header)
-async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') {
+async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN') {
   if (!buffer || buffer.length === 0) {
     return { text: '', confidence: 0, empty: true };
   }
@@ -48,9 +49,12 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en') 
     metrics.incrementSttRequest(true);
 
     const langCode = String(language || '').toLowerCase().trim();
-    const whisperLang = (langCode && langCode !== 'auto' && !langCode.startsWith('en') && langCode !== 'hinglish')
-      ? langCode.split('-')[0]
-      : undefined;
+    let whisperLang;
+    if (langCode && langCode !== 'auto') {
+      const normalizedLanguage = normalizeLanguageCode(language, 'en-IN');
+      const langConfig = getLanguage(normalizedLanguage);
+      whisperLang = langConfig?.whisperCode || undefined;
+    }
 
     const resp = await openai.transcribeAudio(buffer, mime, whisperLang);
     const latencyMs = Date.now() - startMs;

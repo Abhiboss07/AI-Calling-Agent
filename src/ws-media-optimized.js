@@ -19,7 +19,7 @@ const metrics = require('./services/metrics');
 const costControl = require('./services/costControlOptimized');
 const { ConversationFSM, States } = require('./services/conversationFSM');
 const config = require('./config');
-const { getLanguage } = require('./config/languages');
+const { getLanguage, normalizeLanguageCode: normalizeLanguageFromRegistry } = require('./config/languages');
 
 // MULAW ↔ PCM conversion tables
 const MULAW_DECODE = new Int16Array(256);
@@ -324,12 +324,7 @@ class EnhancedCallSession {
   }
 
   normalizeLanguageCode(language) {
-    if (!language) return config.language?.default || 'en-IN';
-    const raw = String(language).trim().toLowerCase();
-    if (raw === 'hinglish' || raw === 'hi-en' || raw === 'en-hi') return 'hinglish';
-    // Map bare codes to full Indian locale codes
-    const BARE_MAP = { 'en': 'en-IN', 'hi': 'hi-IN', 'ta': 'ta-IN', 'te': 'te-IN', 'bn': 'bn-IN', 'mr': 'mr-IN', 'kn': 'kn-IN', 'gu': 'gu-IN', 'ml': 'ml-IN' };
-    return BARE_MAP[raw] || language;
+    return normalizeLanguageFromRegistry(language, config.language?.default || 'en-IN');
   }
 
   // Cancel any ongoing pipeline operations
@@ -560,9 +555,10 @@ module.exports = function setupWs(app) {
     const queryCallUuid = req.query?.callUuid;
     const queryCallerNumber = req.query?.callerNumber || '';
     // Normalize language at parse time: 'en' → 'en-IN', 'hi' → 'hi-IN', etc.
-    const BARE_LANG_MAP = { 'en': 'en-IN', 'hi': 'hi-IN', 'ta': 'ta-IN', 'te': 'te-IN', 'bn': 'bn-IN', 'mr': 'mr-IN', 'kn': 'kn-IN', 'gu': 'gu-IN', 'ml': 'ml-IN' };
-    const rawLang = (req.query?.language || config.language?.default || 'en-IN').trim().toLowerCase();
-    const queryLanguage = BARE_LANG_MAP[rawLang] || rawLang;
+    const queryLanguage = normalizeLanguageFromRegistry(
+      req.query?.language || config.language?.default || 'en-IN',
+      config.language?.default || 'en-IN'
+    );
     const queryDirection = req.query?.direction === 'outbound' ? 'outbound' : 'inbound';
 
     // Initialize session

@@ -74,7 +74,7 @@ export async function fetchWallet() {
     return res.json();
 }
 
-export async function fetchStartCall(campaignId, phoneNumber, language = 'en') {
+export async function fetchStartCall(campaignId, phoneNumber, language = 'en-IN') {
     const res = await fetch(`${API_BASE}/v1/calls/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },

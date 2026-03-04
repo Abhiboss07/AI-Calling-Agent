@@ -6,7 +6,7 @@ const logger = require('../utils/logger');
 const Call = require('../models/call.model');
 const metrics = require('../services/metrics');
 const costControl = require('../services/costControl');
-const { getLanguage } = require('../config/languages');
+const { normalizeLanguageCode } = require('../config/languages');
 
 // FIX H2: Rate limiting for webhook endpoints
 const webhookLimitMap = new Map();
@@ -116,9 +116,14 @@ router.post('/answer', webhookRateLimit(60000, 100), validateVobizSignature, asy
     const normalizedDirection = String(direction).toLowerCase() === 'outbound' ? 'outbound' : 'inbound';
     const customerNumber = normalizedDirection === 'outbound' ? to : from;
 
-    // Extract language from custom parameters or use default
-    const language = req.body?.language || req.query?.language || config.language.default;
-    const langConfig = getLanguage(language);
+    // Normalize language from webhook/query inputs.
+    const requestedLanguage =
+        req.body?.language
+        || req.body?.Language
+        || req.query?.language
+        || req.query?.Language
+        || config.language.default;
+    const language = normalizeLanguageCode(requestedLanguage, config.language?.default || 'en-IN');
 
     logger.log('📞 Answer webhook', { callUuid, from, to, direction: normalizedDirection, customerNumber, language });
 
@@ -151,12 +156,21 @@ router.post('/answer', webhookRateLimit(60000, 100), validateVobizSignature, asy
     const statusUrl = `${publicBaseUrl}/vobiz/stream-status`;
     const streamUrl = `${publicBaseUrl.replace(/^http/i, 'ws')}/stream`;
 
+    const streamQuery = [
+        `callUuid=${encodeURIComponent(String(callUuid))}`,
+        `callerNumber=${encodeURIComponent(String(customerNumber || ''))}`,
+        `direction=${encodeURIComponent(normalizedDirection)}`,
+        `language=${encodeURIComponent(language)}`
+    ].join('&');
+    const streamWsUrl = `${streamUrl}?${streamQuery}`;
+
     const xml = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<Response>',
         // Bidirectional stream — call stays alive as long as WS is open
         // URL must be clean (no leading whitespace/newlines) for Vobiz to parse correctly
-        `  <Stream bidirectional="true" keepCallAlive="true" audioTrack="inbound_track" statusCallbackUrl="${xmlEscape(statusUrl)}" statusCallbackMethod="POST">${streamUrl}?callUuid=${callUuid}&amp;callerNumber=${xmlEscape(customerNumber)}&amp;direction=${xmlEscape(normalizedDirection)}&amp;language=${xmlEscape(language)}</Stream>`,
+        // Vobiz requires inbound audio track when bidirectional=true.
+        `  <Stream bidirectional="true" keepCallAlive="true" audioTrack="inbound" statusCallbackUrl="${xmlEscape(statusUrl)}" statusCallbackMethod="POST">${xmlEscape(streamWsUrl)}</Stream>`,
         '</Response>'
     ].join('\n');
 

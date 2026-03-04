@@ -13,6 +13,7 @@ const storage = require('../services/storage');
 const UploadLog = require('../models/uploadLog.model');
 const Document = require('../models/document.model');
 const multer = require('multer');
+const { normalizeLanguageCode } = require('../config/languages');
 
 // Configure Multer for in-memory uploads (process or forward to S3)
 const upload = multer({
@@ -46,13 +47,15 @@ router.post('/v1/calls/test-start', async (req, res) => {
 
     console.log(' Test call initiated', { campaignId, phoneNumber, fromNumber, language, agentName, testMode });
 
+    const normalizedLanguage = normalizeLanguageCode(language || config.language?.default || 'en-IN');
+
     // Create call record directly (no Vobiz integration for test)
     const call = await Call.create({
       phoneNumber: cleanPhone,
       callSid: `test-${Date.now()}`,
       status: 'test-initiated',
       direction: 'test',
-      language: language || 'en-IN',
+      language: normalizedLanguage,
       startAt: new Date(),
       metadata: {
         testMode: true,
@@ -132,7 +135,7 @@ router.post('/v1/calls/start', async (req, res) => {
       }, { $set: { status: 'failed' } });
     }
 
-    const callLanguage = language || config.language?.default || 'en-IN';
+    const callLanguage = normalizeLanguageCode(language || config.language?.default || 'en-IN');
     const publicBaseUrl = getPublicBaseUrl(req);
     const answerUrl = `${publicBaseUrl}/vobiz/answer?language=${encodeURIComponent(callLanguage)}`;
     const hangupUrl = `${publicBaseUrl}/vobiz/hangup`;
