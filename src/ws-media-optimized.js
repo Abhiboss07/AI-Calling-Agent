@@ -160,7 +160,7 @@ const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
 const ECHO_COOLDOWN_MS = 800;   // Discard audio for 800ms after playback ends (Vobiz has no AEC)
 const MAX_SPEECH_DURATION_MS = 3000; // Force processing after 3s of continuous speech for fast responses
 const NOISE_CALIBRATION_CHUNKS = 25; // ~500ms of audio to calibrate noise floor after cool-down
-const VOICE_MARGIN = 0.08; // Voice must exceed noise floor by this ADDITIVE margin
+const VOICE_MARGIN = 0.03; // Additive margin above noise floor for voice detection (lowered for L16 linear PCM)
 const PRE_SPEECH_CHUNKS = config.pipeline.preSpeechChunks || 6;
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -915,6 +915,18 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   const floor = session._frozenNoiseFloor || VAD_THRESHOLD * 0.6;
   const dynamicThreshold = Math.max(VAD_THRESHOLD, floor + VOICE_MARGIN);
   const hasVoice = rms >= dynamicThreshold;
+
+  // Periodic RMS logging (every 1s) to diagnose speech detection
+  session._rmsLogCounter = (session._rmsLogCounter || 0) + 1;
+  if (session._rmsLogCounter % 50 === 0) {
+    logger.log('RMS check', {
+      callSid: session.callSid,
+      rms: rms.toFixed(4),
+      threshold: dynamicThreshold.toFixed(4),
+      hasVoice,
+      isSpeaking: session.isSpeaking
+    });
+  }
 
   // ─────────────────────────────────────────────
   // 5. SPEECH DETECTION
