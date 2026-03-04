@@ -4,6 +4,17 @@ const metrics = require('./metrics');
 const costControl = require('./costControl');
 const { getLanguage, normalizeLanguageCode } = require('../config/languages');
 
+function computePcm16Rms(pcmBuffer) {
+  if (!pcmBuffer || pcmBuffer.length < 2) return 0;
+  const sampleCount = Math.floor(pcmBuffer.length / 2);
+  let sumSq = 0;
+  for (let i = 0; i < sampleCount; i++) {
+    const sample = pcmBuffer.readInt16LE(i * 2) / 32768;
+    sumSq += sample * sample;
+  }
+  return Math.sqrt(sumSq / sampleCount);
+}
+
 function normalizeTranscriptText(text) {
   let out = String(text || '').trim();
   if (!out) return '';
@@ -43,6 +54,14 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
   // WAV at 8kHz mono 16-bit => 16000 bytes/sec
   const dataBytes = Math.max(0, buffer.length - 44);
   const durationSec = dataBytes / 16000;
+  const pcmRms = computePcm16Rms(buffer.subarray(44));
+
+  // Drop ultra-low-energy short snippets before paying Whisper cost.
+  // This avoids false transcriptions from line hiss/comfort noise.
+  if (durationSec <= 0.8 && pcmRms < 0.0015) {
+    logger.log(`STT: prefilter low-energy audio skipped (${durationSec.toFixed(1)}s, rms=${pcmRms.toFixed(4)})`, { callSid });
+    return { text: '', confidence: 0, empty: true };
+  }
 
   try {
     const startMs = Date.now();
@@ -60,6 +79,9 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
     const latencyMs = Date.now() - startMs;
     const rawText = String(resp.text || '').trim();
     const text = normalizeTranscriptText(rawText);
+    const confidence = resp?.segments?.[0]?.avg_logprob
+      ? Math.exp(resp.segments[0].avg_logprob)
+      : 0.8;
 
     // Log raw Whisper output BEFORE any filtering (critical for debugging)
     logger.log(`STT raw (${latencyMs}ms, ${durationSec.toFixed(1)}s audio): "${rawText}"`, { callSid });
@@ -88,13 +110,38 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
       return { text: '', confidence: 0, empty: true };
     }
 
+    // Additional short-utterance guard for common Whisper noise artifacts.
+    if (durationSec <= 0.8) {
+      const SAFE_SHORT_UTTERANCES = new Set([
+        'yes', 'no', 'ok', 'okay', 'hello',
+        'haan', 'haan ji', 'han', 'ji',
+        'nahi', 'nahin', 'hmm', 'hmmm'
+      ]);
+      const SHORT_AMBIGUOUS = new Set([
+        'and i\'ll', 'oh', 'uh', 'uhh', 'huh',
+        'margaret', 'margaret?'
+      ]);
+
+      const words = lowerText.split(/\s+/).filter(Boolean);
+      const looksAmbiguousShort = SHORT_AMBIGUOUS.has(lowerText)
+        || (words.length <= 2 && confidence < 0.55 && !SAFE_SHORT_UTTERANCES.has(lowerText));
+
+      if (looksAmbiguousShort) {
+        logger.log(`STT: short ambiguous filtered "${text}"`, {
+          callSid,
+          latencyMs,
+          durationSec: Number(durationSec.toFixed(2)),
+          confidence: Number(confidence.toFixed(2))
+        });
+        return { text: '', confidence: 0, empty: true };
+      }
+    }
+
     logger.log(`STT: "${text}" (${latencyMs}ms, ${durationSec.toFixed(1)}s audio)`, { callSid });
 
     return {
       text,
-      confidence: resp?.segments?.[0]?.avg_logprob
-        ? Math.exp(resp.segments[0].avg_logprob)
-        : 0.8,
+      confidence,
       empty: false,
       latencyMs,
       audioDurationSec: durationSec

@@ -1014,7 +1014,8 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     session.isSpeaking = false;
     session.speechStartedAt = null;
 
-    if (session.totalPcmBytes >= MIN_UTTERANCE_BYTES * 0.6) {
+    const minProcessBytes = Math.max(MIN_UTTERANCE_BYTES, 8000); // ~0.5s @ 8kHz PCM16
+    if (session.totalPcmBytes >= minProcessBytes) {
       triggerProcessing(session, ws);
     } else {
       clearBuffers(session);
@@ -1100,7 +1101,18 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   // 1. STT
   const pcmData = Buffer.concat(pcmChunks);
   const wavBuffer = buildWavBuffer(pcmData);
-  const audioDurationSec = Math.max(0, pcmData.length - 44) / 16000;
+  const audioDurationSec = pcmData.length / 16000;
+  const utteranceRms = computeRms(pcmData);
+
+  if (audioDurationSec <= 0.8 && utteranceRms < 0.0018) {
+    logger.log('Skipping low-energy utterance before STT', {
+      callSid: session.callSid,
+      pcmBytes: pcmData.length,
+      audioDuration: `${audioDurationSec.toFixed(1)}s`,
+      rms: utteranceRms.toFixed(4)
+    });
+    return;
+  }
 
   logger.log('STT input', {
     callSid: session.callSid,
@@ -1178,14 +1190,15 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   let firstChunkMs = 0;
   let fullSentence = '';
   let finalAction = null;
-  let isFirstSentence = true;
+  let ttsLatencyTotal = 0;
 
   // Process LLM in streaming mode
   for await (const chunk of replyStream) {
     if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
 
     if (chunk.type === 'sentence') {
-      let sentence = chunk.text;
+      let sentence = String(chunk.text || '').trim();
+      if (!sentence) continue;
 
       if (firstChunkMs === 0) {
         firstChunkMs = Date.now() - llmStart;
@@ -1198,20 +1211,19 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
 
       fullSentence += sentence + ' ';
 
-      // Fire and forget TTS synthesis stream
-      const ttsStream = tts.synthesizeStream(sentence, session.callSid, session.language);
+      const ttsStart = Date.now();
+      const ttsResult = await tts.synthesizeRaw(sentence, session.callSid, session.language);
+      ttsLatencyTotal += (Date.now() - ttsStart);
 
-      // Start streaming audio to the websocket concurrently for THIS sentence
-      (async () => {
-        try {
-          for await (const mulawChunk of ttsStream) {
-            if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
-            await sendAudioThroughStream(session, ws, mulawChunk, { skipPacing: false, fastStart: isFirstSentence });
-          }
-        } catch (e) { logger.error('TTS streaming playback error', e.message); }
-      })();
-
-      isFirstSentence = false;
+      if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
+      if (ttsResult?.mulawBuffer && ws.readyState === 1) {
+        await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
+      } else {
+        logger.warn('Reply TTS synthesis failed, skipping audio', {
+          callSid: session.callSid,
+          sentenceChars: sentence.length
+        });
+      }
     } else {
       // Must be the final parsed JSON response returned from the stream 
       finalAction = chunk.action;
@@ -1231,7 +1243,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   });
 
   session.fsm.transition('speech_complete');
-  metrics.addPipelineLatency(sttLatency, completeLatency, 0); // TTS latency is interleaved now
+  metrics.addPipelineLatency(sttLatency, completeLatency, ttsLatencyTotal);
 
   // Handle actions
   if (finalAction === 'hangup' || finalAction === 'escalate') {
