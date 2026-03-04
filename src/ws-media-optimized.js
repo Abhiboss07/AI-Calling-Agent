@@ -160,7 +160,7 @@ const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
 const ECHO_COOLDOWN_MS = 800;   // Discard audio for 800ms after playback ends (Vobiz has no AEC)
 const MAX_SPEECH_DURATION_MS = 3000; // Force processing after 3s of continuous speech for fast responses
 const NOISE_CALIBRATION_CHUNKS = 25; // ~500ms of audio to calibrate noise floor after cool-down
-const VOICE_MARGIN = 0.03; // Additive margin above noise floor for voice detection (lowered for L16 linear PCM)
+const VOICE_MARGIN = 0.006; // Additive margin above noise floor for voice detection (tuned for extremely quiet L16 PSTN audio)
 const PRE_SPEECH_CHUNKS = config.pipeline.preSpeechChunks || 6;
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -927,6 +927,11 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // ─────────────────────────────────────────────
   // 3. FROZEN NOISE FLOOR THRESHOLD
   // ─────────────────────────────────────────────
+  // Smoothly track downward if measured noise is consistently lower than the frozen floor
+  if (session._frozenNoiseFloor && !session.isSpeaking && rms < session._frozenNoiseFloor) {
+    session._frozenNoiseFloor = (session._frozenNoiseFloor * 0.99) + (rms * 0.01);
+  }
+
   // Additive margin applied to frozen network floor
   const floor = session._frozenNoiseFloor || VAD_THRESHOLD * 0.6;
   const dynamicThreshold = Math.max(VAD_THRESHOLD, floor + VOICE_MARGIN);
