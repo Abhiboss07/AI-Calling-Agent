@@ -726,6 +726,22 @@ module.exports = function setupWs(app) {
           if (!session) return;
 
           const rawBytes = Buffer.from(payload, 'base64');
+
+          // Diagnostic: log first 5 media chunks to see raw data
+          session._mediaLogCount = (session._mediaLogCount || 0) + 1;
+          if (session._mediaLogCount <= 5) {
+            logger.log('Media payload dump', {
+              callSid: session.callSid,
+              chunk: session._mediaLogCount,
+              track: msg.media?.track || 'none',
+              payloadLen: payload.length,
+              rawLen: rawBytes.length,
+              hexFirst20: rawBytes.slice(0, 20).toString('hex'),
+              encoding: session._audioEncoding,
+              msgKeys: Object.keys(msg.media || msg).join(',')
+            });
+          }
+
           const pcmChunk = decodeToPcm16(rawBytes, session?._audioEncoding);
           const rms = computeRms(pcmChunk);
 
