@@ -221,7 +221,7 @@ function decodeL16ToPcm16(audioBuffer, session) {
 }
 
 function getNoiseFloorCap(session) {
-  return session?._audioCodec === 'l16' ? 0.006 : 0.15;
+  return session?._audioCodec === 'l16' ? 0.001 : 0.15;
 }
 
 function canStartGreeting(session) {

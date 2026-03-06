@@ -118,18 +118,23 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
     // Additional short-utterance guard for common Whisper noise artifacts.
     if (durationSec <= 0.8) {
       const SAFE_SHORT_UTTERANCES = new Set([
-        'yes', 'no', 'ok', 'okay', 'hello',
-        'haan', 'haan ji', 'han', 'ji',
-        'nahi', 'nahin', 'hmm', 'hmmm'
+        'yes', 'no', 'ok', 'okay', 'hello', 'hi', 'hey',
+        'haan', 'haan ji', 'han', 'ji', 'ha', 'ha ji',
+        'nahi', 'nahin', 'hmm', 'hmmm', 'accha', 'achha',
+        'namaste', 'namaskar', 'theek hai', 'thik hai',
+        'bilkul', 'zaroor', 'boliye', 'bolo', 'haa',
+        'sure', 'yeah', 'yep', 'right', 'correct'
       ]);
       const SHORT_AMBIGUOUS = new Set([
         'and i\'ll', 'oh', 'uh', 'uhh', 'huh',
         'margaret', 'margaret?'
       ]);
 
-      const words = lowerText.split(/\s+/).filter(Boolean);
-      const looksAmbiguousShort = SHORT_AMBIGUOUS.has(lowerText)
-        || (words.length <= 2 && confidence < 0.55 && !SAFE_SHORT_UTTERANCES.has(lowerText));
+      // Strip punctuation for safe utterance matching ("Hello." → "hello")
+      const strippedText = lowerText.replace(/[^a-z0-9\s]/gi, '').trim();
+      const words = strippedText.split(/\s+/).filter(Boolean);
+      const looksAmbiguousShort = SHORT_AMBIGUOUS.has(strippedText)
+        || (words.length <= 2 && confidence < 0.55 && !SAFE_SHORT_UTTERANCES.has(strippedText));
 
       if (looksAmbiguousShort) {
         logger.log(`STT: short ambiguous filtered "${text}"`, {
