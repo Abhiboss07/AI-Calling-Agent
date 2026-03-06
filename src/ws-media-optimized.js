@@ -237,13 +237,46 @@ function pcmBufferToMulaw(pcmBuffer) {
 
 function computeRms(pcmBuffer) {
   if (pcmBuffer.length < 2) return 0;
-  let sumSq = 0;
   const numSamples = Math.floor(pcmBuffer.length / 2);
+  if (numSamples <= 0) return 0;
+
+  // Remove DC component before RMS to avoid false VAD on biased L16 silence.
+  let mean = 0;
   for (let i = 0; i < numSamples; i++) {
-    const sample = pcmBuffer.readInt16LE(i * 2) / 32768.0;
+    mean += pcmBuffer.readInt16LE(i * 2);
+  }
+  mean /= numSamples;
+
+  let sumSq = 0;
+  for (let i = 0; i < numSamples; i++) {
+    const sample = (pcmBuffer.readInt16LE(i * 2) - mean) / 32768.0;
     sumSq += sample * sample;
   }
   return Math.sqrt(sumSq / numSamples);
+}
+
+function removeDcOffset(pcmBuffer) {
+  const numSamples = Math.floor(pcmBuffer.length / 2);
+  if (numSamples <= 0) return pcmBuffer;
+
+  let mean = 0;
+  for (let i = 0; i < numSamples; i++) {
+    mean += pcmBuffer.readInt16LE(i * 2);
+  }
+  mean /= numSamples;
+
+  // Skip copy when no meaningful offset is present.
+  if (Math.abs(mean) < 8) return pcmBuffer;
+
+  const centered = Buffer.alloc(numSamples * 2);
+  for (let i = 0; i < numSamples; i++) {
+    let sample = pcmBuffer.readInt16LE(i * 2) - mean;
+    if (sample > 32767) sample = 32767;
+    else if (sample < -32768) sample = -32768;
+    centered.writeInt16LE(Math.round(sample), i * 2);
+  }
+
+  return centered;
 }
 
 // Tuning constants
@@ -816,7 +849,7 @@ module.exports = function setupWs(app) {
           if (!session) return;
 
           const rawBytes = msgStr;
-          const pcmChunk = decodeToPcm16(rawBytes, session);
+          const pcmChunk = removeDcOffset(decodeToPcm16(rawBytes, session));
           const rms = computeRms(pcmChunk);
 
           processAudioChunk(session, ws, rawBytes, pcmChunk, rms);
@@ -915,7 +948,7 @@ module.exports = function setupWs(app) {
             });
           }
 
-          const pcmChunk = decodeToPcm16(rawBytes, session);
+          const pcmChunk = removeDcOffset(decodeToPcm16(rawBytes, session));
           const rms = computeRms(pcmChunk);
 
           processAudioChunk(session, ws, rawBytes, pcmChunk, rms);
