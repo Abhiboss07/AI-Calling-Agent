@@ -133,6 +133,40 @@ function swapPcm16Endian(buffer) {
   return out;
 }
 
+function scoreL16PcmQuality(pcmBuffer) {
+  const numSamples = Math.floor(pcmBuffer.length / 2);
+  if (numSamples <= 0) {
+    return { score: Number.POSITIVE_INFINITY, quantizedRatio: 1, clippedRatio: 0, meanAbs: 0 };
+  }
+
+  let quantized = 0;
+  let clipped = 0;
+  let absSum = 0;
+
+  for (let i = 0; i < numSamples; i++) {
+    const sample = pcmBuffer.readInt16LE(i * 2);
+    const abs = Math.abs(sample);
+    absSum += abs;
+
+    // Byte-swapped PCM often produces values clustered near 0x??00 / 0x??FF.
+    const lowByte = abs & 0xff;
+    if (lowByte <= 1 || lowByte >= 0xfe) quantized++;
+    if (abs >= 32000) clipped++;
+  }
+
+  const meanAbs = absSum / numSamples;
+  const quantizedRatio = quantized / numSamples;
+  const clippedRatio = clipped / numSamples;
+
+  // Lower score => more speech-like / less endian-artifact.
+  const score =
+    (quantizedRatio * 8.0) +
+    (clippedRatio * 3.0) +
+    ((meanAbs / 32768) * 0.5);
+
+  return { score, quantizedRatio, clippedRatio, meanAbs };
+}
+
 function decodeL16ToPcm16(audioBuffer, session) {
   const usableLen = audioBuffer.length - (audioBuffer.length % 2);
   if (usableLen <= 0) return Buffer.alloc(0);
@@ -149,32 +183,53 @@ function decodeL16ToPcm16(audioBuffer, session) {
   // Auto-detect when provider only says "audio/x-l16" without endianness.
   const pcmLe = Buffer.from(source);
   const pcmBe = swapPcm16Endian(source);
-  const rmsLe = computeRms(pcmLe);
-  const rmsBe = computeRms(pcmBe);
+  const qualityLe = scoreL16PcmQuality(pcmLe);
+  const qualityBe = scoreL16PcmQuality(pcmBe);
+  const chooseLe = qualityLe.score <= qualityBe.score;
+  const chosen = chooseLe ? 'le' : 'be';
+  const chosenPcm = chooseLe ? pcmLe : pcmBe;
 
   if (session) {
     session._l16EndianVotes = session._l16EndianVotes || { le: 0, be: 0 };
-    if (rmsBe > (rmsLe * 2.5) && rmsBe > 0.002) session._l16EndianVotes.be++;
-    if (rmsLe > (rmsBe * 2.5) && rmsLe > 0.002) session._l16EndianVotes.le++;
+    session._l16EndianVotes[chosen]++;
+    session._l16ProbeCount = (session._l16ProbeCount || 0) + 1;
 
     if (session._l16EndianVotes.be >= 3) {
       session._l16Endian = 'be';
-      logger.log('Detected L16 endian', { callSid: session.callSid, endian: 'be' });
+      logger.log('Detected L16 endian', {
+        callSid: session.callSid,
+        endian: 'be',
+        qualityLe: Number(qualityLe.score.toFixed(3)),
+        qualityBe: Number(qualityBe.score.toFixed(3))
+      });
       return pcmBe;
     }
     if (session._l16EndianVotes.le >= 3) {
       session._l16Endian = 'le';
-      logger.log('Detected L16 endian', { callSid: session.callSid, endian: 'le' });
+      logger.log('Detected L16 endian', {
+        callSid: session.callSid,
+        endian: 'le',
+        qualityLe: Number(qualityLe.score.toFixed(3)),
+        qualityBe: Number(qualityBe.score.toFixed(3))
+      });
       return pcmLe;
     }
   }
 
-  // While undecided, prefer network byte order (big-endian) as RFC default.
-  return pcmBe;
+  // While undecided, return the lower-artifact decode for this chunk.
+  return chosenPcm;
 }
 
 function getNoiseFloorCap(session) {
-  return session?._audioCodec === 'l16' ? 0.012 : 0.15;
+  return session?._audioCodec === 'l16' ? 0.006 : 0.15;
+}
+
+function canStartGreeting(session) {
+  if (!session) return false;
+  if (session._audioCodec !== 'l16') return true;
+  if (session._l16Endian && session._l16Endian !== 'unknown') return true;
+  // Allow fallback after a few probe chunks even if still unresolved.
+  return (session._l16ProbeCount || 0) >= 3;
 }
 
 // Generic decoder that picks the right codec
@@ -297,6 +352,8 @@ const ECHO_COOLDOWN_MS = 800;   // Discard audio for 800ms after playback ends (
 const MAX_SPEECH_DURATION_MS = 3000; // Force processing after 3s of continuous speech for fast responses
 const NOISE_CALIBRATION_CHUNKS = 25; // ~500ms of audio to calibrate noise floor after cool-down
 const VOICE_MARGIN = 0.006; // Additive margin above noise floor for voice detection (tuned for extremely quiet L16 PSTN audio)
+const L16_MIN_THRESHOLD = 0.0012;
+const L16_VOICE_MARGIN = 0.0014;
 const PRE_SPEECH_CHUNKS = config.pipeline.preSpeechChunks || 6;
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -496,7 +553,7 @@ function prepareOutboundAudioForStream(session, mulawBuffer) {
 
   if (codec === 'l16') {
     const pcmLe = mulawToPcm16(mulawBuffer);
-    const endian = session?._l16Endian === 'le' ? 'le' : 'be';
+    const endian = session?._l16Endian === 'be' ? 'be' : 'le';
     const l16Buffer = endian === 'le' ? pcmLe : swapPcm16Endian(pcmLe);
     return {
       payload: l16Buffer,
@@ -910,7 +967,7 @@ module.exports = function setupWs(app) {
             if (streamSid) {
               sess._greetingPending = true;
             }
-            if (sess._greetingPending && sess.streamSid) {
+            if (sess._greetingPending && sess.streamSid && canStartGreeting(sess)) {
               deliverInstantGreeting(sess, ws).catch(e =>
                 logger.warn('Greeting delivery failed', e.message)
               );
@@ -999,9 +1056,9 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     // conservative default and recalibrate AFTER the greeting plays.
     if (session.direction === 'outbound') {
       session.vadCalibrated = true;
-      session._frozenNoiseFloor = 0.01; // Conservative default
-      session._needsPostGreetingCal = true; // Will recalibrate after greeting
-      if (session._greetingPending && session.streamSid) {
+      session._frozenNoiseFloor = session._audioCodec === 'l16' ? 0.0015 : 0.01; // Conservative default
+      if (session._greetingPending && session.streamSid && canStartGreeting(session)) {
+        session._needsPostGreetingCal = true; // Will recalibrate after greeting
         deliverInstantGreeting(session, ws).catch(() => { });
       }
       return;
@@ -1018,7 +1075,9 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
 
     if (session.calibrationChunks >= NOISE_CALIBRATION_CHUNKS) { // 500ms of incoming audio
       session.vadCalibrated = true;
-      if (session.noiseFloorRms < 0.001) session.noiseFloorRms = VAD_THRESHOLD * 0.5;
+      if (session.noiseFloorRms < 0.001) {
+        session.noiseFloorRms = session._audioCodec === 'l16' ? 0.0004 : VAD_THRESHOLD * 0.5;
+      }
       session._frozenNoiseFloor = Math.min(session.noiseFloorRms, getNoiseFloorCap(session));
 
       logger.log('Initial calibration complete', {
@@ -1037,6 +1096,17 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   // ─────────────────────────────────────────────
   // 1. BARGE-IN DURING PLAYBACK
   // ─────────────────────────────────────────────
+  // Wait for greeting to start before normal VAD processing.
+  if (session._greetingPending && !session._greetingStarted) {
+    if (session.streamSid && canStartGreeting(session)) {
+      if (session.direction === 'outbound') {
+        session._needsPostGreetingCal = true; // Will recalibrate after greeting
+      }
+      deliverInstantGreeting(session, ws).catch(() => { });
+    }
+    return;
+  }
+
   if (session.isPlaying) {
     // NEVER allow barge-in during the initial greeting — line noise on Indian PSTN
     // causes false positives that cut the greeting after just "Hello"
@@ -1121,7 +1191,9 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       }
       delete session._calSampleRaw;
 
-      if (session.noiseFloorRms < 0.001) session.noiseFloorRms = VAD_THRESHOLD * 0.5;
+      if (session.noiseFloorRms < 0.001) {
+        session.noiseFloorRms = session._audioCodec === 'l16' ? 0.0004 : VAD_THRESHOLD * 0.5;
+      }
       session._frozenNoiseFloor = Math.min(session.noiseFloorRms, getNoiseFloorCap(session));
       logger.log('Post-greeting recalibration complete', {
         callSid: session.callSid,
@@ -1142,7 +1214,9 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
 
   // Additive margin applied to frozen network floor
   const floor = session._frozenNoiseFloor || VAD_THRESHOLD * 0.6;
-  const dynamicThreshold = Math.max(VAD_THRESHOLD, floor + VOICE_MARGIN);
+  const minThreshold = session._audioCodec === 'l16' ? L16_MIN_THRESHOLD : VAD_THRESHOLD;
+  const voiceMargin = session._audioCodec === 'l16' ? L16_VOICE_MARGIN : VOICE_MARGIN;
+  const dynamicThreshold = Math.max(minThreshold, floor + voiceMargin);
   const hasVoice = rms >= dynamicThreshold;
 
   // Periodic RMS logging (every 1s) to diagnose speech detection
@@ -1335,13 +1409,44 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
 
   const sttStart = Date.now();
   let sttResult = await stt.transcribe(wavBuffer, session.callSid, 'audio/wav', session.language);
+  let sttLatency = Date.now() - sttStart;
+
+  // Safety net for ambiguous L16 streams:
+  // if primary STT is empty despite high-energy audio, retry once with swapped endianness.
+  if ((!sttResult || sttResult.empty || !sttResult.text) &&
+    session._audioCodec === 'l16' &&
+    audioDurationSec >= 1.0 &&
+    utteranceRms >= 0.01) {
+    const altStart = Date.now();
+    const altPcmData = removeDcOffset(swapPcm16Endian(pcmData));
+    const altWavBuffer = buildWavBuffer(altPcmData);
+    const altStt = await stt.transcribe(altWavBuffer, session.callSid, 'audio/wav', session.language);
+    sttLatency += Date.now() - altStart;
+
+    if (altStt && !altStt.empty && altStt.text) {
+      const previousEndian = session._l16Endian || 'unknown';
+      session._l16Endian = previousEndian === 'be' ? 'le' : 'be';
+      session._l16EndianVotes = session._l16Endian === 'le' ? { le: 3, be: 0 } : { le: 0, be: 3 };
+      logger.log('Recovered STT with alternate L16 endian', {
+        callSid: session.callSid,
+        previousEndian,
+        selectedEndian: session._l16Endian,
+        text: altStt.text
+      });
+      sttResult = altStt;
+    } else {
+      logger.log('Alternate endian STT also empty', {
+        callSid: session.callSid,
+        pcmBytes: pcmData.length,
+        audioDuration: `${audioDurationSec.toFixed(1)}s`
+      });
+    }
+  }
 
   if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
     logger.debug('Pipeline cancelled after STT', session.callSid);
     return;
   }
-
-  const sttLatency = Date.now() - sttStart;
 
   if (sttResult.empty || !sttResult.text) {
     logger.log('STT returned empty — skipping pipeline', { callSid: session.callSid, pcmBytes: pcmData.length });
