@@ -727,6 +727,7 @@ module.exports = function setupWs(app) {
       const streamSid = fields.streamSid || null;
       const language = fields.language || queryLanguage;
       const direction = fields.direction || queryDirection;
+      const autoGreet = fields.autoGreet !== false;
 
       if (!callUuid) return null;
 
@@ -741,8 +742,8 @@ module.exports = function setupWs(app) {
         // Don't overwrite normalized language with raw value
         session.direction = direction || session.direction;
 
-        // Try to deliver greeting if pending
-        if (session._greetingPending && session.streamSid) {
+        // Try to deliver greeting if pending (can be disabled by caller for ordered init)
+        if (autoGreet && session._greetingPending && session.streamSid) {
           deliverInstantGreeting(session, ws).catch(e =>
             logger.warn('Greeting delivery failed', e.message)
           );
@@ -855,7 +856,8 @@ module.exports = function setupWs(app) {
             || msg.start?.encoding
             || 'audio/x-mulaw'; // default
 
-          const sess = initializeSession({ callUuid, callerNumber, streamSid, language, direction });
+          // IMPORTANT: delay greeting until after codec/endianness is set from this start event.
+          const sess = initializeSession({ callUuid, callerNumber, streamSid, language, direction, autoGreet: false });
 
           if (sess) {
             const codec = normalizeAudioEncoding(encoding);
@@ -874,6 +876,11 @@ module.exports = function setupWs(app) {
             // Stream established. Greeting stays pending until 500ms VAD calibration finishes.
             if (streamSid) {
               sess._greetingPending = true;
+            }
+            if (sess._greetingPending && sess.streamSid) {
+              deliverInstantGreeting(sess, ws).catch(e =>
+                logger.warn('Greeting delivery failed', e.message)
+              );
             }
           }
           return;
