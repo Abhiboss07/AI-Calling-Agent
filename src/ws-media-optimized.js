@@ -74,13 +74,116 @@ function alawToPcm16(alawBuffer) {
   return pcm;
 }
 
-// Generic decoder that picks the right codec
-function decodeToPcm16(audioBuffer, encoding) {
-  // LINEAR PCM (16-bit) - Vobiz sends little-endian L16 (native byte order)
-  if (encoding === 'audio/x-l16' || encoding === 'l16' || encoding === 'linear16') {
-    return audioBuffer; // Already correct little-endian PCM16
+function pcm16ToAlaw(sample) {
+  const ALAW_MAX = 0x7fff;
+  let sign = 0;
+  if (sample < 0) {
+    sign = 0x80;
+    sample = -sample;
   }
-  if (encoding === 'alaw' || encoding === 'audio/x-alaw' || encoding === 'PCMA') {
+  if (sample > ALAW_MAX) sample = ALAW_MAX;
+
+  let compressed;
+  if (sample >= 256) {
+    let exponent = 7;
+    for (let expMask = 0x4000; (sample & expMask) === 0 && exponent > 0; exponent--, expMask >>= 1) { }
+    const mantissa = (sample >> (exponent + 3)) & 0x0f;
+    compressed = (exponent << 4) | mantissa;
+  } else {
+    compressed = sample >> 4;
+  }
+  return (compressed ^ (sign ^ 0x55)) & 0xff;
+}
+
+function pcmBufferToAlaw(pcmBuffer) {
+  const numSamples = Math.floor(pcmBuffer.length / 2);
+  const alaw = Buffer.alloc(numSamples);
+  for (let i = 0; i < numSamples; i++) {
+    alaw[i] = pcm16ToAlaw(pcmBuffer.readInt16LE(i * 2));
+  }
+  return alaw;
+}
+
+function normalizeAudioEncoding(encoding) {
+  const value = String(encoding || '').toLowerCase().trim();
+  if (!value) return 'mulaw';
+  if (value.includes('l16') || value.includes('linear16') || value.includes('pcm16')) return 'l16';
+  if (value.includes('alaw') || value.includes('pcma')) return 'alaw';
+  if (value.includes('mulaw') || value.includes('ulaw') || value.includes('pcmu')) return 'mulaw';
+  return 'mulaw';
+}
+
+function inferL16EndiannessFromEncoding(encoding) {
+  const value = String(encoding || '').toLowerCase();
+  if (!value.includes('l16') && !value.includes('linear16')) return null;
+  const tokens = value.split(/[^a-z0-9]+/).filter(Boolean);
+  if (value.includes('little') || tokens.includes('le')) return 'le';
+  if (value.includes('big') || tokens.includes('be')) return 'be';
+  return 'unknown';
+}
+
+function swapPcm16Endian(buffer) {
+  const usableLen = buffer.length - (buffer.length % 2);
+  if (usableLen <= 0) return Buffer.alloc(0);
+  const out = Buffer.alloc(usableLen);
+  for (let i = 0; i < usableLen; i += 2) {
+    out[i] = buffer[i + 1];
+    out[i + 1] = buffer[i];
+  }
+  return out;
+}
+
+function decodeL16ToPcm16(audioBuffer, session) {
+  const usableLen = audioBuffer.length - (audioBuffer.length % 2);
+  if (usableLen <= 0) return Buffer.alloc(0);
+  const source = usableLen === audioBuffer.length ? audioBuffer : audioBuffer.subarray(0, usableLen);
+
+  // Respect an explicit or already-detected endian choice.
+  if (session?._l16Endian === 'le') {
+    return Buffer.from(source);
+  }
+  if (session?._l16Endian === 'be') {
+    return swapPcm16Endian(source);
+  }
+
+  // Auto-detect when provider only says "audio/x-l16" without endianness.
+  const pcmLe = Buffer.from(source);
+  const pcmBe = swapPcm16Endian(source);
+  const rmsLe = computeRms(pcmLe);
+  const rmsBe = computeRms(pcmBe);
+
+  if (session) {
+    session._l16EndianVotes = session._l16EndianVotes || { le: 0, be: 0 };
+    if (rmsBe > (rmsLe * 2.5) && rmsBe > 0.002) session._l16EndianVotes.be++;
+    if (rmsLe > (rmsBe * 2.5) && rmsLe > 0.002) session._l16EndianVotes.le++;
+
+    if (session._l16EndianVotes.be >= 3) {
+      session._l16Endian = 'be';
+      logger.log('Detected L16 endian', { callSid: session.callSid, endian: 'be' });
+      return pcmBe;
+    }
+    if (session._l16EndianVotes.le >= 3) {
+      session._l16Endian = 'le';
+      logger.log('Detected L16 endian', { callSid: session.callSid, endian: 'le' });
+      return pcmLe;
+    }
+  }
+
+  // While undecided, prefer network byte order (big-endian) as RFC default.
+  return pcmBe;
+}
+
+function getNoiseFloorCap(session) {
+  return session?._audioCodec === 'l16' ? 0.012 : 0.15;
+}
+
+// Generic decoder that picks the right codec
+function decodeToPcm16(audioBuffer, session) {
+  const codec = normalizeAudioEncoding(session?._audioEncoding);
+  if (codec === 'l16') {
+    return decodeL16ToPcm16(audioBuffer, session);
+  }
+  if (codec === 'alaw') {
     return alawToPcm16(audioBuffer);
   }
   return mulawToPcm16(audioBuffer); // default to mulaw
@@ -263,9 +366,11 @@ class EnhancedCallSession {
     this.noiseFloorRms = VAD_THRESHOLD * 0.6;
 
     // Playback buffering
-    this.playbackQueue = []; // Array of mu-law buffers
+    this.playbackQueue = []; // Array of outbound-encoded buffers
     this.playbackLoopRunning = false;
     this.audioResidue = Buffer.alloc(0);
+    this._playbackContentType = 'audio/x-mulaw;rate=8000';
+    this._playbackChunkBytes = PLAYBACK_CHUNK_SIZE;
 
     // State management
     this.isProcessing = false;
@@ -300,6 +405,10 @@ class EnhancedCallSession {
     this._ended = false;
     this._finalized = false;
     this._lastPong = Date.now();
+    this._audioEncoding = 'audio/x-mulaw';
+    this._audioCodec = 'mulaw';
+    this._l16Endian = 'unknown';
+    this._l16EndianVotes = { le: 0, be: 0 };
 
     // Echo cool-down: discard audio for a brief period after playback ends
     this._echoCooldownUntil = 0;
@@ -349,6 +458,39 @@ class EnhancedCallSession {
 // STREAMING AUDIO PLAYBACK WITH INTERRUPT
 // ═════════════════════════════════════════════════════════════════════════════
 
+function prepareOutboundAudioForStream(session, mulawBuffer) {
+  const codec = normalizeAudioEncoding(session?._audioEncoding);
+
+  if (codec === 'l16') {
+    const pcmLe = mulawToPcm16(mulawBuffer);
+    const endian = session?._l16Endian === 'le' ? 'le' : 'be';
+    const l16Buffer = endian === 'le' ? pcmLe : swapPcm16Endian(pcmLe);
+    return {
+      payload: l16Buffer,
+      contentType: 'audio/x-l16;rate=8000',
+      chunkBytes: PLAYBACK_CHUNK_SIZE * 2,
+      codec: 'l16'
+    };
+  }
+
+  if (codec === 'alaw') {
+    const pcmLe = mulawToPcm16(mulawBuffer);
+    return {
+      payload: pcmBufferToAlaw(pcmLe),
+      contentType: 'audio/x-alaw;rate=8000',
+      chunkBytes: PLAYBACK_CHUNK_SIZE,
+      codec: 'alaw'
+    };
+  }
+
+  return {
+    payload: mulawBuffer,
+    contentType: 'audio/x-mulaw;rate=8000',
+    chunkBytes: PLAYBACK_CHUNK_SIZE,
+    codec: 'mulaw'
+  };
+}
+
 async function sendAudioThroughStream(session, ws, mulawBuffer, options = {}) {
   return new Promise((resolve) => {
     enqueueAudio(session, ws, mulawBuffer, resolve);
@@ -360,7 +502,22 @@ function enqueueAudio(session, ws, mulawBuffer, onComplete) {
     if (onComplete) onComplete(false);
     return;
   }
-  session.playbackQueue.push(mulawBuffer);
+
+  const outbound = prepareOutboundAudioForStream(session, mulawBuffer);
+  session.playbackQueue.push(outbound.payload);
+  session._playbackContentType = outbound.contentType;
+  session._playbackChunkBytes = outbound.chunkBytes;
+
+  if (session._lastLoggedPlaybackCodec !== outbound.codec) {
+    session._lastLoggedPlaybackCodec = outbound.codec;
+    logger.log('Playback format selected', {
+      callSid: session.callSid,
+      codec: outbound.codec,
+      contentType: outbound.contentType,
+      chunkBytes: outbound.chunkBytes
+    });
+  }
+
   if (!session.playbackLoopRunning) {
     runPlaybackLoop(session, ws, onComplete).catch(e => {
       logger.error('Playback loop error', e.message);
@@ -382,11 +539,13 @@ async function runPlaybackLoop(session, ws, onComplete) {
 
   try {
     while ((session.playbackQueue.length > 0 || session.audioResidue.length > 0) && session.isPlaying && ws.readyState === 1) {
-      if (session.audioResidue.length < PLAYBACK_CHUNK_SIZE && session.playbackQueue.length > 0) {
+      const chunkTarget = session._playbackChunkBytes || PLAYBACK_CHUNK_SIZE;
+
+      if (session.audioResidue.length < chunkTarget && session.playbackQueue.length > 0) {
         session.audioResidue = Buffer.concat([session.audioResidue, session.playbackQueue.shift()]);
       }
 
-      const chunkSize = Math.min(PLAYBACK_CHUNK_SIZE, session.audioResidue.length);
+      const chunkSize = Math.min(chunkTarget, session.audioResidue.length);
       if (chunkSize === 0) break;
 
       const chunk = session.audioResidue.subarray(0, chunkSize);
@@ -395,11 +554,11 @@ async function runPlaybackLoop(session, ws, onComplete) {
       const msg = JSON.stringify({
         event: 'playAudio',
         streamSid: session.streamSid,
-        contentType: 'audio/x-mulaw',
+        contentType: session._playbackContentType,
         sampleRate: 8000,
         media: {
           streamSid: session.streamSid,
-          contentType: 'audio/x-mulaw',
+          contentType: session._playbackContentType,
           sampleRate: 8000,
           payload: chunk.toString('base64')
         }
@@ -656,7 +815,7 @@ module.exports = function setupWs(app) {
           if (!session) return;
 
           const rawBytes = msgStr;
-          const pcmChunk = decodeToPcm16(rawBytes, session?._audioEncoding);
+          const pcmChunk = decodeToPcm16(rawBytes, session);
           const rms = computeRms(pcmChunk);
 
           processAudioChunk(session, ws, rawBytes, pcmChunk, rms);
@@ -699,8 +858,19 @@ module.exports = function setupWs(app) {
           const sess = initializeSession({ callUuid, callerNumber, streamSid, language, direction });
 
           if (sess) {
+            const codec = normalizeAudioEncoding(encoding);
+            const inferredL16Endian = codec === 'l16' ? inferL16EndiannessFromEncoding(encoding) : null;
             sess._audioEncoding = encoding;
-            logger.log('Audio encoding detected', { callSid: sess.callSid, encoding });
+            sess._audioCodec = codec;
+            if (inferredL16Endian) {
+              sess._l16Endian = inferredL16Endian;
+            }
+            logger.log('Audio encoding detected', {
+              callSid: sess.callSid,
+              encoding,
+              codec,
+              l16Endian: sess._l16Endian
+            });
             // Stream established. Greeting stays pending until 500ms VAD calibration finishes.
             if (streamSid) {
               sess._greetingPending = true;
@@ -738,7 +908,7 @@ module.exports = function setupWs(app) {
             });
           }
 
-          const pcmChunk = decodeToPcm16(rawBytes, session?._audioEncoding);
+          const pcmChunk = decodeToPcm16(rawBytes, session);
           const rms = computeRms(pcmChunk);
 
           processAudioChunk(session, ws, rawBytes, pcmChunk, rms);
@@ -806,11 +976,10 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session.noiseFloorRms = session.noiseFloorRms * 0.8 + rms * 0.2;
     }
 
-    if (session.calibrationChunks >= 25) { // 500ms of incoming audio
+    if (session.calibrationChunks >= NOISE_CALIBRATION_CHUNKS) { // 500ms of incoming audio
       session.vadCalibrated = true;
       if (session.noiseFloorRms < 0.001) session.noiseFloorRms = VAD_THRESHOLD * 0.5;
-      // Cap at 0.15 to prevent tones from poisoning the floor
-      session._frozenNoiseFloor = Math.min(session.noiseFloorRms, 0.15);
+      session._frozenNoiseFloor = Math.min(session.noiseFloorRms, getNoiseFloorCap(session));
 
       logger.log('Initial calibration complete', {
         callSid: session.callSid,
@@ -880,13 +1049,15 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session.noiseFloorRms = session.noiseFloorRms * 0.8 + rms * 0.2;
     }
 
-    if (session._postGreetingCalChunks >= 25) { // 500ms of TRUE line noise
+    if (session._postGreetingCalChunks >= NOISE_CALIBRATION_CHUNKS) { // 500ms of TRUE line noise
       session._needsPostGreetingCal = false;
 
-      // AUTO-DETECT ENCODING: if noise floor is absurdly high, try alternate codec
-      if (session.noiseFloorRms > 0.50 && session._calSampleRaw) {
+      // AUTO-DETECT ENCODING: if noise floor is absurdly high, try alternate G.711 codec.
+      // L16 auto-detection is handled separately via endian probing in decodeToPcm16.
+      const currentCodec = normalizeAudioEncoding(session._audioEncoding);
+      if (session.noiseFloorRms > 0.50 && session._calSampleRaw && (currentCodec === 'mulaw' || currentCodec === 'alaw')) {
         const currentEnc = session._audioEncoding || 'audio/x-mulaw';
-        const isCurrentMulaw = !currentEnc.includes('alaw') && currentEnc !== 'PCMA';
+        const isCurrentMulaw = currentCodec === 'mulaw';
         const altDecoder = isCurrentMulaw ? alawToPcm16 : mulawToPcm16;
         const altName = isCurrentMulaw ? 'audio/x-alaw' : 'audio/x-mulaw';
         const altPcm = altDecoder(session._calSampleRaw);
@@ -903,6 +1074,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
         if (altRms < session.noiseFloorRms * 0.5) {
           // Alternate encoding is significantly quieter => switch!
           session._audioEncoding = altName;
+          session._audioCodec = normalizeAudioEncoding(altName);
           session.noiseFloorRms = altRms;
           logger.log('Switched audio encoding', { callSid: session.callSid, to: altName, newRms: altRms.toFixed(4) });
         }
@@ -910,7 +1082,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       delete session._calSampleRaw;
 
       if (session.noiseFloorRms < 0.001) session.noiseFloorRms = VAD_THRESHOLD * 0.5;
-      session._frozenNoiseFloor = session.noiseFloorRms;
+      session._frozenNoiseFloor = Math.min(session.noiseFloorRms, getNoiseFloorCap(session));
       logger.log('Post-greeting recalibration complete', {
         callSid: session.callSid,
         noiseFloor: session._frozenNoiseFloor.toFixed(4),
