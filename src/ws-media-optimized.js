@@ -338,7 +338,6 @@ function removeDcOffset(pcmBuffer) {
 const VAD_THRESHOLD = config.pipeline.vadThreshold;
 const SPEECH_START_CHUNKS = config.pipeline.speechStartChunks;
 const SPEECH_END_CHUNKS = config.pipeline.speechEndChunks;
-const POST_RECAL_GUARD_CHUNKS = 25; // ~500ms guard after recalibration ends — ignore noise spikes
 const BARGE_IN_MIN_PLAYBACK_MS = config.pipeline.bargeInMinPlaybackMs;
 const BARGE_IN_REQUIRED_CHUNKS = 5; // Increased to prevent false positives from line noise
 const BARGE_IN_RMS_MULTIPLIER = config.pipeline.bargeInRmsMultiplier;
@@ -349,7 +348,7 @@ const MAX_CALL_MS = config.callMaxMinutes * 60 * 1000;
 const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize || 160;
 const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs || 20;
 const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
-const ECHO_COOLDOWN_MS = 400;   // Discard audio for 400ms after playback ends (Vobiz has no AEC)
+const ECHO_COOLDOWN_MS = 200;   // Discard audio for 200ms after playback ends (Vobiz has no AEC)
 const MAX_SPEECH_DURATION_MS = 2000; // Force processing after 2s of continuous speech for fast responses
 const NOISE_CALIBRATION_CHUNKS = 12; // ~240ms of audio to calibrate noise floor after cool-down
 const VOICE_MARGIN = 0.006; // Additive margin above noise floor for voice detection
@@ -1198,8 +1197,6 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
         session.noiseFloorRms = session._audioCodec === 'l16' ? 0.0004 : VAD_THRESHOLD * 0.5;
       }
       session._frozenNoiseFloor = Math.min(session.noiseFloorRms, getNoiseFloorCap(session));
-      // Start post-recal guard — ignore transient noise spikes for 500ms
-      session._postRecalGuardRemaining = POST_RECAL_GUARD_CHUNKS;
       logger.log('Post-greeting recalibration complete', {
         callSid: session.callSid,
         noiseFloor: session._frozenNoiseFloor.toFixed(4),
@@ -1207,14 +1204,6 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       });
     }
     return; // Block processing during recalibration
-  }
-
-  // ─────────────────────────────────────────────
-  // 2c. POST-RECAL SPEECH GUARD (prevent noise spikes right after recal)
-  // ─────────────────────────────────────────────
-  if (session._postRecalGuardRemaining > 0) {
-    session._postRecalGuardRemaining--;
-    return; // Discard audio during guard period
   }
 
   // ─────────────────────────────────────────────
