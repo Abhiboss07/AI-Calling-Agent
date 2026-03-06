@@ -1221,16 +1221,21 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
   const dynamicThreshold = Math.max(minThreshold, floor + voiceMargin);
   const hasVoice = rms >= dynamicThreshold;
 
-  // Periodic RMS logging (every 1s) to diagnose speech detection
+  // Track peak RMS between log intervals for diagnostics
+  session._peakRms = Math.max(session._peakRms || 0, rms);
   session._rmsLogCounter = (session._rmsLogCounter || 0) + 1;
   if (session._rmsLogCounter % 50 === 0) {
     logger.log('RMS check', {
       callSid: session.callSid,
       rms: rms.toFixed(4),
+      peak: (session._peakRms || 0).toFixed(4),
       threshold: dynamicThreshold.toFixed(4),
+      floor: floor.toFixed(4),
       hasVoice,
-      isSpeaking: session.isSpeaking
+      isSpeaking: session.isSpeaking,
+      chunks: session._rmsLogCounter
     });
+    session._peakRms = 0; // Reset peak for next window
   }
 
   // ─────────────────────────────────────────────
