@@ -40,7 +40,7 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
   }
 
   // 44-byte WAV header + at least 1200 bytes of PCM data
-  if (buffer.length < 1244) {
+  if (buffer.length < 844) {
     logger.debug('STT: buffer too small', buffer.length, 'bytes');
     return { text: '', confidence: 0, empty: true };
   }
@@ -58,7 +58,7 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
 
   // Drop ultra-low-energy short snippets before paying Whisper cost.
   // This avoids false transcriptions from line hiss/comfort noise.
-  if (durationSec <= 0.8 && pcmRms < 0.0015) {
+  if (durationSec <= 0.5 && pcmRms < 0.0008) {
     logger.log(`STT: prefilter low-energy audio skipped (${durationSec.toFixed(1)}s, rms=${pcmRms.toFixed(4)})`, { callSid });
     return { text: '', confidence: 0, empty: true };
   }
@@ -71,8 +71,13 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
     let whisperLang;
     if (langCode && langCode !== 'auto') {
       const normalizedLanguage = normalizeLanguageCode(language, 'en-IN');
-      const langConfig = getLanguage(normalizedLanguage);
-      whisperLang = langConfig?.whisperCode || undefined;
+      // For hinglish (mixed Hindi-English), don't set language so Whisper auto-detects
+      if (normalizedLanguage === 'hinglish') {
+        whisperLang = undefined;
+      } else {
+        const langConfig = getLanguage(normalizedLanguage);
+        whisperLang = langConfig?.whisperCode || undefined;
+      }
     }
 
     const resp = await openai.transcribeAudio(buffer, mime, whisperLang);

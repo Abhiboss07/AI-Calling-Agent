@@ -348,12 +348,12 @@ const MAX_CALL_MS = config.callMaxMinutes * 60 * 1000;
 const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize || 160;
 const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs || 20;
 const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
-const ECHO_COOLDOWN_MS = 800;   // Discard audio for 800ms after playback ends (Vobiz has no AEC)
-const MAX_SPEECH_DURATION_MS = 3000; // Force processing after 3s of continuous speech for fast responses
-const NOISE_CALIBRATION_CHUNKS = 25; // ~500ms of audio to calibrate noise floor after cool-down
-const VOICE_MARGIN = 0.006; // Additive margin above noise floor for voice detection (tuned for extremely quiet L16 PSTN audio)
-const L16_MIN_THRESHOLD = 0.0012;
-const L16_VOICE_MARGIN = 0.0014;
+const ECHO_COOLDOWN_MS = 400;   // Discard audio for 400ms after playback ends (Vobiz has no AEC)
+const MAX_SPEECH_DURATION_MS = 2000; // Force processing after 2s of continuous speech for fast responses
+const NOISE_CALIBRATION_CHUNKS = 12; // ~240ms of audio to calibrate noise floor after cool-down
+const VOICE_MARGIN = 0.006; // Additive margin above noise floor for voice detection
+const L16_MIN_THRESHOLD = 0.0002; // Very low threshold for quiet L16 PSTN audio
+const L16_VOICE_MARGIN = 0.0004;  // Small margin — L16 PSTN RMS is typically 0.0003-0.001
 const PRE_SPEECH_CHUNKS = config.pipeline.preSpeechChunks || 6;
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1056,7 +1056,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     // conservative default and recalibrate AFTER the greeting plays.
     if (session.direction === 'outbound') {
       session.vadCalibrated = true;
-      session._frozenNoiseFloor = session._audioCodec === 'l16' ? 0.0015 : 0.01; // Conservative default
+      session._frozenNoiseFloor = session._audioCodec === 'l16' ? 0.0003 : 0.01; // Conservative default for L16 quiet PSTN
       if (session._greetingPending && session.streamSid && canStartGreeting(session)) {
         session._needsPostGreetingCal = true; // Will recalibrate after greeting
         deliverInstantGreeting(session, ws).catch(() => { });
@@ -1117,7 +1117,9 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     const playbackMs = Date.now() - session.playbackStartedAt;
     // Dynamic barge-in threshold based on measured line noise
     const floor = session._frozenNoiseFloor || VAD_THRESHOLD * 0.6;
-    const bargeThreshold = Math.max(0.15, floor + (VOICE_MARGIN * 1.5));
+    const bargeThreshold = session._audioCodec === 'l16'
+      ? Math.max(0.001, floor + (L16_VOICE_MARGIN * 3))
+      : Math.max(0.15, floor + (VOICE_MARGIN * 1.5));
 
     if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && rms >= bargeThreshold) {
       session.interruptVoiceChunks++;
@@ -1300,7 +1302,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
     session.isSpeaking = false;
     session.speechStartedAt = null;
 
-    const minProcessBytes = Math.max(MIN_UTTERANCE_BYTES, 8000); // ~0.5s @ 8kHz PCM16
+    const minProcessBytes = Math.max(MIN_UTTERANCE_BYTES, 3200); // ~0.2s @ 8kHz PCM16
     if (session.totalPcmBytes >= minProcessBytes) {
       triggerProcessing(session, ws);
     } else {
@@ -1390,7 +1392,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   const audioDurationSec = pcmData.length / 16000;
   const utteranceRms = computeRms(pcmData);
 
-  if (audioDurationSec <= 0.8 && utteranceRms < 0.0018) {
+  if (audioDurationSec <= 0.4 && utteranceRms < 0.0005) {
     logger.log('Skipping low-energy utterance before STT', {
       callSid: session.callSid,
       pcmBytes: pcmData.length,

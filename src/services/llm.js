@@ -377,7 +377,9 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
     systemContent += '\nStyle requirement: short conversational lines, one question at a time, no robotic repetition.';
 
     if (languageCode === 'hinglish') {
-      systemContent += '\nRespond in natural Hinglish (Roman script).';
+      systemContent += '\nIMPORTANT: Respond in natural Hinglish (Roman script Hindi mixed with English). Example: "Aapka budget kitna hai? Hum aapko best options dikhayenge." Match the customer\'s language style.';
+    } else if (languageCode === 'hi-IN') {
+      systemContent += '\nIMPORTANT: Respond in Hindi (Devanagari script). Keep sentences short and conversational. Example: "आपका बजट कितना है?"';
     } else if (languageCode && languageCode !== 'en-IN') {
       systemContent += `\nCustomer language: ${langConfig.name}. Respond in ${langConfig.name}.`;
     }
@@ -410,7 +412,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
 
     const resp = await openai.chatCompletion(messages, 'gpt-4o-mini', {
       temperature: 0.25,
-      max_tokens: 140,
+      max_tokens: 100,
       response_format: { type: 'json_object' }
     });
 
@@ -519,7 +521,9 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
     systemContent += '\nStyle requirement: short conversational lines, one question at a time, no robotic repetition.';
 
     if (languageCode === 'hinglish') {
-      systemContent += '\nRespond in natural Hinglish (Roman script).';
+      systemContent += '\nIMPORTANT: Respond in natural Hinglish (Roman script Hindi mixed with English). Example: "Aapka budget kitna hai? Hum aapko best options dikhayenge." Match the customer\'s language style.';
+    } else if (languageCode === 'hi-IN') {
+      systemContent += '\nIMPORTANT: Respond in Hindi (Devanagari script). Keep sentences short and conversational. Example: "आपका बजट कितना है?"';
     } else if (languageCode && languageCode !== 'en-IN') {
       systemContent += `\nCustomer language: ${langConfig.name}. Respond in ${langConfig.name}.`;
     }
@@ -552,7 +556,7 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
 
     const stream = await openai.chatCompletionStream(messages, 'gpt-4o-mini', {
       temperature: 0.25,
-      max_tokens: 140,
+      max_tokens: 100,
       response_format: { type: 'json_object' }
     });
 
