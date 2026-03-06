@@ -338,6 +338,7 @@ function removeDcOffset(pcmBuffer) {
 const VAD_THRESHOLD = config.pipeline.vadThreshold;
 const SPEECH_START_CHUNKS = config.pipeline.speechStartChunks;
 const SPEECH_END_CHUNKS = config.pipeline.speechEndChunks;
+const POST_RECAL_GUARD_CHUNKS = 25; // ~500ms guard after recalibration ends — ignore noise spikes
 const BARGE_IN_MIN_PLAYBACK_MS = config.pipeline.bargeInMinPlaybackMs;
 const BARGE_IN_REQUIRED_CHUNKS = 5; // Increased to prevent false positives from line noise
 const BARGE_IN_RMS_MULTIPLIER = config.pipeline.bargeInRmsMultiplier;
@@ -1197,6 +1198,8 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
         session.noiseFloorRms = session._audioCodec === 'l16' ? 0.0004 : VAD_THRESHOLD * 0.5;
       }
       session._frozenNoiseFloor = Math.min(session.noiseFloorRms, getNoiseFloorCap(session));
+      // Start post-recal guard — ignore transient noise spikes for 500ms
+      session._postRecalGuardRemaining = POST_RECAL_GUARD_CHUNKS;
       logger.log('Post-greeting recalibration complete', {
         callSid: session.callSid,
         noiseFloor: session._frozenNoiseFloor.toFixed(4),
@@ -1204,6 +1207,14 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       });
     }
     return; // Block processing during recalibration
+  }
+
+  // ─────────────────────────────────────────────
+  // 2c. POST-RECAL SPEECH GUARD (prevent noise spikes right after recal)
+  // ─────────────────────────────────────────────
+  if (session._postRecalGuardRemaining > 0) {
+    session._postRecalGuardRemaining--;
+    return; // Discard audio during guard period
   }
 
   // ─────────────────────────────────────────────
@@ -1392,7 +1403,10 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   const audioDurationSec = pcmData.length / 16000;
   const utteranceRms = computeRms(pcmData);
 
-  if (audioDurationSec <= 0.4 && utteranceRms < 0.0005) {
+  // Skip noise-only utterances: short + low energy, OR L16 first utterance with marginal RMS
+  const isFirstUtterance = session.transcriptEntries.filter(e => e.speaker === 'customer').length === 0;
+  const l16NoiseGuard = isFirstUtterance && session._audioCodec === 'l16' && utteranceRms < 0.002;
+  if ((audioDurationSec <= 0.8 && utteranceRms < 0.001) || l16NoiseGuard) {
     logger.log('Skipping low-energy utterance before STT', {
       callSid: session.callSid,
       pcmBytes: pcmData.length,
