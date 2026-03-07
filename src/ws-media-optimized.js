@@ -348,6 +348,7 @@ const MAX_CALL_MS = config.callMaxMinutes * 60 * 1000;
 const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize || 160;
 const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs || 20;
 const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
+const STREAM_CLOSE_DRAIN_MS = 4000;
 const ECHO_COOLDOWN_MS = 200;   // Discard audio for 200ms after playback ends (Vobiz has no AEC)
 const MAX_SPEECH_DURATION_MS = 2000; // Force processing after 2s of continuous speech for fast responses
 const NOISE_CALIBRATION_CHUNKS = 12; // ~240ms of audio to calibrate noise floor after cool-down
@@ -480,6 +481,7 @@ class EnhancedCallSession {
 
     // Pipeline cancellation
     this.abortController = null;
+    this.currentPipelinePromise = null;
     this.currentLLMPromise = null;
     this.currentTTSPromise = null;
 
@@ -494,6 +496,7 @@ class EnhancedCallSession {
     this._greetingPlayback = false; // True while greeting is actively playing — blocks barge-in
     this._ended = false;
     this._finalized = false;
+    this._wsClosed = false;
     this._lastPong = Date.now();
     this._audioEncoding = 'audio/x-mulaw';
     this._audioCodec = 'mulaw';
@@ -1362,12 +1365,15 @@ function startPipeline(session, ws, pcmChunks) {
   session.userSpeakingWhileProcessing = false;
   session.abortController = new AbortController();
 
-  processUtterance(session, ws, pcmChunks, pipelineId, session.abortController.signal)
+  const pipelinePromise = processUtterance(session, ws, pcmChunks, pipelineId, session.abortController.signal)
     .catch(err => logger.error('Pipeline error', session.callSid, err.message))
     .finally(() => {
       if (session.currentPipelineId === pipelineId) {
         session.isProcessing = false;
         session.abortController = null;
+      }
+      if (session.currentPipelinePromise === pipelinePromise) {
+        session.currentPipelinePromise = null;
       }
 
       // Process any pending chunks
@@ -1380,6 +1386,8 @@ function startPipeline(session, ws, pcmChunks) {
         }
       }
     });
+
+  session.currentPipelinePromise = pipelinePromise;
 }
 
 async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal) {
@@ -1475,6 +1483,15 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     text: sttResult.text,
     confidence: sttResult.confidence
   });
+
+  if (session._wsClosed || ws.readyState !== 1) {
+    logger.log('Skipping response generation after stream close', {
+      callSid: session.callSid,
+      pipelineId,
+      transcript: sttResult.text
+    });
+    return;
+  }
 
   // Check for cancellation before LLM
   if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
@@ -1673,12 +1690,39 @@ async function endCallGracefully(session, ws, farewellText) {
 
 async function cleanupSession(session, ws, pingInterval) {
   clearInterval(pingInterval);
-  if (!session) return;
+  if (!session || session._finalized) return;
 
-  session._ended = true;
+  session._wsClosed = true;
   clearTimeout(session.silenceTimer);
   clearTimeout(session.maxDurationTimer);
 
+  if (session.isProcessing && session.currentPipelinePromise) {
+    logger.log('Waiting for in-flight pipeline during cleanup', {
+      callSid: session.callSid,
+      pipelineId: session.currentPipelineId,
+      drainMs: STREAM_CLOSE_DRAIN_MS
+    });
+
+    let timedOut = false;
+    await Promise.race([
+      session.currentPipelinePromise.catch(() => { }),
+      new Promise((resolve) => {
+        setTimeout(() => {
+          timedOut = true;
+          resolve();
+        }, STREAM_CLOSE_DRAIN_MS);
+      })
+    ]);
+
+    if (timedOut && session.isProcessing) {
+      logger.warn('Pipeline drain timeout during cleanup', {
+        callSid: session.callSid,
+        pipelineId: session.currentPipelineId
+      });
+    }
+  }
+
+  session._ended = true;
   session.cancelOngoingOperations();
 
   await finalizeCall(session);
