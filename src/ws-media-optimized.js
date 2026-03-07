@@ -348,7 +348,7 @@ const MAX_CALL_MS = config.callMaxMinutes * 60 * 1000;
 const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize || 160;
 const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs || 20;
 const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
-const STREAM_CLOSE_DRAIN_MS = 4000;
+const STREAM_CLOSE_DRAIN_MS = 1500;
 const ECHO_COOLDOWN_MS = 200;   // Discard audio for 200ms after playback ends (Vobiz has no AEC)
 const MAX_SPEECH_DURATION_MS = 2000; // Force processing after 2s of continuous speech for fast responses
 const NOISE_CALIBRATION_CHUNKS = 12; // ~240ms of audio to calibrate noise floor after cool-down
@@ -395,7 +395,7 @@ async function prewarmCriticalGreetings() {
   if (_prewarmInitialized) return;
   _prewarmInitialized = true;
 
-  const phrases = [
+  const greetings = [
     { lang: 'en-IN', dir: 'outbound', text: `Hello, this is ${config.agentName} from ${config.companyName}. Is this a good time to talk?` },
     { lang: 'en-IN', dir: 'inbound', text: `Hello, thank you for calling ${config.companyName}. How may I assist you today?` },
     { lang: 'hinglish', dir: 'outbound', text: `Hello, main ${config.agentName} ${config.companyName} se bol rahi hoon. Kya abhi baat karne ka sahi time hai?` },
@@ -405,7 +405,7 @@ async function prewarmCriticalGreetings() {
   ];
 
   // Pre-generate all greetings in parallel
-  const promises = phrases.map(async ({ lang, dir, text }) => {
+  const greetingPromises = greetings.map(async ({ lang, dir, text }) => {
     try {
       const key = `${lang}:${dir}`;
       const result = await tts.synthesizeRaw(text, null, lang);
@@ -422,7 +422,57 @@ async function prewarmCriticalGreetings() {
     }
   });
 
-  await Promise.allSettled(promises);
+  await Promise.allSettled(greetingPromises);
+
+  // Prewarm ALL deterministic reply phrases so they hit TTS cache instantly
+  // These are the fixed phrases returned by deterministicTurnReply() in llm.js
+  const replyPhrases = [
+    // en-IN phrases
+    { lang: 'en-IN', text: 'Is this a good time to talk for one minute?' },
+    { lang: 'en-IN', text: 'Great, thank you. Are you looking to buy, rent, or invest?' },
+    { lang: 'en-IN', text: 'No problem. What is a better time for a quick callback?' },
+    { lang: 'en-IN', text: 'Sure. Please share a suitable time for callback.' },
+    { lang: 'en-IN', text: 'Perfect, thank you. We will call you at that time. Goodbye.' },
+    { lang: 'en-IN', text: 'Thank you for calling. How may I help you today?' },
+    { lang: 'en-IN', text: 'Yes, I can hear you clearly. Please go ahead.' },
+    { lang: 'en-IN', text: 'Thank you for your time. Goodbye.' },
+    // Hardcoded purpose-step replies (English only)
+    { lang: 'en-IN', text: 'Great. What type of property are you considering: apartment, villa, or plot?' },
+    { lang: 'en-IN', text: 'Understood. Which area and budget range are you considering for rent?' },
+    { lang: 'en-IN', text: 'Nice. Are you looking for short-term returns or long-term appreciation?' },
+    // Hinglish phrases
+    { lang: 'hinglish', text: 'Kya abhi 1 minute baat karna convenient hai?' },
+    { lang: 'hinglish', text: 'Great, thank you. Aap buy, rent, ya invest ke liye dekh rahe hain?' },
+    { lang: 'hinglish', text: 'No problem. Callback ke liye kaunsa time better rahega?' },
+    { lang: 'hinglish', text: 'Sure, callback ka suitable time bata dijiye.' },
+    { lang: 'hinglish', text: 'Perfect, thank you. Hum ussi time call karenge. Goodbye.' },
+    { lang: 'hinglish', text: 'Thank you for calling. Aaj main aapki kaise help kar sakti hoon?' },
+    { lang: 'hinglish', text: 'Ji, main aapko clear sun pa rahi hoon. Please boliye.' },
+    { lang: 'hinglish', text: 'Thank you ji. Goodbye.' },
+    // hi-IN phrases
+    { lang: 'hi-IN', text: 'क्या अभी एक मिनट बात करना ठीक रहेगा?' },
+    { lang: 'hi-IN', text: 'बहुत अच्छा। क्या आप खरीदना, किराए पर लेना, या निवेश करना चाहते हैं?' },
+    { lang: 'hi-IN', text: 'कोई बात नहीं। कृपया बताइए, दोबारा कॉल का सही समय क्या रहेगा?' },
+    { lang: 'hi-IN', text: 'ठीक है, कृपया कॉल बैक का सही समय बताइए।' },
+    { lang: 'hi-IN', text: 'बहुत धन्यवाद। हम उसी समय कॉल करेंगे। नमस्ते।' },
+    { lang: 'hi-IN', text: 'धन्यवाद। मैं आपकी कैसे मदद कर सकती हूँ?' },
+    { lang: 'hi-IN', text: 'जी, आपकी आवाज साफ आ रही है। बताइए।' },
+    { lang: 'hi-IN', text: 'धन्यवाद। नमस्ते।' },
+    // Fallback response
+    { lang: 'en-IN', text: 'I apologize, could you please repeat that?' }
+  ];
+
+  const phrasePromises = replyPhrases.map(async ({ lang, text }) => {
+    try {
+      await tts.synthesizeRaw(text, null, lang);
+      logger.debug('Prewarmed reply phrase', { lang, text: text.substring(0, 40) });
+    } catch (e) {
+      logger.warn('Failed to prewarm reply phrase', { lang, error: e.message });
+    }
+  });
+
+  await Promise.allSettled(phrasePromises);
+  logger.log('Prewarming complete', { greetings: greetings.length, replyPhrases: replyPhrases.length });
 }
 
 // Start prewarming immediately on module load
@@ -1484,13 +1534,13 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     confidence: sttResult.confidence
   });
 
-  if (session._wsClosed || ws.readyState !== 1) {
-    logger.log('Skipping response generation after stream close', {
+  const wsOpen = !session._wsClosed && ws.readyState === 1;
+  if (!wsOpen) {
+    logger.log('WS closed — will generate reply for transcript but skip audio', {
       callSid: session.callSid,
       pipelineId,
       transcript: sttResult.text
     });
-    return;
   }
 
   // Check for cancellation before LLM
@@ -1560,7 +1610,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
       ttsLatencyTotal += (Date.now() - ttsStart);
 
       if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
-      if (ttsResult?.mulawBuffer && ws.readyState === 1) {
+      if (ttsResult?.mulawBuffer && wsOpen && ws.readyState === 1) {
         await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
       } else {
         logger.warn('Reply TTS synthesis failed, skipping audio', {
@@ -1693,6 +1743,7 @@ async function cleanupSession(session, ws, pingInterval) {
   if (!session || session._finalized) return;
 
   session._wsClosed = true;
+  session.cancelOngoingOperations(); // Signal abort immediately so in-flight TTS/LLM bail out fast
   clearTimeout(session.silenceTimer);
   clearTimeout(session.maxDurationTimer);
 
@@ -1723,7 +1774,6 @@ async function cleanupSession(session, ws, pingInterval) {
   }
 
   session._ended = true;
-  session.cancelOngoingOperations();
 
   await finalizeCall(session);
 
