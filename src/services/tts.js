@@ -251,8 +251,17 @@ async function* synthesizeStream(text, callSid, language = 'en-IN') {
   }
 }
 
+// Synchronous cache-only lookup — returns cached result or null (no API call).
+// Used by speculative early response to avoid any async overhead.
+function synthesizeRawCached(text, language = 'en-IN') {
+  if (!text || text.trim().length === 0) return null;
+  const key = cacheKey(text.trim(), language);
+  return ttsCache.get(key) || null;
+}
+
 module.exports = {
   synthesizeRaw,
+  synthesizeRawCached,
   synthesizeStream,
   prewarmPhrases,
   pcm16ToMulaw,

@@ -675,4 +675,4 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
   }
 }
 
-module.exports = { generateReply, generateReplyStream, clearHistory, getHistory };
+module.exports = { generateReply, generateReplyStream, clearHistory, getHistory, phrase };

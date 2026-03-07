@@ -349,9 +349,9 @@ const PLAYBACK_CHUNK_SIZE = config.pipeline.playbackChunkSize || 160;
 const PLAYBACK_CHUNK_INTERVAL_MS = config.pipeline.playbackChunkIntervalMs || 20;
 const TARGET_COST_PER_MIN_RS = config.budget?.targetPerMinuteRs || 2;
 const STREAM_CLOSE_DRAIN_MS = 1500;
-const ECHO_COOLDOWN_MS = 200;   // Discard audio for 200ms after playback ends (Vobiz has no AEC)
+const ECHO_COOLDOWN_MS = 120;   // Discard audio for 120ms after playback ends (Vobiz L16 has minimal echo)
 const MAX_SPEECH_DURATION_MS = 2000; // Force processing after 2s of continuous speech for fast responses
-const NOISE_CALIBRATION_CHUNKS = 12; // ~240ms of audio to calibrate noise floor after cool-down
+const NOISE_CALIBRATION_CHUNKS = 8;  // ~160ms of audio to calibrate noise floor after cool-down
 const VOICE_MARGIN = 0.006; // Additive margin above noise floor for voice detection
 const L16_MIN_THRESHOLD = 0.0002; // Very low threshold for quiet L16 PSTN audio
 const L16_VOICE_MARGIN = 0.0004;  // Small margin — L16 PSTN RMS is typically 0.0003-0.001
@@ -573,6 +573,9 @@ class EnhancedCallSession {
 
     // Transcript
     this.transcriptEntries = [];
+
+    // Speculative early response: played before STT returns on outbound availability_check
+    this._speculativeResponseSent = false;
   }
 
   normalizeLanguageCode(language) {
@@ -1405,6 +1408,38 @@ function triggerProcessing(session, ws) {
     session.isPlaying = false;
   }
 
+  // ── SPECULATIVE EARLY RESPONSE ──────────────────────────────────────────
+  // On outbound calls at availability_check (the first turn after greeting),
+  // immediately play the cached re-ask phrase BEFORE STT returns.
+  // This eliminates ~2s of dead air (STT latency) from the caller's experience.
+  // The STT pipeline still runs in the background for transcript/FSM purposes.
+  if (session.direction === 'outbound' &&
+    !session._speculativeResponseSent &&
+    session.fsm.getState() === 'LISTENING' &&
+    ws.readyState === 1) {
+    session._speculativeResponseSent = true;
+    const speculativePhrase = llm.phrase(session.language, 'availabilityReask');
+    const cached = tts.synthesizeRawCached?.(speculativePhrase, session.language);
+    // Try synchronous cache lookup first, fall back to async
+    const playCached = (buf) => {
+      if (buf?.mulawBuffer && ws.readyState === 1) {
+        logger.log('Speculative early response', {
+          callSid: session.callSid,
+          phrase: speculativePhrase.substring(0, 40)
+        });
+        sendAudioThroughStream(session, ws, buf.mulawBuffer).catch(() => { });
+      }
+    };
+    if (cached) {
+      playCached(cached);
+    } else {
+      // Async cache hit (synthesizeRaw returns from cache)
+      tts.synthesizeRaw(speculativePhrase, null, session.language)
+        .then(playCached)
+        .catch(() => { });
+    }
+  }
+
   startPipeline(session, ws, pcmChunks);
 }
 
@@ -1604,6 +1639,12 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
       if (costGuardActive && fullSentence.length > 120) continue; // Skip further sentences if guard is active
 
       fullSentence += sentence + ' ';
+
+      // If speculative response already played this exact phrase, skip TTS+playback
+      if (session._speculativeResponseSent && session.isPlaying) {
+        logger.debug('Skipping TTS — speculative response already playing', session.callSid);
+        continue;
+      }
 
       const ttsStart = Date.now();
       const ttsResult = await tts.synthesizeRaw(sentence, session.callSid, session.language);
