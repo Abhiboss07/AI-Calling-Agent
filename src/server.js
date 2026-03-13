@@ -6,6 +6,8 @@ const db = require('./services/db');
 const vobizRoutes = require('./routes/vobiz');
 const authRoutes = require('./routes/auth');
 const apiRoutes = require('./routes/api');
+const campaignRoutes = require('./routes/campaigns');
+const knowledgeBaseRoutes = require('./routes/knowledgeBase');
 const { verifyToken } = require('./middleware/auth');
 const setupWs = require('./ws-media-optimized');
 const metrics = require('./services/metrics');
@@ -62,19 +64,21 @@ let isShuttingDown = false;
 async function start() {
   await db.connect();
 
-  // ── Validate OpenAI API key at startup ──────────────────────────────────
+  // ── Validate AI provider API key at startup ──────────────────────────────
   try {
-    const openai = require('./services/openaiClient');
-    const keyCheck = await openai.validateApiKey();
+    const aiClient = require('./services/aiClient');
+    const providerLabel = config.aiProvider === 'gemini' ? 'Gemini' : 'OpenAI';
+    const keyCheck = await aiClient.validateApiKey();
     if (keyCheck.valid) {
-      logger.log('✅ OpenAI API key validated — TTS/STT/LLM will work');
+      logger.log(`✅ ${providerLabel} API key validated — TTS/STT/LLM will work`);
     } else {
-      logger.error(`⚠️  OpenAI API key INVALID — ${keyCheck.error}`);
+      logger.error(`⚠️  ${providerLabel} API key INVALID — ${keyCheck.error}`);
       logger.error('   TTS, STT, and LLM will ALL fail during calls!');
-      logger.error('   Fix: Update OPENAI_API_KEY in your .env file with a valid key');
+      const keyVar = config.aiProvider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
+      logger.error(`   Fix: Update ${keyVar} in your .env file with a valid key`);
     }
   } catch (err) {
-    logger.warn('OpenAI key validation skipped:', err.message);
+    logger.warn('AI provider key validation skipped:', err.message);
   }
 
   const app = express();
@@ -159,26 +163,23 @@ async function start() {
   });
 
   // Readiness probe — can the service accept traffic?
-  let lastOpenAICheck = 0;
-  let openAIHealthy = true;
+  let lastAIProviderCheck = 0;
+  let aiProviderHealthy = true;
 
   app.get('/health/ready', async (req, res) => {
     const dbReady = db.isReady();
 
-    // FIX: Lightweight OpenAI check using free /v1/models endpoint (cached for 60s)
+    // Lightweight AI provider check (cached 60s)
     const now = Date.now();
-    if (now - lastOpenAICheck > 60000) {
+    if (now - lastAIProviderCheck > 60000) {
       try {
-        const axios = require('axios');
-        await axios.get('https://api.openai.com/v1/models', {
-          headers: { Authorization: `Bearer ${config.openaiApiKey}` },
-          timeout: 5000
-        });
-        openAIHealthy = true;
-        lastOpenAICheck = now;
+        const aiClient = require('./services/aiClient');
+        const result = await aiClient.validateApiKey();
+        aiProviderHealthy = result.valid;
+        lastAIProviderCheck = now;
       } catch (err) {
-        openAIHealthy = false;
-        logger.warn('OpenAI health check failed', err.message);
+        aiProviderHealthy = false;
+        logger.warn('AI provider health check failed', err.message);
       }
     }
 
@@ -189,7 +190,7 @@ async function start() {
       version: '2.0.0',
       uptime: Math.round(process.uptime()),
       database: dbReady ? 'connected' : 'disconnected',
-      openai: openAIHealthy ? 'healthy' : 'unhealthy',
+      aiProvider: `${config.aiProvider}:${aiProviderHealthy ? 'healthy' : 'unhealthy'}`,
       memory: {
         heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
         heapTotalMB: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
@@ -222,6 +223,8 @@ async function start() {
   app.use('/api/v1/auth', authRoutes);  // Public auth routes
   app.use('/api/v1/calls/test-start', apiRoutes);  // Public test endpoint
   app.use('/api', verifyToken, apiRoutes);  // Protected API routes
+  app.use('/api', verifyToken, campaignRoutes);
+  app.use('/api', verifyToken, knowledgeBaseRoutes);
   app.use('/monitor', monitoringRoutes);  // Monitoring API routes
 
   // WebSocket for Vobiz Media Streams

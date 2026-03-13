@@ -23,8 +23,8 @@ async function verifyToken(req, res, next) {
 
         const token = authHeader.split(' ')[1];
 
-        // Developer bypass for local testing
-        if (token === 'dummy-token' && process.env.NODE_ENV !== 'production') {
+        // Developer bypass — only when explicitly opted in via ALLOW_DUMMY_TOKEN=true
+        if (token === 'dummy-token' && process.env.ALLOW_DUMMY_TOKEN === 'true') {
             const bypassUser = await User.findOne();
             if (bypassUser) {
                 req.user = bypassUser;

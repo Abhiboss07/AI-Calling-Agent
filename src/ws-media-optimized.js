@@ -1415,7 +1415,7 @@ function triggerProcessing(session, ws) {
   // The STT pipeline still runs in the background for transcript/FSM purposes.
   if (session.direction === 'outbound' &&
     !session._speculativeResponseSent &&
-    session.fsm.getState() === 'LISTENING' &&
+    session.fsm.getState() === States.LISTENING &&
     ws.readyState === 1) {
     session._speculativeResponseSent = true;
     const speculativePhrase = llm.phrase(session.language, 'availabilityReask');
@@ -1689,7 +1689,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   } else if (!costControl.isWithinBudget(session.callSid)) {
     logger.warn('Budget exceeded, hanging up', session.callSid);
     await endCallGracefully(session, ws, 'Our call duration limit is reached. We will call you back. Goodbye.');
-  } else if (session.fsm.getState() === 'call_ended') {
+  } else if (session.fsm.getState() === States.END_CALL) {
     await endCallGracefully(session, ws, null);
   }
 }

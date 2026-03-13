@@ -1,4 +1,4 @@
-const openai = require('./openaiClient');
+const openai = require('./aiClient');
 const logger = require('../utils/logger');
 const costControl = require('./costControl');
 const metrics = require('./metrics');
@@ -402,7 +402,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       { role: 'user', content: userMsg }
     ];
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (!config.openaiApiKey) {
       logger.warn('OpenAI API key missing; using fallback response');
       metrics.incrementLlmRequest(false);
       return { ...FALLBACK_RESPONSE };
@@ -410,7 +410,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
 
     metrics.incrementLlmRequest(true);
 
-    const resp = await openai.chatCompletion(messages, 'gpt-4o-mini', {
+    const resp = await openai.chatCompletion(messages, config.llm.model, {
       temperature: 0.25,
       max_tokens: 100,
       response_format: { type: 'json_object' }
@@ -531,7 +531,7 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
     const userMsg = [
       `CUSTOMER NAME: ${customerName || 'unknown'}`,
       `CALL DIRECTION: ${direction}`,
-      `HONORIFIC HINT: ${honorific || ' sir_maam '}`,
+      `HONORIFIC HINT: ${honorific || 'sir_maam'}`,
       `LATEST: "${lastTranscript || '(silence)'}"`,
       `CALL STATE: ${JSON.stringify(callState || {})}`,
       '',
@@ -546,7 +546,8 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
       { role: 'user', content: userMsg }
     ];
 
-    if (!config.openaiApiKey) {
+    const activeApiKey = config.aiProvider === 'gemini' ? config.geminiApiKey : config.openaiApiKey;
+    if (!activeApiKey) {
       yield { type: 'sentence', text: FALLBACK_RESPONSE.speak };
       yield { ...FALLBACK_RESPONSE };
       return;
@@ -554,7 +555,7 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
 
     metrics.incrementLlmRequest(true);
 
-    const stream = await openai.chatCompletionStream(messages, 'gpt-4o-mini', {
+    const stream = await openai.chatCompletionStream(messages, config.llm.model, {
       temperature: 0.25,
       max_tokens: 100,
       response_format: { type: 'json_object' }

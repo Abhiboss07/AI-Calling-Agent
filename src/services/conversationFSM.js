@@ -542,4 +542,4 @@ class ConversationFSM {
   }
 }
 
-module.exports = { ConversationFSM, States, Transitions };
+module.exports = { ConversationFSM, States };

@@ -178,5 +178,5 @@ function getSupportedLocales() {
     return Object.keys(LANGUAGES);
 }
 
-module.exports = { LANGUAGES, getLanguage, isSupported, getSupportedLocales, normalizeLanguageCode };
+module.exports = { getLanguage, isSupported, normalizeLanguageCode };
 

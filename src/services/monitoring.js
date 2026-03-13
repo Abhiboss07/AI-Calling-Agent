@@ -195,17 +195,6 @@ class MonitoringServer {
     process.emit('transcript_update', transcriptData);
   }
 
-  notifyAgentSpeaking(callData) {
-    process.emit('agent_speaking', callData);
-  }
-
-  notifyCustomerSpeaking(callData) {
-    process.emit('customer_speaking', callData);
-  }
-
-  notifyMetricsUpdate(metricsData) {
-    process.emit('metrics_update', metricsData);
-  }
 }
 
 // Create singleton instance
@@ -248,7 +237,7 @@ router.get('/transcript/:callUuid', async (req, res) => {
     const { callUuid } = req.params;
     const Transcript = require('../models/transcript.model');
     
-    const transcripts = await Transcript.find({ callUuid }).sort({ timestamp: 1 });
+    const transcripts = await Transcript.find({ callId: callUuid }).sort({ timestamp: 1 });
     
     res.json({
       ok: true,

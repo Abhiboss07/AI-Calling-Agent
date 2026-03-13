@@ -5,7 +5,6 @@ const config = require('../config');
 const Call = require('../models/call.model');
 const Lead = require('../models/lead.model');
 const Transcript = require('../models/transcript.model');
-const Recording = require('../models/recording.model');
 const logger = require('../utils/logger');
 const metrics = require('../services/metrics');
 const costControl = require('../services/costControl');
@@ -21,15 +20,7 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 
-function getPublicBaseUrl(req) {
-  const configured = (config.baseUrl || '').trim();
-  const isConfiguredUsable = configured && !/localhost|127\.0\.0\.1/i.test(configured);
-  if (isConfiguredUsable) return configured.replace(/\/$/, '');
-
-  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-  const host = req.headers['x-forwarded-host'] || req.get('host');
-  return `${proto}://${host}`.replace(/\/$/, '');
-}
+const { getPublicBaseUrl } = require('../utils/urlHelper');
 
 // ──────────────────────────────────────────────────────────────────────────
 // CALLS

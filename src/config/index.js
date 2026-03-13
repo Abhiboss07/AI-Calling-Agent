@@ -8,7 +8,9 @@ const path = require('path');
 dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
 
 // Validation
-const REQUIRED = ['VOBIZ_AUTH_ID', 'VOBIZ_AUTH_TOKEN', 'VOBIZ_CALLER_ID', 'OPENAI_API_KEY'];
+const _provider = process.env.AI_PROVIDER || 'gemini';
+const _aiKeyVar = _provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
+const REQUIRED = ['VOBIZ_AUTH_ID', 'VOBIZ_AUTH_TOKEN', 'VOBIZ_CALLER_ID', _aiKeyVar];
 const missing = REQUIRED.filter((k) => !process.env[k]);
 if (missing.length) {
   // use stderr directly here since logger depends on config (circular)
@@ -37,7 +39,9 @@ module.exports = {
     callerId: process.env.VOBIZ_CALLER_ID
   },
 
+  aiProvider: _provider,           // 'gemini' (default) or 'openai'
   openaiApiKey: process.env.OPENAI_API_KEY,
+  geminiApiKey: process.env.GEMINI_API_KEY,
 
   mongodbUri: process.env.MONGODB_URI, // Atlas URI required
 
@@ -81,6 +85,7 @@ module.exports = {
   },
 
   llm: {
+    model: process.env.LLM_MODEL || (_provider === 'gemini' ? 'gemini-2.0-flash' : 'gpt-4o-mini'),
     maxHistory: envNumber('LLM_MAX_HISTORY', 10),
     historyTtlMs: envNumber('LLM_HISTORY_TTL_MS', 30 * 60 * 1000)
   },

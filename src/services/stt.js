@@ -1,4 +1,4 @@
-const openai = require('./openaiClient');
+const openai = require('./aiClient');
 const logger = require('../utils/logger');
 const metrics = require('./metrics');
 const costControl = require('./costControl');
