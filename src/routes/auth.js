@@ -58,12 +58,21 @@ router.post('/signup', async (req, res) => {
         });
         await user.save();
 
-        await sendVerificationCode(email, code, name);
+        let emailSent = true;
+        try {
+            await sendVerificationCode(email, code, name);
+        } catch (emailErr) {
+            emailSent = false;
+            logger.warn('Signup: verification email failed to send', emailErr.message);
+        }
 
         res.status(201).json({
             ok: true,
-            message: 'Account created. Verification code sent to your email.',
-            email
+            message: emailSent
+                ? 'Account created. Verification code sent to your email.'
+                : 'Account created. Email delivery is unavailable — please contact support to verify your account.',
+            email,
+            emailSent
         });
     } catch (err) {
         logger.error('Signup error', err.message);

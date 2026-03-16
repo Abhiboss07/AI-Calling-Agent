@@ -11,6 +11,7 @@ const costControl = require('../services/costControl');
 const storage = require('../services/storage');
 const UploadLog = require('../models/uploadLog.model');
 const Document = require('../models/document.model');
+const Recording = require('../models/recording.model');
 const multer = require('multer');
 const { normalizeLanguageCode } = require('../config/languages');
 
@@ -44,8 +45,8 @@ router.post('/v1/calls/test-start', async (req, res) => {
     const call = await Call.create({
       phoneNumber: cleanPhone,
       callSid: `test-${Date.now()}`,
-      status: 'test-initiated',
-      direction: 'test',
+      status: 'queued',
+      direction: 'outbound',
       language: normalizedLanguage,
       startAt: new Date(),
       metadata: {
@@ -63,7 +64,7 @@ router.post('/v1/calls/test-start', async (req, res) => {
     monitoringServer.notifyCallStarted({
       callUuid: call.callSid,
       phoneNumber: cleanPhone,
-      direction: 'test',
+      direction: 'outbound',
       startTime: new Date()
     });
 
@@ -156,6 +157,7 @@ router.post('/v1/calls/:id/end', async (req, res) => {
     const call = await Call.findById(req.params.id);
     if (!call) return res.status(404).json({ ok: false, error: 'not found' });
 
+    const alreadyCompleted = call.status === 'completed';
     const durationSec = call.endAt && call.startAt ? Math.round((call.endAt - call.startAt) / 1000) : 0;
     call.status = 'completed';
     call.durationSec = durationSec;
@@ -164,7 +166,7 @@ router.post('/v1/calls/:id/end', async (req, res) => {
 
     if (call.callSid) costControl.endCallTracking(call.callSid);
     metrics.addCallDuration(durationSec);
-    metrics.incrementCallsCompleted();
+    if (!alreadyCompleted) metrics.incrementCallsCompleted();
 
     res.json({ ok: true, callId: call._id, durationSec });
   } catch (err) {
@@ -669,6 +671,11 @@ router.post('/v1/documents/url', async (req, res) => {
     const { url, category = 'All Documents' } = req.body;
 
     if (!url) return res.status(400).json({ ok: false, error: 'URL is required' });
+
+    const validCategories = ['All Documents', 'Property Listings', 'Scripts & FAQs', 'Legal & Contracts'];
+    if (!validCategories.includes(category)) {
+      return res.status(400).json({ ok: false, error: `Invalid category. Must be one of: ${validCategories.join(', ')}` });
+    }
 
     const doc = await Document.create({
       title: url,

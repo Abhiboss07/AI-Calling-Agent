@@ -14,7 +14,7 @@ const metrics = require('./services/metrics');
 const { startMonitoring, router: monitoringRoutes } = require('./services/monitoring');
 
 // ══════════════════════════════════════════════════════════════════════════════
-// RATE LIMITER (in-memory — production: Redis via RATE_LIMIT_REDIS_URL)
+// RATE LIMITER (in-memory)
 // ══════════════════════════════════════════════════════════════════════════════
 const rateLimitMap = new Map();
 function rateLimit(windowMs = 60000, max = 200) {
@@ -221,10 +221,16 @@ async function start() {
 
   app.use('/vobiz', vobizRoutes);
   app.use('/api/v1/auth', authRoutes);  // Public auth routes
-  app.use('/api/v1/calls/test-start', apiRoutes);  // Public test endpoint
-  app.use('/api', verifyToken, apiRoutes);  // Protected API routes
-  app.use('/api', verifyToken, campaignRoutes);
-  app.use('/api', verifyToken, knowledgeBaseRoutes);
+
+  // Public test endpoint — must be before the auth-protected /api middleware
+  app.post('/api/v1/calls/test-start', (req, res, next) => {
+    req.url = '/v1/calls/test-start';
+    apiRoutes(req, res, next);
+  });
+
+  app.use('/api', verifyToken, apiRoutes);                               // Protected API routes
+  app.use('/api/v1/campaigns', verifyToken, campaignRoutes);             // Campaign CRUD
+  app.use('/api/v1/knowledge-bases', verifyToken, knowledgeBaseRoutes);  // Knowledge-base CRUD
   app.use('/monitor', monitoringRoutes);  // Monitoring API routes
 
   // WebSocket for Vobiz Media Streams

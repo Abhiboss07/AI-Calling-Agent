@@ -55,22 +55,3 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-  # ── Redis (for scaling: rate limiting, session store, pub/sub) ───────────
-  redis:
-    image: redis:7-alpine
-    container_name: ai-calling-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-
-volumes:
-  redis_data:
