@@ -14,8 +14,19 @@
 
 const logger = require('../utils/logger');
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+// speak field can be: string | fn(ctx) | array of string|fn — arrays are cycled by turnCount
+function _resolveSpeak(speakDef, ctx) {
+  if (Array.isArray(speakDef)) {
+    const idx = (ctx.turnCount || 0) % speakDef.length;
+    const item = speakDef[idx];
+    return typeof item === 'function' ? item(ctx) : item;
+  }
+  return typeof speakDef === 'function' ? speakDef(ctx) : speakDef;
+}
+
 // ── Pattern definitions ───────────────────────────────────────────────────────
-// Each entry: { regex, steps?, direction?, speak: string|fn, action, nextStep }
+// Each entry: { regex, steps?, direction?, speak: string|fn|array, action, nextStep }
 //   steps: array of FSM steps where this pattern applies (omit = any step)
 //   direction: 'outbound'|'inbound'|undefined (any)
 
@@ -24,7 +35,11 @@ const PATTERNS = [
   {
     id: 'not_interested',
     regex: /\b(not interested|no thanks|don't call|remove (me|my|number)|stop calling|unsubscribe)\b/i,
-    speak: (ctx) => `I completely understand. I appreciate your time and won't disturb you again. Have a wonderful day!`,
+    speak: [
+      (ctx) => `I completely understand. I won't disturb you again. Have a wonderful day!`,
+      (ctx) => `No worries at all. I respect that. Have a great day!`,
+      (ctx) => `Absolutely, I understand. Thanks for your time. Take care!`
+    ],
     action: 'hangup',
     nextStep: 'close'
   },
@@ -34,7 +49,11 @@ const PATTERNS = [
     id: 'busy',
     regex: /\b(busy|in a meeting|not now|bad time|call (me )?(back|later)|later|abhi nahi|baad mein)\b/i,
     steps: ['availability_check'],
-    speak: (ctx) => `No problem at all. What time would be convenient for me to call you back?`,
+    speak: [
+      `No problem at all. What time would be convenient for a quick callback?`,
+      `Of course! When would be a good time for me to call you back?`,
+      `Sure, I understand. What time works best for you — morning or evening?`
+    ],
     action: 'collect',
     nextStep: 'reschedule_time'
   },
@@ -45,7 +64,11 @@ const PATTERNS = [
     regex: /^(yes|yeah|yep|sure|ok|okay|haan|haan ji|ji|theek hai|boliye|go ahead|fine|alright)[.!,\s]*$/i,
     steps: ['availability_check'],
     direction: 'outbound',
-    speak: (ctx) => `Great, thank you for your time! I'm ${ctx.agentName} from ${ctx.companyName}. Are you looking to buy, rent, or invest in property?`,
+    speak: [
+      (ctx) => `Great, thanks for your time! I'm ${ctx.agentName} from ${ctx.companyName}. Are you looking to buy, rent, or invest in property?`,
+      (ctx) => `Perfect! So I'm ${ctx.agentName} from ${ctx.companyName}. Are you currently looking to buy, rent, or invest?`,
+      (ctx) => `Wonderful! ${ctx.agentName} here from ${ctx.companyName}. Quick question — are you looking to buy, rent, or invest in property?`
+    ],
     action: 'collect',
     nextStep: 'purpose'
   },
@@ -82,7 +105,11 @@ const PATTERNS = [
   {
     id: 'audio_check',
     regex: /\b(can you hear|are you there|hello|testing|audio|sound|aawaz|sun pa rahe)\b/i,
-    speak: () => `Yes, I can hear you clearly. Please go ahead.`,
+    speak: [
+      `Yes, I can hear you clearly. Please go ahead.`,
+      `Yes, loud and clear! Please continue.`,
+      `Yes, I can hear you well. Go ahead, please.`
+    ],
     action: 'continue',
     nextStep: null
   },
@@ -91,7 +118,11 @@ const PATTERNS = [
   {
     id: 'who_are_you',
     regex: /\b(who (are you|is (this|calling)|called)|kya aap|aap kaun|identity|introducing)\b/i,
-    speak: (ctx) => `I'm ${ctx.agentName}, a property consultant from ${ctx.companyName}. I'm reaching out to share an exciting real estate opportunity that might interest you.`,
+    speak: [
+      (ctx) => `I'm ${ctx.agentName}, a property consultant from ${ctx.companyName}. I'm reaching out about an exciting real estate opportunity.`,
+      (ctx) => `This is ${ctx.agentName} from ${ctx.companyName}. I help clients find the right property — buying, renting, or investing.`,
+      (ctx) => `Hi, I'm ${ctx.agentName} from ${ctx.companyName}. We specialise in premium real estate across major cities.`
+    ],
     action: 'continue',
     nextStep: null
   },
@@ -100,7 +131,11 @@ const PATTERNS = [
   {
     id: 'whatsapp',
     regex: /\b(whatsapp|send (me |the )?(details|info|brochure)|message|text me|email)\b/i,
-    speak: () => `Absolutely, I can share all the details. Could I also take just 2 minutes to explain the key highlights? It would help you decide if this suits your needs.`,
+    speak: [
+      `Absolutely, I can share all the details. Could I take 2 minutes to explain the highlights? It will help you decide.`,
+      `Sure! I'll send you everything. But let me quickly tell you the key points — it'll take just 2 minutes.`,
+      `Of course! I can share the brochure. Would you also like me to walk you through the key features quickly?`
+    ],
     action: 'continue',
     nextStep: null
   },
@@ -202,7 +237,7 @@ function lookup(transcript, ctx = {}) {
 
   const text = transcript.trim();
   const { step = '', direction = 'outbound', agentName = 'Priya', companyName = 'our company',
-    budget = null, location = null } = ctx;
+    budget = null, location = null, turnCount = 0 } = ctx;
 
   for (const pattern of PATTERNS) {
     // Check step filter
@@ -212,10 +247,9 @@ function lookup(transcript, ctx = {}) {
     // Check regex
     if (!pattern.regex.test(text)) continue;
 
-    // Build the speak text
-    const speak = typeof pattern.speak === 'function'
-      ? pattern.speak({ agentName, companyName, step, language: ctx.language, budget, location })
-      : pattern.speak;
+    // Build the speak text — supports string | fn | array of (string|fn)
+    const speakCtx = { agentName, companyName, step, language: ctx.language, budget, location, turnCount };
+    const speak = _resolveSpeak(pattern.speak, speakCtx);
 
     logger.debug(`[CACHE] Hit: ${pattern.id} → "${speak.substring(0, 60)}"`);
 
@@ -241,12 +275,16 @@ function getAllPhrases(ctx = {}) {
   const phrases = [];
 
   for (const pattern of PATTERNS) {
-    const speak = typeof pattern.speak === 'function'
-      ? pattern.speak({ agentName, companyName, step: '', language: 'en-IN' })
-      : pattern.speak;
-    if (!seen.has(speak)) {
-      seen.add(speak);
-      phrases.push(speak);
+    const baseCtx = { agentName, companyName, step: '', language: 'en-IN', budget: null, location: null, turnCount: 0 };
+    if (Array.isArray(pattern.speak)) {
+      // Warm all variants
+      for (let i = 0; i < pattern.speak.length; i++) {
+        const speak = _resolveSpeak(pattern.speak, { ...baseCtx, turnCount: i });
+        if (!seen.has(speak)) { seen.add(speak); phrases.push(speak); }
+      }
+    } else {
+      const speak = _resolveSpeak(pattern.speak, baseCtx);
+      if (!seen.has(speak)) { seen.add(speak); phrases.push(speak); }
     }
   }
   return phrases;

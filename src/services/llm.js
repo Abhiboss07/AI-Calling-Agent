@@ -1,5 +1,6 @@
 // LLM: Gemini primary → OpenAI fallback
 const humanSpeech = require('./humanSpeechEngine');
+const conversationStyle = require('./conversationStyle');
 const geminiClient = require('./geminiClient');
 const openaiClient = require('./openaiClient');
 const logger = require('../utils/logger');
@@ -161,51 +162,60 @@ function classifyAvailability(text = '') {
   return 'unknown';
 }
 
-function phrase(languageCode, key) {
-  const map = {
-    'en-IN': {
-      availabilityReask: 'Is this a good time to talk for one minute?',
-      availabilityYes: 'Great, thank you. Are you looking to buy, rent, or invest?',
-      availabilityNo: 'No problem. What is a better time for a quick callback?',
-      rescheduleAsk: 'Sure. Please share a suitable time for callback.',
-      rescheduleThanks: 'Perfect, thank you. We will call you at that time. Goodbye.',
-      inboundAssist: 'Thank you for calling. How may I help you today?',
-      audioCheck: 'Yes, I can hear you clearly. Please go ahead.',
-      close: 'Thank you for your time. Goodbye.'
-    },
-    'hinglish': {
-      availabilityReask: 'Kya abhi 1 minute baat karna convenient hai?',
-      availabilityYes: 'Great, thank you. Aap buy, rent, ya invest ke liye dekh rahe hain?',
-      availabilityNo: 'No problem. Callback ke liye kaunsa time better rahega?',
-      rescheduleAsk: 'Sure, callback ka suitable time bata dijiye.',
-      rescheduleThanks: 'Perfect, thank you. Hum ussi time call karenge. Goodbye.',
-      inboundAssist: 'Thank you for calling. Aaj main aapki kaise help kar sakti hoon?',
-      audioCheck: 'Ji, main aapko clear sun pa rahi hoon. Please boliye.',
-      close: 'Thank you ji. Goodbye.'
-    },
-    'hi-IN': {
-      availabilityReask: 'क्या अभी एक मिनट बात करना ठीक रहेगा?',
-      availabilityYes: 'बहुत अच्छा। क्या आप खरीदना, किराए पर लेना, या निवेश करना चाहते हैं?',
-      availabilityNo: 'कोई बात नहीं। कृपया बताइए, दोबारा कॉल का सही समय क्या रहेगा?',
-      rescheduleAsk: 'ठीक है, कृपया कॉल बैक का सही समय बताइए।',
-      rescheduleThanks: 'बहुत धन्यवाद। हम उसी समय कॉल करेंगे। नमस्ते।',
-      inboundAssist: 'धन्यवाद। मैं आपकी कैसे मदद कर सकती हूँ?',
-      audioCheck: 'जी, आपकी आवाज साफ आ रही है। बताइए।',
-      close: 'धन्यवाद। नमस्ते।'
-    }
-  };
+// ── Response variation pools (3–5 per key) ────────────────────────────────
+const PHRASE_POOLS = {
+  'en-IN': {
+    availabilityReask: ['Is this a good time to talk for one minute?', 'Do you have a quick minute to chat?', 'Can I take just 60 seconds of your time?', 'Is now a convenient time for a brief conversation?'],
+    availabilityYes: ['Great, thank you. Are you looking to buy, rent, or invest in property?', 'Wonderful! Are you interested in buying, renting, or investing?', 'Perfect. Are you looking to buy, rent, or invest?', 'Excellent! Buying, renting, or investing — what brings you here?'],
+    availabilityNo: ['No problem at all. What time works better for a quick callback?', 'Of course. When would be a good time to call you back?', 'Absolutely, no worries. What is a convenient callback time?', 'Sure! When can I reach you for a quick chat?'],
+    rescheduleAsk: ['Sure. Please share a convenient time for the callback.', 'Of course. What time works best for you?', 'No problem — when would you like me to call back?', 'Absolutely. What is a good time for you?'],
+    rescheduleThanks: ['Perfect, noted! I will call you at that time. Have a great day!', 'Wonderful — I have noted it. Speak to you then. Goodbye!', 'Great, I will call you back then. Thank you. Bye!', 'Noted! We will connect then. Take care. Goodbye!'],
+    inboundAssist: ['Thank you for calling. How may I help you today?', 'Thanks for reaching out. How can I assist you?', 'Hello, thank you for calling. What can I help you with?', 'Hi there, thanks for calling. How may I be of help?'],
+    audioCheck: ['Yes, I can hear you clearly. Please go ahead.', 'Absolutely, the line is clear. Do continue.', 'Yes, loud and clear! Please go on.', 'Yes, I can hear you well. Please proceed.'],
+    close: ['Thank you for your time. Have a wonderful day. Goodbye!', 'It was a pleasure speaking with you. Take care. Goodbye!', 'Thank you! Hope to connect soon. Have a great day!', 'Thanks for your time. Wishing you a great day. Bye!']
+  },
+  'hinglish': {
+    availabilityReask: ['Kya abhi 1 minute baat karna convenient hai?', 'Kya aap abhi ek minute de sakte hain?', 'Abhi thoda time hai baat karne ka?', 'Kya abhi baat karna theek rahega?'],
+    availabilityYes: ['Great, thank you. Aap buy, rent, ya invest ke liye dekh rahe hain?', 'Wonderful! Kharidna, rent karna, ya invest karna — kya soch rahe hain?', 'Perfect! Buy, rent, ya invest — kya interest hai?', 'Excellent! Property mein kya plan hai — buy, rent, ya investment?'],
+    availabilityNo: ['No problem. Callback ke liye kaunsa time better rahega?', 'Bilkul theek hai. Kab call karun aapko?', 'Koi baat nahi. Callback ke liye suitable time batayein.', 'Sure ji. Kab available rahenge?'],
+    rescheduleAsk: ['Sure, callback ka suitable time bata dijiye.', 'Theek hai, kab call karun?', 'Ji, kaunsa waqt sahi rahega aapke liye?', 'No problem, convenient time batao please.'],
+    rescheduleThanks: ['Perfect, note kar liya! Ussi time call karenge. Goodbye!', 'Great ji! Aapka time note kar liya. Tab baat karte hain.', 'Bilkul, hum ussi time connect karenge. Dhanyavaad!', 'Noted! Tab baat karte hain. Take care. Bye!'],
+    inboundAssist: ['Thank you for calling. Aaj main aapki kaise help kar sakti hoon?', 'Hello ji, call karne ka shukriya. Kya madad kar sakti hoon?', 'Hi! Aapki kaise help kar sakti hoon?', 'Thanks for calling. Kya main aapki help kar sakti hoon?'],
+    audioCheck: ['Ji, main aapko clear sun pa rahi hoon. Please boliye.', 'Haan ji, aawaz bilkul clear hai. Boliye.', 'Yes, main sun pa rahi hoon. Aage boliye.', 'Ji, sab clear hai. Please continue karein.'],
+    close: ['Thank you ji. Goodbye!', 'Bahut shukriya aapka. Alvida!', 'Thank you for your time ji. Bye!', 'Dhanyavaad! Aapka din achha rahe. Goodbye!']
+  },
+  'hi-IN': {
+    availabilityReask: ['क्या अभी एक मिनट बात करना ठीक रहेगा?', 'क्या आपके पास अभी एक मिनट का समय है?', 'क्या अभी बात करना सुविधाजनक है?', 'क्या मैं एक मिनट का समय ले सकती हूँ?'],
+    availabilityYes: ['बहुत अच्छा। क्या आप खरीदना, किराए पर लेना, या निवेश करना चाहते हैं?', 'शानदार! खरीदना है, किराया चाहिए, या निवेश करना है?', 'बढ़िया! क्या प्लान है — खरीदना, किराया, या निवेश?', 'परफेक्ट! आपकी क्या जरूरत है — खरीदना, किराया, या निवेश?'],
+    availabilityNo: ['कोई बात नहीं। कृपया बताइए, दोबारा कॉल का सही समय क्या रहेगा?', 'बिल्कुल ठीक है। कब कॉल करूँ आपको?', 'समझ गई। कब वापस कॉल करें?', 'ठीक है। कौन सा समय सही रहेगा?'],
+    rescheduleAsk: ['ठीक है, कृपया कॉल बैक का सही समय बताइए।', 'जी, कब कॉल करूँ आपको?', 'कोई बात नहीं। आपके लिए सुविधाजनक समय बताइए।', 'बताइए, कब बात करना ठीक रहेगा?'],
+    rescheduleThanks: ['बहुत धन्यवाद। हम उसी समय कॉल करेंगे। नमस्ते।', 'बढ़िया! नोट कर लिया। उसी समय बात करते हैं।', 'धन्यवाद! उस समय ज़रूर कॉल करेंगे। अलविदा!', 'परफेक्ट! उस वक्त कनेक्ट करते हैं। शुभ दिन!'],
+    inboundAssist: ['धन्यवाद। मैं आपकी कैसे मदद कर सकती हूँ?', 'नमस्ते! कॉल करने का धन्यवाद। कैसे मदद करूँ?', 'हेलो! मैं आपकी क्या सहायता कर सकती हूँ?', 'जी नमस्ते। आज आपके लिए क्या कर सकती हूँ?'],
+    audioCheck: ['जी, आपकी आवाज साफ आ रही है। बताइए।', 'हाँ, बिल्कुल सुन पा रही हूँ। बोलिए।', 'जी, सब ठीक है। आगे बताइए।', 'हाँ, आवाज़ क्लियर है। जारी रखिए।'],
+    close: ['धन्यवाद। नमस्ते।', 'बहुत धन्यवाद। अलविदा!', 'आपका समय देने का शुक्रिया। शुभ दिन!', 'धन्यवाद जी! नमस्ते।']
+  }
+};
 
-  const lang = map[languageCode] ? languageCode : 'en-IN';
-  return map[lang][key] || map['en-IN'][key];
+// Per-call rotating index to avoid repeating same phrase variant
+const _phraseIndex = new Map();
+
+function phrase(languageCode, key, callSid) {
+  const lang = PHRASE_POOLS[languageCode] ? languageCode : 'en-IN';
+  const pool = (PHRASE_POOLS[lang] || {})[key] || (PHRASE_POOLS['en-IN'] || {})[key] || [''];
+  if (!callSid || pool.length <= 1) return pool[0] || '';
+  const mapKey = `${callSid}:${lang}:${key}`;
+  const idx = (_phraseIndex.get(mapKey) || 0) % pool.length;
+  _phraseIndex.set(mapKey, idx + 1);
+  return pool[idx];
 }
 
-function deterministicTurnReply(step, languageCode, transcript, callDirection) {
+function deterministicTurnReply(step, languageCode, transcript, callDirection, callSid) {
   const heard = normalizeHeardText(transcript);
 
   if (isAudioCheck(heard)) {
     return {
       ...FALLBACK_RESPONSE,
-      speak: phrase(languageCode, 'audioCheck'),
+      speak: phrase(languageCode, 'audioCheck', callSid),
       action: 'collect',
       nextStep: step || 'handle',
       reasoning: 'deterministic_audio_check'
@@ -217,7 +227,7 @@ function deterministicTurnReply(step, languageCode, transcript, callDirection) {
     if (availability === 'yes') {
       return {
         ...FALLBACK_RESPONSE,
-        speak: phrase(languageCode, 'availabilityYes'),
+        speak: phrase(languageCode, 'availabilityYes', callSid),
         action: 'collect',
         nextStep: 'purpose',
         reasoning: 'deterministic_availability_yes'
@@ -226,7 +236,7 @@ function deterministicTurnReply(step, languageCode, transcript, callDirection) {
     if (availability === 'no') {
       return {
         ...FALLBACK_RESPONSE,
-        speak: phrase(languageCode, 'availabilityNo'),
+        speak: phrase(languageCode, 'availabilityNo', callSid),
         action: 'collect',
         nextStep: 'reschedule_time',
         reasoning: 'deterministic_availability_no'
@@ -234,7 +244,7 @@ function deterministicTurnReply(step, languageCode, transcript, callDirection) {
     }
     return {
       ...FALLBACK_RESPONSE,
-      speak: phrase(languageCode, 'availabilityReask'),
+      speak: phrase(languageCode, 'availabilityReask', callSid),
       action: 'collect',
       nextStep: 'availability_check',
       reasoning: 'deterministic_availability_reask'
@@ -245,7 +255,7 @@ function deterministicTurnReply(step, languageCode, transcript, callDirection) {
     if (isMeaningfulUtterance(heard)) {
       return {
         ...FALLBACK_RESPONSE,
-        speak: phrase(languageCode, 'rescheduleThanks'),
+        speak: phrase(languageCode, 'rescheduleThanks', callSid),
         action: 'hangup',
         nextStep: 'close',
         data: { callbackTime: transcript },
@@ -254,7 +264,7 @@ function deterministicTurnReply(step, languageCode, transcript, callDirection) {
     }
     return {
       ...FALLBACK_RESPONSE,
-      speak: phrase(languageCode, 'rescheduleAsk'),
+      speak: phrase(languageCode, 'rescheduleAsk', callSid),
       action: 'collect',
       nextStep: 'reschedule_time',
       reasoning: 'deterministic_reschedule_reask'
@@ -394,7 +404,7 @@ function validateResponse(reply, transcript, step) {
   return { valid: true, reason: null };
 }
 
-async function generateReply({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific, maxTokens, fastMode, modelPref }) {
+async function generateReply({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific, maxTokens, fastMode, modelPref, contextHint, speakerStylePrompt, contextSummary, ackInstruction }) {
   // Hoist step so catch block can reference it in timeout fallback
   const step = callState?.step || '';
   try {
@@ -413,7 +423,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       };
     }
 
-    const fastReply = deterministicTurnReply(step, languageCode, lastTranscript, direction);
+    const fastReply = deterministicTurnReply(step, languageCode, lastTranscript, direction, callSid);
     if (fastReply) return fastReply;
 
     let systemContent = buildSystemPrompt();
@@ -454,12 +464,20 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
     }
 
     if (languageCode === 'hinglish') {
-      systemContent += '\nIMPORTANT: Respond in natural Hinglish (Roman script Hindi mixed with English). Example: "Aapka budget kitna hai? Hum aapko best options dikhayenge." Match the customer\'s language style.';
+      systemContent += '\nIMPORTANT: Respond in consistent informal Hinglish (Roman script). Sound like a real person, not a bot. Mix Hindi+English naturally: "Aapka budget kitna hai? Main best options dikhata hoon." Do NOT use formal English phrases like "esteemed" or "kindly". Match the customer\'s casual tone exactly.';
     } else if (languageCode === 'hi-IN') {
-      systemContent += '\nIMPORTANT: Respond in Hindi (Devanagari script). Keep sentences short and conversational. Example: "आपका बजट कितना है?"';
+      systemContent += '\nIMPORTANT: Respond in Hindi (Devanagari). Short, conversational sentences. Example: "आपका बजट कितना है? मैं सबसे अच्छे विकल्प दिखाता हूँ।"';
     } else if (languageCode && languageCode !== 'en-IN') {
       systemContent += `\nCustomer language: ${langConfig.name}. Respond in ${langConfig.name}.`;
     }
+
+    // Speaker style adaptation (fast speaker, Hinglish tone consistency)
+    if (speakerStylePrompt) systemContent += `\n${speakerStylePrompt}`;
+    // Contextual hint — user's known budget/location/intent
+    if (contextHint) systemContent += contextHint;
+    // Conversation memory: known facts + acknowledgement instruction
+    if (contextSummary) systemContent += `\n\n${contextSummary}`;
+    if (ackInstruction) systemContent += `\n\n${ackInstruction}`;
 
     const userMsg = [
       `CUSTOMER NAME: ${customerName || 'unknown'}`,
@@ -588,7 +606,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
 
 // ── Streaming LLM Reply Generator ───────────────────────────────────────────
 
-async function* generateReplyStream({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific, maxTokens, fastMode, modelPref }) {
+async function* generateReplyStream({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific, maxTokens, fastMode, modelPref, contextHint, speakerStylePrompt, contextSummary, ackInstruction }) {
   const step = callState?.step || '';  // hoisted for catch block access
   try {
     const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
@@ -609,7 +627,7 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
       return;
     }
 
-    const fastReply = deterministicTurnReply(step, languageCode, lastTranscript, direction);
+    const fastReply = deterministicTurnReply(step, languageCode, lastTranscript, direction, callSid);
     if (fastReply) {
       const { text: cleanText } = humanSpeech.qualityCheck(fastReply.speak, { fastMode });
       yield { type: 'sentence', text: cleanText };
@@ -655,12 +673,19 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
     }
 
     if (languageCode === 'hinglish') {
-      systemContent += '\nIMPORTANT: Respond in natural Hinglish (Roman script Hindi mixed with English). Example: "Aapka budget kitna hai? Hum aapko best options dikhayenge." Match the customer\'s language style.';
+      systemContent += '\nIMPORTANT: Consistent informal Hinglish throughout. Sound like a real person: "Aapka budget kitna hai? Main best options dikhata hoon." Do NOT switch to formal English. Match the customer\'s casual tone exactly.';
     } else if (languageCode === 'hi-IN') {
-      systemContent += '\nIMPORTANT: Respond in Hindi (Devanagari script). Keep sentences short and conversational. Example: "आपका बजट कितना है?"';
+      systemContent += '\nIMPORTANT: Respond in Hindi (Devanagari). Short, natural sentences. Example: "आपका बजट कितना है? मैं सबसे अच्छे विकल्प दिखाता हूँ।"';
     } else if (languageCode && languageCode !== 'en-IN') {
       systemContent += `\nCustomer language: ${langConfig.name}. Respond in ${langConfig.name}.`;
     }
+
+    // Speaker style adaptation + contextual personalisation
+    if (speakerStylePrompt) systemContent += `\n${speakerStylePrompt}`;
+    if (contextHint) systemContent += contextHint;
+    // Conversation memory: known facts + acknowledgement instruction
+    if (contextSummary) systemContent += `\n\n${contextSummary}`;
+    if (ackInstruction) systemContent += `\n\n${ackInstruction}`;
 
     const userMsg = [
       `CUSTOMER NAME: ${customerName || 'unknown'}`,

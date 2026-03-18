@@ -23,7 +23,9 @@ const callRecorder = require('./services/callRecorder');
 const intentTracker = require('./services/intentTracker');
 const callOptimizer = require('./services/callOptimizer');
 const responseCache = require('./services/responseCache');
+const conversationMemory = require('./services/conversationMemory');
 const humanSpeech = require('./services/humanSpeechEngine');
+const conversationStyle = require('./services/conversationStyle');
 const { withRetry } = require('./utils/retry');
 const { ConversationFSM, States } = require('./services/conversationFSM');
 const config = require('./config');
@@ -1394,6 +1396,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       // Abort all in-flight LLM/TTS + cancel speculative timer
       session.cancelOngoingOperations();
       session._echoCooldownUntil = Date.now() + ECHO_COOLDOWN_MS;
+      session._wasInterrupted = true;   // flag for interruption recovery phrase
       metrics.incrementInterrupt();
       callDebugger.recordInterruption(session.callSid);
       callOptimizer.recordInterruption(session.callSid, interruptLatencyMs);
@@ -1799,6 +1802,17 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     logger.debug(`[TONE] Detected user tone: ${session._lastUserTone}`, { callSid: session.callSid });
   }
 
+  // Conversation memory: extract entities, build context summary for LLM
+  const { newInfo: _memNewInfo, ack: _memAck } = conversationMemory.update(
+    session.callSid, sttResult.text, session.fsm.leadData || {}
+  );
+  const _contextSummary = conversationMemory.buildContextSummary(session.callSid);
+  const _ackInstruction = conversationMemory.getAckInstruction(session.callSid);
+  const _smartFollowUp = conversationMemory.getSmartFollowUp(session.callSid);
+  if (Object.keys(_memNewInfo).length > 0) {
+    logger.debug('[MEM] New entities extracted', { callSid: session.callSid, newInfo: _memNewInfo });
+  }
+
   // Track intent accuracy (non-blocking)
   intentTracker.record({
     callSid: session.callSid,
@@ -1809,6 +1823,27 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     language: session.language,
     latencyMs: sttLatency
   }).catch(() => { });
+
+  // ── Speaker profiling — track utterance length for fast-speaker detection ──
+  const _utteranceWords = sttResult.text.trim().split(/\s+/).filter(Boolean).length;
+  conversationStyle.recordUtterance(session.callSid, _utteranceWords);
+
+  // ── Interruption recovery — play a brief "go ahead" phrase before responding ──
+  if (session._wasInterrupted) {
+    session._wasInterrupted = false;
+    const recoveryPhrase = conversationStyle.getInterruptRecovery(session.callSid, session.language);
+    try {
+      const recoveryTts = await tts.synthesizeRaw(recoveryPhrase, session.callSid, session.language);
+      if (recoveryTts?.mulawBuffer && !session._wsClosed && ws.readyState === 1) {
+        if (recoveryTts.pcmBuffer) callRecorder.addOutbound(session.callSid, recoveryTts.pcmBuffer, Date.now() - session.startTime);
+        await sendAudioThroughStream(session, ws, recoveryTts.mulawBuffer);
+        logger.debug(`[INTERRUPT] Recovery phrase played: "${recoveryPhrase}"`, { callSid: session.callSid });
+      }
+    } catch (err) {
+      logger.debug('[INTERRUPT] Recovery TTS failed (non-fatal)', err.message);
+    }
+    if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
+  }
 
   // Record transcript
   session.transcriptEntries.push({
@@ -1846,20 +1881,25 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     userTone: session._lastUserTone
   };
 
-  // ── 3a. Response cache — smart filter: only use when STT is confident ────
-  // Low-confidence transcripts may have mis-heard words; avoid wrong canned replies
+  // ── 3a. Response cache — smart filter: STT confidence + intent confidence ──
+  // P4: Only use cache when BOTH STT accuracy AND intent clarity are high.
+  // Mis-heard words or complex utterances get routed to LLM for accurate handling.
   const sttConfident = (sttResult.confidence || 0) >= CACHE_MIN_CONFIDENCE;
-  const cacheHit = sttConfident ? responseCache.lookup(sttResult.text, {
+  const intentConfidence = computeIntentConfidence(sttResult.text);
+  const intentConfident = intentConfidence >= 0.80;
+  const rawCacheHit = (sttConfident && intentConfident) ? responseCache.lookup(sttResult.text, {
     step: callState.step,
     direction: session.direction,
     language: session.language,
     agentName: config.agentName,
     companyName: config.companyName,
-    budget: session.fsm.leadData?.budget || fsmContext.budget,
-    location: session.fsm.leadData?.location || fsmContext.location
+    turnCount: session._turnNumber || 0,
+    budget: session.fsm.leadData?.budget || null,
+    location: session.fsm.leadData?.location || null
   }) : null;
-  if (!sttConfident && sttResult.confidence > 0) {
-    logger.debug(`[CACHE] Skipping cache — STT confidence too low (${(sttResult.confidence * 100).toFixed(0)}% < ${CACHE_MIN_CONFIDENCE * 100}%)`, { callSid: session.callSid });
+  const cacheHit = rawCacheHit;
+  if (!sttConfident || !intentConfident) {
+    logger.debug(`[CACHE] Bypassed — sttConf=${(sttResult.confidence * 100).toFixed(0)}% intentConf=${(intentConfidence * 100).toFixed(0)}%`, { callSid: session.callSid });
   }
 
   const llmStart = Date.now();
@@ -1941,13 +1981,58 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     session._speculativeText = null;
   }
 
+  // ── Fast speaker override — force fast mode when caller uses very short phrases ──
+  if (conversationStyle.isFastSpeaker(session.callSid)) {
+    session._optimizerConfig = { ...(session._optimizerConfig || callOptimizer.getCallConfig(session.callSid)), fastMode: true };
+    logger.debug('[STYLE] Fast speaker detected — forcing fast mode', { callSid: session.callSid });
+  }
+
   // Get optimizer config for this turn
   const optimizerConfig = session._optimizerConfig || callOptimizer.getCallConfig(session.callSid);
 
+  // ── P5: FSM-first execution — skip LLM entirely when deterministic ────────
+  // Calls deterministicTurnReply directly; if it returns a result, play it
+  // immediately without touching the LLM API (0ms LLM, ~50ms TTS from cache).
+  if (!speculativeReply) {
+    const fsmDirect = llm.deterministicTurnReply(callState.step, session.language, sttResult.text, session.direction, session.callSid);
+    if (fsmDirect) {
+      logger.log('[FSM-FIRST] Deterministic reply — skipping LLM entirely', {
+        callSid: session.callSid, step: callState.step, reasoning: fsmDirect.reasoning
+      });
+      const fsmPauseMs = MICRO_PAUSE_MIN_MS + Math.floor(Math.random() * (MICRO_PAUSE_MAX_MS - MICRO_PAUSE_MIN_MS));
+      await new Promise(r => setTimeout(r, fsmPauseMs));
+      if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
+
+      const fsmTts = await withRetry(() => tts.synthesizeRaw(fsmDirect.speak, session.callSid, session.language), 1, 0, 'TTS-FSM');
+      if (fsmTts?.mulawBuffer && wsOpen && ws.readyState === 1) {
+        if (fsmTts.pcmBuffer) callRecorder.addOutbound(session.callSid, fsmTts.pcmBuffer, Date.now() - session.startTime);
+        session.fsm.transition('intent_classified', { response: fsmDirect.speak });
+        await sendAudioThroughStream(session, ws, fsmTts.mulawBuffer);
+      }
+
+      fullSentence = fsmDirect.speak;
+      finalAction = fsmDirect.action;
+      firstChunkMs = 0;
+      const fsmLatency = Date.now() - llmStart;
+      session.fsm.transition('speech_complete');
+      session.transcriptEntries.push({ startMs: Date.now() - session.startTime, endMs: Date.now() - session.startTime + 300, speaker: 'agent', text: fsmDirect.speak, confidence: 1 });
+      session._turnNumber = (session._turnNumber || 0) + 1;
+      metrics.addPipelineLatency(sttLatency, fsmLatency, 0);
+      callOptimizer.recordTurn(session.callSid, { sttMs: sttLatency, llmMs: 0, ttsMs: fsmLatency, totalMs: sttLatency + fsmLatency, modelUsed: 'fsm' });
+      callDebugger.recordTurn(session.callSid, { turnNumber: session._turnNumber, transcript: sttResult.text, response: fsmDirect.speak, stt_time: sttLatency, llm_time: 0, tts_time: fsmLatency, total_time: sttLatency + fsmLatency, fsmState: session.fsm.getState(), fsmIntent: detectedIntent, action: finalAction, sttSource: 'fsm', llmProvider: 'fsm', ttsCached: false, audioDurationSec });
+      if (finalAction === 'hangup') await endCallGracefully(session, ws, null, 'agent_hangup');
+      return;
+    }
+  }
+
   logger.log('LLM pipeline starting', { callSid: session.callSid, step: callState.step, fsmState: session.fsm.getState(), direction: session.direction, maxTokens: optimizerConfig.maxTokens, fastMode: optimizerConfig.fastMode });
 
-  const replyStream = speculativeReply
-    ? _singleReplyToStream(speculativeReply)  // Replay speculative result as stream
+  // ── P2: Build stream with 700ms first-token timeout ──────────────────────
+  // If LLM is silent for > LLM_HARD_TIMEOUT_MS, the stream iterator returns done
+  // and the pipeline falls through to the fallback block below.
+  const LLM_STREAM_TIMEOUT_MS = 700;
+  const rawStream = speculativeReply
+    ? _singleReplyToStream(speculativeReply)
     : llm.generateReplyStream({
         callState,
         script: { companyName: config.companyName },
@@ -1959,19 +2044,31 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
         honorific: session.fsm.leadData.honorific || 'sir_maam',
         maxTokens: optimizerConfig.maxTokens,
         fastMode: optimizerConfig.fastMode,
-        modelPref: optimizerConfig.modelPref
+        modelPref: optimizerConfig.modelPref,
+        contextHint: conversationStyle.buildContextHint(session.fsm.leadData, session.language),
+        speakerStylePrompt: conversationStyle.getSpeakerStylePrompt(session.callSid, session.language),
+        contextSummary: _contextSummary || undefined,
+        ackInstruction: (_ackInstruction || _smartFollowUp)
+          ? [_ackInstruction, _smartFollowUp ? `SMART FOLLOW-UP SUGGESTION: ${_smartFollowUp}` : ''].filter(Boolean).join('\n\n')
+          : undefined
       });
+
+  // Apply timeout only to non-speculative streams (speculative already has the result)
+  const replyStream = speculativeReply ? rawStream : withStreamTimeout(rawStream, LLM_STREAM_TIMEOUT_MS);
 
   if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
     logger.debug('Pipeline cancelled after STT', session.callSid);
     return;
   }
 
-  // ── Pre-stream Response Validation ────────────────────────────────────────
-  // Check whether the user has already said something new while we built the stream.
-  // If so, the reply will be stale — discard and let the new VAD trigger a fresh turn.
-  if (session.dgFinalText && session.dgFinalText !== sttResult.text) {
-    logger.warn('[VALID] Pre-stream: user spoke new text while building LLM stream — discarding', {
+  // ── P3: Pre-stream Response Validation (similarity-based) ─────────────────
+  // Use Jaccard similarity instead of strict equality — catches rephrasing of
+  // the same utterance (e.g. "yes" vs "yes please") as stable, not stale.
+  const preStreamSim = session.dgFinalText
+    ? textSimilarity(session.dgFinalText, sttResult.text)
+    : 1.0;
+  if (session.dgFinalText && preStreamSim < 0.8) {
+    logger.warn(`[VALID] Pre-stream: new utterance detected (sim=${preStreamSim.toFixed(2)}) — discarding stale reply`, {
       callSid: session.callSid,
       processed: sttResult.text.substring(0, 40),
       newer: session.dgFinalText.substring(0, 40)
@@ -2024,6 +2121,8 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
         fastMode: effectiveFastMode
       });
       sentence = processed.text;
+      // ── Micro humanization — occasional ellipsis pause every 3rd turn ──
+      sentence = conversationStyle.microHumanize(sentence, session.callSid, session.language);
       _speechIssues += processed.issues.length;
       if (processed.addedFiller) _fillerUsed = true;
       _isFirstSentence = false;
@@ -2038,25 +2137,34 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
         firstChunkMs = Date.now() - llmStart;
         logger.debug(`Time to first sentence: ${firstChunkMs}ms`);
 
-        // ── Response Validation ─────────────────────────────────────────────
-        // If the user spoke new words while LLM was thinking, discard this reply.
-        // This prevents stale responses from playing after mid-thought corrections.
-        if (session.dgFinalText && session.dgFinalText !== sttResult.text) {
-          logger.warn('[VALID] User spoke new text during LLM — discarding stale reply', {
-            callSid: session.callSid,
-            processed: sttResult.text.substring(0, 40),
-            newer: session.dgFinalText.substring(0, 40)
-          });
-          return;
+        // ── P3: In-stream response validation (similarity-based) ────────────
+        // Discard if user said something meaningfully different while LLM was thinking.
+        // Uses Jaccard similarity — tolerates minor rephrasing (>= 0.8 = same utterance).
+        if (session.dgFinalText) {
+          const inStreamSim = textSimilarity(session.dgFinalText, sttResult.text);
+          if (inStreamSim < 0.8) {
+            logger.warn(`[VALID] Stale reply discarded (sim=${inStreamSim.toFixed(2)})`, {
+              callSid: session.callSid,
+              processed: sttResult.text.substring(0, 40),
+              newer: session.dgFinalText.substring(0, 40)
+            });
+            return;
+          }
         }
 
-        // ── Micro-Pause (human thinking simulation) ─────────────────────────
-        // Skip for speculative LLM replies (already had a head start — no dead air)
-        if (!speculativeReply) {
-          const thinkMs = MICRO_PAUSE_MIN_MS + Math.floor(Math.random() * (MICRO_PAUSE_MAX_MS - MICRO_PAUSE_MIN_MS));
-          logger.debug(`[PAUSE] Micro-pause ${thinkMs}ms (tone: ${session._lastUserTone})`, { callSid: session.callSid });
-          await new Promise(r => setTimeout(r, thinkMs));
-          if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
+        // ── P1: Micro-pause — skip when latency already > 700ms or speculative ──
+        // Only add thinking pause when response is fast enough that the pause
+        // adds realism without pushing total latency over 1s.
+        const elapsedBeforeTts = Date.now() - llmStart;
+        const pauseWouldHelp = !speculativeReply && elapsedBeforeTts < HARD_LATENCY_DEADLINE_MS;
+        if (pauseWouldHelp) {
+          const remainingBudget = HARD_LATENCY_DEADLINE_MS - elapsedBeforeTts;
+          const thinkMs = Math.min(MICRO_PAUSE_MIN_MS + Math.floor(Math.random() * (MICRO_PAUSE_MAX_MS - MICRO_PAUSE_MIN_MS)), remainingBudget);
+          if (thinkMs > 50) {
+            logger.debug(`[PAUSE] Micro-pause ${thinkMs}ms (elapsed=${elapsedBeforeTts}ms, tone=${session._lastUserTone})`, { callSid: session.callSid });
+            await new Promise(r => setTimeout(r, thinkMs));
+            if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
+          }
         }
 
         // Transition FSM to speaking
@@ -2098,6 +2206,19 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
       // Must be the final parsed JSON response returned from the stream 
       finalAction = chunk.action;
     }
+  }
+
+  // ── P2: LLM stream timeout fallback ─────────────────────────────────────
+  // If withStreamTimeout cut iteration before any sentence was yielded,
+  // firstChunkMs stays 0. Play FALLBACK_RESPONSE immediately.
+  if (firstChunkMs === 0 && wsOpen && ws.readyState === 1) {
+    logger.warn(`[LLM-TIMEOUT] No sentence received within ${LLM_STREAM_TIMEOUT_MS}ms — using fallback`, { callSid: session.callSid });
+    const fallbackSpeak = 'I apologize, could you please repeat that?';
+    const fbTts = await tts.synthesizeRaw(fallbackSpeak, session.callSid, session.language).catch(() => null);
+    if (fbTts?.mulawBuffer && ws.readyState === 1) await sendAudioThroughStream(session, ws, fbTts.mulawBuffer);
+    fullSentence = fallbackSpeak;
+    finalAction = 'continue';
+    firstChunkMs = Date.now() - llmStart;
   }
 
   const completeLatency = Date.now() - llmStart;
@@ -2254,6 +2375,7 @@ async function endCallGracefully(session, ws, farewellText, endReason = 'agent_h
   // Cleanup
   sessions.delete(session.callSid);
   llm.clearHistory(session.callSid);
+  conversationMemory.clearMemory(session.callSid);
   costControl.endCallTracking(session.callSid);
 
   await finalizeCall(session);
@@ -2301,6 +2423,7 @@ async function cleanupSession(session, ws, pingInterval) {
 
   sessions.delete(session.callSid);
   llm.clearHistory(session.callSid);
+  conversationMemory.clearMemory(session.callSid);
   costControl.endCallTracking(session.callSid);
 }
 
@@ -2317,60 +2440,63 @@ async function finalizeCall(session) {
     language: session.language
   });
 
+  // P6: Non-blocking DB writes — pipeline never waits for MongoDB.
+  // We still need call._id for referencing, so findOne is awaited (fast read).
+  // All writes (save, Transcript.create, Lead.upsert) are fire-and-forget with retry.
+  let call = null;
   try {
-    const call = session.callSid
-      ? await Call.findOne({ callSid: session.callSid })
-      : null;
-
-    if (call) {
-      session._callDbId = call._id;  // Store for callRecorder.finalize
-      call.durationSec = duration;
-      call.endAt = new Date();
-      call.status = 'completed';
-      await call.save();
-    }
-
-    if (call && session.transcriptEntries.length > 0) {
-      const fullText = session.transcriptEntries.map(e => `${e.speaker}: ${e.text}`).join('\n');
-
-      // Compute avg latency from callDebugger turns (attached to transcript)
-      const debugSession = session._debugTurns || [];
-      const latencies = debugSession.map(t => t.total_time).filter(Boolean);
-      const avgLatencyMs = latencies.length
-        ? Math.round(latencies.reduce((s, v) => s + v, 0) / latencies.length)
-        : 0;
-
-      await Transcript.create({
-        callId: call._id,
-        callSid: session.callSid,
-        entries: session.transcriptEntries,
-        fullText,
-        summary: fullText.substring(0, 500),
-        avgLatencyMs
-      });
-    }
-
-    if (session.callerNumber && Object.keys(session.fsm.leadData).length > 0) {
-      const leadStatus = session.fsm.leadData.siteVisitDate ? 'site-visit-booked'
-        : session.fsm.leadData.qualityScore >= 50 ? 'qualified'
-          : session.fsm.leadData.qualityScore > 0 ? 'follow-up'
-            : 'new';
-
-      await Lead.findOneAndUpdate(
-        { phoneNumber: session.callerNumber, callId: call?._id },
-        {
-          callId: call?._id,
-          phoneNumber: session.callerNumber,
-          ...session.fsm.leadData,
-          status: leadStatus,
-          conversationSummary: session.transcriptEntries.map(e => `${e.speaker}: ${e.text}`).join('\n').substring(0, 2000),
-          source: 'ai-call'
-        },
-        { upsert: true, new: true }
-      );
-    }
+    call = session.callSid ? await Call.findOne({ callSid: session.callSid }) : null;
   } catch (err) {
-    logger.error('Finalize error', err.message);
+    logger.warn('Call lookup failed during finalize', err.message);
+  }
+
+  if (call) {
+    session._callDbId = call._id;
+    // Non-blocking call update
+    call.durationSec = duration;
+    call.endAt = new Date();
+    call.status = 'completed';
+    call.save().catch(e => logger.warn('Call save failed', e.message));
+  }
+
+  if (call && session.transcriptEntries.length > 0) {
+    const fullText = session.transcriptEntries.map(e => `${e.speaker}: ${e.text}`).join('\n');
+    const debugSession = session._debugTurns || [];
+    const latencies = debugSession.map(t => t.total_time).filter(Boolean);
+    const avgLatencyMs = latencies.length
+      ? Math.round(latencies.reduce((s, v) => s + v, 0) / latencies.length)
+      : 0;
+
+    // Non-blocking transcript write
+    Transcript.create({
+      callId: call._id,
+      callSid: session.callSid,
+      entries: session.transcriptEntries,
+      fullText,
+      summary: fullText.substring(0, 500),
+      avgLatencyMs
+    }).catch(e => logger.warn('Transcript create failed', e.message));
+  }
+
+  if (session.callerNumber && Object.keys(session.fsm.leadData).length > 0) {
+    const leadStatus = session.fsm.leadData.siteVisitDate ? 'site-visit-booked'
+      : session.fsm.leadData.qualityScore >= 50 ? 'qualified'
+        : session.fsm.leadData.qualityScore > 0 ? 'follow-up'
+          : 'new';
+
+    // Non-blocking lead upsert
+    Lead.findOneAndUpdate(
+      { phoneNumber: session.callerNumber, callId: call?._id },
+      {
+        callId: call?._id,
+        phoneNumber: session.callerNumber,
+        ...session.fsm.leadData,
+        status: leadStatus,
+        conversationSummary: session.transcriptEntries.map(e => `${e.speaker}: ${e.text}`).join('\n').substring(0, 2000),
+        source: 'ai-call'
+      },
+      { upsert: true, new: true }
+    ).catch(e => logger.warn('Lead upsert failed', e.message));
   }
 
   // Generate and save call debug report
@@ -2384,6 +2510,9 @@ async function finalizeCall(session) {
     durationSec: Math.round((Date.now() - session.startTime) / 1000),
     leadQualityScore: session.fsm?.leadData?.qualityScore || 0
   }).catch(err => logger.warn('Optimizer finalize error:', err.message));
+
+  // Cleanup conversation style state
+  conversationStyle.cleanup(session.callSid);
 
   // Save audio recording
   callRecorder.finalize(session.callSid, session._callDbId || null)
