@@ -17,19 +17,20 @@ const config = require('../config');
 const { getLanguage } = require('../config/languages');
 
 // ── Sarvam Language & Speaker Mapping ────────────────────────────────────────
-// Sarvam supports: hi-IN, en-IN, ta-IN, te-IN, kn-IN, ml-IN, mr-IN, bn-IN, gu-IN
-// Speakers: meera, pavithra, maitreyi, arvind, amol, amartya (vary by language)
+// Valid model: bulbul:v2 (bulbul:v3-beta / bulbul:v3 also available)
+// Valid female speakers (professional): anushka, priya, neha, kavya, ishita, shruti
+// Valid male speakers: rahul, rohan, amit, dev, karun, hitesh
 const SARVAM_LANGUAGE_MAP = {
-  'en-IN':    { code: 'en-IN',    speaker: 'meera'   },
-  'hi-IN':    { code: 'hi-IN',    speaker: 'meera'   },
-  'hinglish': { code: 'hi-IN',    speaker: 'meera'   },  // closest match
-  'ta-IN':    { code: 'ta-IN',    speaker: 'meera'   },
-  'te-IN':    { code: 'te-IN',    speaker: 'meera'   },
-  'kn-IN':    { code: 'kn-IN',    speaker: 'meera'   },
-  'ml-IN':    { code: 'ml-IN',    speaker: 'meera'   },
-  'mr-IN':    { code: 'mr-IN',    speaker: 'meera'   },
-  'bn-IN':    { code: 'bn-IN',    speaker: 'meera'   },
-  'gu-IN':    { code: 'gu-IN',    speaker: 'meera'   }
+  'en-IN':    { code: 'en-IN',    speaker: 'anushka' },
+  'hi-IN':    { code: 'hi-IN',    speaker: 'anushka' },
+  'hinglish': { code: 'hi-IN',    speaker: 'anushka' },
+  'ta-IN':    { code: 'ta-IN',    speaker: 'anushka' },
+  'te-IN':    { code: 'te-IN',    speaker: 'anushka' },
+  'kn-IN':    { code: 'kn-IN',    speaker: 'anushka' },
+  'ml-IN':    { code: 'ml-IN',    speaker: 'anushka' },
+  'mr-IN':    { code: 'mr-IN',    speaker: 'anushka' },
+  'bn-IN':    { code: 'bn-IN',    speaker: 'anushka' },
+  'gu-IN':    { code: 'gu-IN',    speaker: 'anushka' }
 };
 
 function getSarvamConfig(language) {
@@ -162,7 +163,7 @@ async function callSarvamTTS(text, language) {
       loudness: 1.5,
       speech_sample_rate: 8000,   // Request 8kHz directly — no resampling needed
       enable_preprocessing: true,
-      model: 'bulbul:v1'
+      model: 'bulbul:v2'
     },
     {
       headers: {
