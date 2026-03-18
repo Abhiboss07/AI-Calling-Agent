@@ -19,7 +19,10 @@
     "mock-test": "node scripts/mock-test.js",
     "mock-test:objection": "node scripts/mock-test.js --scenario=objection",
     "mock-test:hindi": "node scripts/mock-test.js --scenario=hindi --lang=hi-IN",
-    "mock-test:tricky": "node scripts/mock-test.js --scenario=tricky"
+    "mock-test:tricky": "node scripts/mock-test.js --scenario=tricky",
+    "stress-test": "node scripts/stress-test.js",
+    "stress-test:10": "node scripts/stress-test.js --calls=10 --turns=4",
+    "stress-test:20": "node scripts/stress-test.js --calls=20 --turns=3"
   },
   "engines": {
     "node": "20.x"

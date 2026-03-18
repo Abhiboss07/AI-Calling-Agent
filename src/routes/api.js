@@ -337,12 +337,24 @@ router.get('/v1/metrics', async (req, res) => {
     }
 
     const data = metrics.getMetrics();
-    const [uniqueClients, durResult] = await Promise.all([
+    const IntentLog = require('../models/intentLog.model');
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+
+    const [uniqueClients, durResult, callsToday, intentStats] = await Promise.all([
       Call.distinct('phoneNumber'),
-      Call.aggregate([{ $group: { _id: null, total: { $sum: '$durationSec' } } }])
+      Call.aggregate([{ $group: { _id: null, total: { $sum: '$durationSec' } } }]),
+      Call.countDocuments({ createdAt: { $gte: startOfDay } }),
+      IntentLog.aggregate([
+        { $group: { _id: null, total: { $sum: 1 }, avgConf: { $avg: '$confidence' } } }
+      ])
     ]);
     data.totalClients = uniqueClients.length;
     data.totalDurationDb = durResult[0]?.total || 0;
+    data.calls_today = callsToday;
+    data.intentAccuracy = {
+      total_classified: intentStats[0]?.total || 0,
+      avg_confidence: intentStats[0]?.avgConf?.toFixed(3) || '0'
+    };
     res.json({ ok: true, data });
   } catch (err) {
     logger.error('Metrics error', err.message);
@@ -842,25 +854,70 @@ router.get('/v1/calls/:id/transcript', async (req, res) => {
   try {
     const transcript = await Transcript.findOne({ callId: req.params.id }).lean();
     if (!transcript) return res.status(404).json({ ok: false, error: 'not found' });
-
-    if (transcript.s3Key) {
-      const url = await storage.getSignedDownloadUrl(transcript.s3Key, 3600);
-      return res.json({ ok: true, parsed: transcript, signedUrl: url });
-    }
-
-    res.json({ ok: true, parsed: transcript });
+    res.json({ ok: true, data: transcript });
   } catch (err) {
     logger.error('Transcript error', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
+// ── Audio playback ────────────────────────────────────────────────────────────
+// GET /api/v1/calls/:id/audio — stream the WAV recording for a call
+router.get('/v1/calls/:id/audio', async (req, res) => {
+  try {
+    const recording = await Recording.findOne({ callId: req.params.id }).lean();
+    if (!recording || !recording.fileId) {
+      return res.status(404).json({ ok: false, error: 'No recording found for this call' });
+    }
+
+    res.setHeader('Content-Type', recording.contentType || 'audio/wav');
+    res.setHeader('Content-Disposition', `inline; filename="call-${req.params.id}.wav"`);
+    if (recording.sizeBytes) res.setHeader('Content-Length', recording.sizeBytes);
+
+    const fileStream = storage.getFileStream(recording.fileId);
+    fileStream.on('error', () => res.status(404).json({ ok: false, error: 'Audio file not found in storage' }));
+    fileStream.pipe(res);
+  } catch (err) {
+    logger.error('Audio stream error', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/v1/calls/:id/recordings — list all recording metadata
 router.get('/v1/calls/:id/recordings', async (req, res) => {
   try {
     const recordings = await Recording.find({ callId: req.params.id }).lean();
     res.json({ ok: true, data: recordings });
   } catch (err) {
     logger.error('Recordings error', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── Intent accuracy stats ─────────────────────────────────────────────────────
+// GET /api/v1/calls/:id/intents  — per-call intent log + accuracy
+router.get('/v1/calls/:id/intents', async (req, res) => {
+  try {
+    const intentTracker = require('../services/intentTracker');
+    const IntentLog = require('../models/intentLog.model');
+    const [logs, stats] = await Promise.all([
+      IntentLog.find({ callId: req.params.id }).sort({ turnNumber: 1 }).lean(),
+      intentTracker.getStats(req.params.id)
+    ]);
+    res.json({ ok: true, data: { logs, stats } });
+  } catch (err) {
+    logger.error('Intent logs error', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/v1/intents/stats — global intent accuracy
+router.get('/v1/intents/stats', async (req, res) => {
+  try {
+    const intentTracker = require('../services/intentTracker');
+    const stats = await intentTracker.getStats();
+    res.json({ ok: true, data: stats });
+  } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });

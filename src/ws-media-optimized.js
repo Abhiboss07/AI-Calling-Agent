@@ -19,6 +19,9 @@ const Transcript = require('./models/transcript.model');
 const metrics = require('./services/metrics');
 const costControl = require('./services/costControl');
 const callDebugger = require('./services/callDebugger');
+const callRecorder = require('./services/callRecorder');
+const intentTracker = require('./services/intentTracker');
+const { withRetry } = require('./utils/retry');
 const { ConversationFSM, States } = require('./services/conversationFSM');
 const config = require('./config');
 const { getLanguage, normalizeLanguageCode: normalizeLanguageFromRegistry } = require('./config/languages');
@@ -587,13 +590,15 @@ class EnhancedCallSession {
     // Per-turn counter for latency tracking
     this._turnNumber = 0;
 
-    // Start debug session (no-op if DEBUG_CALL=false for per-turn tracking,
-    // but always tracks for call report generation)
+    // Start debug session
     callDebugger.startSession(callUuid, {
       direction,
       language: this.language,
       callerNumber
     });
+
+    // Start audio recorder
+    callRecorder.start(callUuid);
   }
 
   // Open Deepgram live WebSocket for this call session
@@ -1109,6 +1114,9 @@ module.exports = function setupWs(app) {
           const pcmChunk = removeDcOffset(decodeToPcm16(rawBytes, session));
           const rms = computeRms(pcmChunk);
 
+          // Record inbound audio (user speech)
+          callRecorder.addInbound(session.callSid, pcmChunk, Date.now() - session.startTime);
+
           processAudioChunk(session, ws, rawBytes, pcmChunk, rms);
           return;
         }
@@ -1571,7 +1579,10 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     session.dgInterimText = '';
     logger.log('STT: using Deepgram live transcript (0ms)', { callSid: session.callSid, text: sttResult.text });
   } else {
-    sttResult = await stt.transcribe(wavBuffer, session.callSid, 'audio/wav', session.language);
+    sttResult = await withRetry(
+      () => stt.transcribe(wavBuffer, session.callSid, 'audio/wav', session.language),
+      1, 0, 'STT'
+    );
   }
   let sttLatency = Date.now() - sttStart;
 
@@ -1619,7 +1630,19 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
 
   // 2. FSM Intent Processing
   const fsmResult = session.fsm.processTranscript(sttResult.text);
-  logger.log(`STT (${sttLatency}ms): "${sttResult.text}" | Intent: ${fsmResult.intent || fsmResult.data?.intent} | State: ${session.fsm.getState()}`);
+  const detectedIntent = fsmResult.intent || fsmResult.data?.intent || 'unknown';
+  logger.log(`STT (${sttLatency}ms): "${sttResult.text}" | Intent: ${detectedIntent} | State: ${session.fsm.getState()}`);
+
+  // Track intent accuracy (non-blocking)
+  intentTracker.record({
+    callSid: session.callSid,
+    turnNumber: (session._turnNumber || 0) + 1,
+    userText: sttResult.text,
+    detectedIntent,
+    fsmState: session.fsm.getState(),
+    language: session.language,
+    latencyMs: sttLatency
+  }).catch(() => { });
 
   // Record transcript
   session.transcriptEntries.push({
@@ -1708,11 +1731,18 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
       }
 
       const ttsStart = Date.now();
-      const ttsResult = await tts.synthesizeRaw(sentence, session.callSid, session.language);
+      const ttsResult = await withRetry(
+        () => tts.synthesizeRaw(sentence, session.callSid, session.language),
+        1, 0, 'TTS'
+      );
       ttsLatencyTotal += (Date.now() - ttsStart);
 
       if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
       if (ttsResult?.mulawBuffer && wsOpen && ws.readyState === 1) {
+        // Record outbound AI audio
+        if (ttsResult.pcmBuffer) {
+          callRecorder.addOutbound(session.callSid, ttsResult.pcmBuffer, Date.now() - session.startTime);
+        }
         await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
       } else {
         logger.warn('Reply TTS synthesis failed, skipping audio', {
@@ -1926,6 +1956,7 @@ async function finalizeCall(session) {
       : null;
 
     if (call) {
+      session._callDbId = call._id;  // Store for callRecorder.finalize
       call.durationSec = duration;
       call.endAt = new Date();
       call.status = 'completed';
@@ -1935,11 +1966,20 @@ async function finalizeCall(session) {
     if (call && session.transcriptEntries.length > 0) {
       const fullText = session.transcriptEntries.map(e => `${e.speaker}: ${e.text}`).join('\n');
 
+      // Compute avg latency from callDebugger turns (attached to transcript)
+      const debugSession = session._debugTurns || [];
+      const latencies = debugSession.map(t => t.total_time).filter(Boolean);
+      const avgLatencyMs = latencies.length
+        ? Math.round(latencies.reduce((s, v) => s + v, 0) / latencies.length)
+        : 0;
+
       await Transcript.create({
         callId: call._id,
+        callSid: session.callSid,
         entries: session.transcriptEntries,
         fullText,
-        summary: fullText.substring(0, 500)
+        summary: fullText.substring(0, 500),
+        avgLatencyMs
       });
     }
 
@@ -1971,4 +2011,8 @@ async function finalizeCall(session) {
     endReason: session._endReason || 'ws_close',
     finalFsmState: session.fsm?.getState() || 'unknown'
   }).catch(err => logger.warn('Call debug finalize error:', err.message));
+
+  // Save audio recording
+  callRecorder.finalize(session.callSid, session._callDbId || null)
+    .catch(err => logger.warn('Call recording finalize error:', err.message));
 }
