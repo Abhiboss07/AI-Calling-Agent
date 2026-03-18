@@ -57,6 +57,106 @@ process.on('uncaughtException', (err) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// API KEY VALIDATION
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function validateApiKeys() {
+  const checks = [
+    {
+      name: 'Gemini (LLM primary)',
+      key: config.geminiApiKey,
+      envVar: 'GEMINI_API_KEY',
+      required: true,
+      validate: async () => {
+        const axios = require('axios');
+        const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${config.geminiApiKey}`;
+        const res = await axios.get(url, { timeout: 5000 });
+        return res.status === 200;
+      }
+    },
+    {
+      name: 'Deepgram (STT)',
+      key: config.deepgramApiKey,
+      envVar: 'DEEPGRAM_API_KEY',
+      required: true,
+      validate: async () => {
+        const axios = require('axios');
+        const res = await axios.get('https://api.deepgram.com/v1/auth/token', {
+          headers: { Authorization: `Token ${config.deepgramApiKey}` },
+          timeout: 5000
+        });
+        return res.status === 200;
+      }
+    },
+    {
+      name: 'Sarvam (TTS)',
+      key: config.sarvamApiKey,
+      envVar: 'SARVAM_API_KEY',
+      required: true,
+      validate: async () => {
+        // Sarvam has no lightweight ping — just verify the key is non-empty and well-formed
+        return typeof config.sarvamApiKey === 'string' && config.sarvamApiKey.length > 10;
+      }
+    },
+    {
+      name: 'OpenAI (LLM fallback)',
+      key: config.llm?.openaiApiKey || process.env.OPENAI_API_KEY,
+      envVar: 'OPENAI_API_KEY',
+      required: false,   // fallback only
+      validate: async () => {
+        const key = config.llm?.openaiApiKey || process.env.OPENAI_API_KEY;
+        return typeof key === 'string' && key.startsWith('sk-') && key.length > 20;
+      }
+    },
+    {
+      name: 'Gmail SMTP',
+      key: config.gmail?.user,
+      envVar: 'GMAIL_USER + GMAIL_APP_PASSWORD',
+      required: false,   // email is optional
+      validate: async () => {
+        return config.gmail?.user && config.gmail?.appPassword;
+      }
+    }
+  ];
+
+  let allCriticalOk = true;
+
+  for (const check of checks) {
+    if (!check.key) {
+      const level = check.required ? 'error' : 'warn';
+      logger[level](`${check.required ? '❌' : '⚠️ '} ${check.name}: ${check.envVar} not set`);
+      if (check.required) allCriticalOk = false;
+      continue;
+    }
+
+    try {
+      const ok = await check.validate();
+      if (ok) {
+        logger.log(`✅ ${check.name}: API key valid`);
+      } else {
+        const level = check.required ? 'error' : 'warn';
+        logger[level](`${check.required ? '❌' : '⚠️ '} ${check.name}: key present but validation failed — check ${check.envVar}`);
+        if (check.required) allCriticalOk = false;
+      }
+    } catch (err) {
+      // Network failure during validation should not block startup
+      logger.warn(`⚠️  ${check.name}: validation request failed (${err.message}) — key may still work`);
+    }
+  }
+
+  if (!allCriticalOk) {
+    logger.error('❌ One or more required API keys are missing or invalid. Calls WILL fail.');
+    logger.error('   Copy .env.example to .env and fill in all required keys, then restart.');
+  } else {
+    logger.log('✅ All required API keys validated');
+  }
+
+  if (process.env.DEBUG_CALL === 'true') {
+    logger.log('🔍 DEBUG_CALL=true — per-turn latency tracking and call reports enabled');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // SERVER STARTUP
 // ══════════════════════════════════════════════════════════════════════════════
 let isShuttingDown = false;
@@ -64,22 +164,8 @@ let isShuttingDown = false;
 async function start() {
   await db.connect();
 
-  // ── Validate AI provider API key at startup ──────────────────────────────
-  try {
-    const aiClient = require('./services/aiClient');
-    const providerLabel = config.aiProvider === 'gemini' ? 'Gemini' : 'OpenAI';
-    const keyCheck = await aiClient.validateApiKey();
-    if (keyCheck.valid) {
-      logger.log(`✅ ${providerLabel} API key validated — TTS/STT/LLM will work`);
-    } else {
-      logger.error(`⚠️  ${providerLabel} API key INVALID — ${keyCheck.error}`);
-      logger.error('   TTS, STT, and LLM will ALL fail during calls!');
-      const keyVar = config.aiProvider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
-      logger.error(`   Fix: Update ${keyVar} in your .env file with a valid key`);
-    }
-  } catch (err) {
-    logger.warn('AI provider key validation skipped:', err.message);
-  }
+  // ── Validate all required API keys at startup ────────────────────────────
+  await validateApiKeys();
 
   const app = express();
   expressWs(app, null, {
@@ -169,17 +255,18 @@ async function start() {
   app.get('/health/ready', async (req, res) => {
     const dbReady = db.isReady();
 
-    // Lightweight AI provider check (cached 60s)
+    // Lightweight Gemini check (cached 60s)
     const now = Date.now();
     if (now - lastAIProviderCheck > 60000) {
       try {
-        const aiClient = require('./services/aiClient');
-        const result = await aiClient.validateApiKey();
-        aiProviderHealthy = result.valid;
+        const axios = require('axios');
+        const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${config.geminiApiKey}`;
+        const r = await axios.get(url, { timeout: 4000 });
+        aiProviderHealthy = r.status === 200;
         lastAIProviderCheck = now;
       } catch (err) {
         aiProviderHealthy = false;
-        logger.warn('AI provider health check failed', err.message);
+        logger.warn('Gemini health check failed', err.message);
       }
     }
 
@@ -190,7 +277,7 @@ async function start() {
       version: '2.0.0',
       uptime: Math.round(process.uptime()),
       database: dbReady ? 'connected' : 'disconnected',
-      aiProvider: `${config.aiProvider}:${aiProviderHealthy ? 'healthy' : 'unhealthy'}`,
+      aiProvider: `gemini:${aiProviderHealthy ? 'healthy' : 'unhealthy'}`,
       memory: {
         heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
         heapTotalMB: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),

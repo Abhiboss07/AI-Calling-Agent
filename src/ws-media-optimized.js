@@ -18,6 +18,7 @@ const Lead = require('./models/lead.model');
 const Transcript = require('./models/transcript.model');
 const metrics = require('./services/metrics');
 const costControl = require('./services/costControl');
+const callDebugger = require('./services/callDebugger');
 const { ConversationFSM, States } = require('./services/conversationFSM');
 const config = require('./config');
 const { getLanguage, normalizeLanguageCode: normalizeLanguageFromRegistry } = require('./config/languages');
@@ -582,6 +583,17 @@ class EnhancedCallSession {
     this.dgSession = null;
     this.dgFinalText = '';      // Set by Deepgram speech_final event
     this.dgInterimText = '';    // Set by Deepgram interim events
+
+    // Per-turn counter for latency tracking
+    this._turnNumber = 0;
+
+    // Start debug session (no-op if DEBUG_CALL=false for per-turn tracking,
+    // but always tracks for call report generation)
+    callDebugger.startSession(callUuid, {
+      direction,
+      language: this.language,
+      callerNumber
+    });
   }
 
   // Open Deepgram live WebSocket for this call session
@@ -948,7 +960,7 @@ module.exports = function setupWs(app) {
       // Set max duration timer
       session.maxDurationTimer = setTimeout(async () => {
         logger.warn('Max call duration reached', callUuid);
-        await endCallGracefully(session, ws, getLanguage(session.language).farewell);
+        await endCallGracefully(session, ws, getLanguage(session.language).farewell, 'max_duration');
       }, MAX_CALL_MS);
 
       // Greeting will be delivered automatically after VAD calibration inside processAudioChunk
@@ -1223,6 +1235,8 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session.audioResidue = Buffer.alloc(0);
       session.cancelOngoingOperations();
       session._echoCooldownUntil = Date.now() + ECHO_COOLDOWN_MS;
+      metrics.incrementInterrupt();
+      callDebugger.recordInterruption(session.callSid);
     }
     return;
   }
@@ -1727,6 +1741,26 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   session.fsm.transition('speech_complete');
   metrics.addPipelineLatency(sttLatency, completeLatency, ttsLatencyTotal);
 
+  // Per-turn latency tracking
+  session._turnNumber = (session._turnNumber || 0) + 1;
+  const totalLatency = sttLatency + completeLatency;
+  callDebugger.recordTurn(session.callSid, {
+    turnNumber: session._turnNumber,
+    transcript: sttResult.text,
+    response: fullSentence.trim(),
+    stt_time: sttLatency,
+    llm_time: firstChunkMs,
+    tts_time: ttsLatencyTotal,
+    total_time: totalLatency,
+    fsmState: session.fsm.getState(),
+    fsmIntent: fsmResult.intent || fsmResult.data?.intent,
+    action: finalAction,
+    sttSource: session.dgFinalText === '' && sttResult.latencyMs === 0 ? 'deepgram_live' : 'batch',
+    llmProvider: session._lastLlmProvider || 'gemini',
+    ttsCached: ttsLatencyTotal < 20,
+    audioDurationSec
+  });
+
   // Handle actions
   if (finalAction === 'hangup' || finalAction === 'escalate') {
     const farewell = finalAction === 'escalate'
@@ -1735,9 +1769,9 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     await endCallGracefully(session, ws, farewell);
   } else if (!costControl.isWithinBudget(session.callSid)) {
     logger.warn('Budget exceeded, hanging up', session.callSid);
-    await endCallGracefully(session, ws, 'Our call duration limit is reached. We will call you back. Goodbye.');
+    await endCallGracefully(session, ws, 'Our call duration limit is reached. We will call you back. Goodbye.', 'budget_exceeded');
   } else if (session.fsm.getState() === States.END_CALL) {
-    await endCallGracefully(session, ws, null);
+    await endCallGracefully(session, ws, null, 'fsm_end');
   }
 }
 
@@ -1764,7 +1798,8 @@ function startSilenceTimer(session, ws) {
 
     if (fsmResult.silenceCount >= 2) {
       logger.log('Second silence, ending call', session.callSid);
-      await endCallGracefully(session, ws, langConfig.farewell);
+      callDebugger.recordSilence(session.callSid);
+      await endCallGracefully(session, ws, langConfig.farewell, 'silence_timeout');
     } else {
       logger.log('First silence, prompting', session.callSid);
 
@@ -1786,9 +1821,10 @@ function startSilenceTimer(session, ws) {
 // CALL CLEANUP
 // ═════════════════════════════════════════════════════════════════════════════
 
-async function endCallGracefully(session, ws, farewellText) {
+async function endCallGracefully(session, ws, farewellText, endReason = 'agent_hangup') {
   if (session._ended) return;
   session._ended = true;
+  session._endReason = endReason;
 
   clearTimeout(session.silenceTimer);
   clearTimeout(session.maxDurationTimer);
@@ -1929,4 +1965,10 @@ async function finalizeCall(session) {
   } catch (err) {
     logger.error('Finalize error', err.message);
   }
+
+  // Generate and save call debug report
+  callDebugger.finalizeSession(session.callSid, {
+    endReason: session._endReason || 'ws_close',
+    finalFsmState: session.fsm?.getState() || 'unknown'
+  }).catch(err => logger.warn('Call debug finalize error:', err.message));
 }
