@@ -1,12 +1,19 @@
+/**
+ * Mailer — Gmail SMTP with App Password
+ * Uses nodemailer under the hood (Gmail SMTP).
+ * Env vars: GMAIL_USER, GMAIL_APP_PASSWORD
+ */
+
 const nodemailer = require('nodemailer');
 const logger = require('../utils/logger');
+const config = require('../config');
 
-// Create reusable transporter
+// Create reusable transporter using Gmail SMTP + App Password
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD
+    user: config.gmail.user,
+    pass: config.gmail.appPassword
   }
 });
 
@@ -75,7 +82,7 @@ async function sendVerificationCode(email, code, name = 'User') {
 
   try {
     await transporter.sendMail({
-      from: `"Estate Agent" <${process.env.SMTP_EMAIL}>`,
+      from: `"Estate Agent" <${config.gmail.user}>`,
       to: email,
       subject: `${code} — Your Estate Agent Verification Code`,
       html

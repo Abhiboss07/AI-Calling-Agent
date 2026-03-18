@@ -1,84 +1,101 @@
-const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
-const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-const config = require('../config');
+/**
+ * Storage Service — MongoDB GridFS
+ *
+ * Replaces: AWS S3 / Cloudflare R2
+ * Stores: avatars, documents, call recordings, transcripts
+ *
+ * API surface is kept compatible with the old S3 storage service
+ * so callers (routes/auth.js, routes/api.js) need minimal changes.
+ */
+
+const mongoose = require('mongoose');
+const { GridFSBucket, ObjectId } = require('mongodb');
+const { Readable } = require('stream');
 const logger = require('../utils/logger');
 
-// Initialize S3Client
-const clientConfig = {
-  region: config.s3.region || 'us-east-1',
-  credentials: {
-    accessKeyId: config.s3.accessKey,
-    secretAccessKey: config.s3.secretKey
-  }
-};
+let _bucket = null;
 
-// If custom endpoint is provided, add it
-if (config.s3.endpoint) {
-  clientConfig.endpoint = config.s3.endpoint;
+function getBucket() {
+  if (!_bucket) {
+    if (!mongoose.connection.db) {
+      throw new Error('MongoDB not connected yet — GridFS unavailable');
+    }
+    _bucket = new GridFSBucket(mongoose.connection.db, { bucketName: 'uploads' });
+  }
+  return _bucket;
 }
 
-const s3 = new S3Client(clientConfig);
+// Reset bucket reference when Mongoose reconnects
+mongoose.connection.on('connected', () => { _bucket = null; });
+mongoose.connection.on('reconnected', () => { _bucket = null; });
 
-async function uploadBuffer(buffer, key, contentType = 'audio/mpeg') {
-  if (!config.s3.bucket) throw new Error('S3 bucket not configured');
+/**
+ * Upload a buffer to GridFS.
+ * @param {Buffer} buffer
+ * @param {string} key      Filename / logical path (e.g. "avatars/userId-ts.png")
+ * @param {string} contentType
+ * @returns {Promise<string>}  URL: /api/v1/files/<gridfsId>
+ */
+async function uploadBuffer(buffer, key, contentType = 'application/octet-stream') {
+  const bucket = getBucket();
 
-  const params = {
-    Bucket: config.s3.bucket,
-    Key: key,
-    Body: buffer,
-    ContentType: contentType
-  };
+  return new Promise((resolve, reject) => {
+    const uploadStream = bucket.openUploadStream(key, {
+      contentType,
+      metadata: { key, uploadedAt: new Date() }
+    });
 
-  try {
-    await s3.send(new PutObjectCommand(params));
-    logger.log('Uploaded to S3', key);
-  } catch (err) {
-    logger.error('S3 upload failed', err.message || err);
-    throw err;
-  }
+    const readable = Readable.from(buffer);
+    readable.pipe(uploadStream);
 
-  // Construct public URL
-  let url;
-  const publicBase = process.env.S3_PUBLIC_URL;
+    uploadStream.on('finish', () => {
+      const url = `/api/v1/files/${uploadStream.id}`;
+      logger.log('GridFS upload:', key, '->', url);
+      resolve(url);
+    });
 
-  if (publicBase) {
-    // Explicit public URL configured
-    url = `${publicBase.replace(/\/$/, '')}/${key}`;
-  } else if (config.s3.endpoint) {
-    // Fallback: construct from endpoint
-    const baseUrl = config.s3.endpoint.replace(/\/$/, '');
-    url = `${baseUrl}/${config.s3.bucket}/${key}`;
-  } else {
-    // Standard AWS S3 URL format
-    url = `https://${config.s3.bucket}.s3.${config.s3.region}.amazonaws.com/${key}`;
-  }
-
-  logger.debug('S3 URL:', url);
-  return url;
-}
-
-
-async function getSignedDownloadUrl(key, expiresIn = 3600) {
-  if (!config.s3.bucket) throw new Error('S3 bucket not configured');
-
-  const command = new GetObjectCommand({
-    Bucket: config.s3.bucket,
-    Key: key
+    uploadStream.on('error', (err) => {
+      logger.error('GridFS upload error:', err.message);
+      reject(err);
+    });
   });
-
-  try {
-    const url = await getSignedUrl(s3, command, { expiresIn });
-    logger.log('Generated signed URL for', key);
-    return url;
-  } catch (err) {
-    logger.error('Failed to generate signed URL', err.message || err);
-    throw err;
-  }
 }
 
-// FIX M3: Helper to check if storage is configured
+/**
+ * Open a download stream by GridFS file ID.
+ * @param {string|ObjectId} fileId
+ * @returns {GridFSBucketReadStream}
+ */
+function getFileStream(fileId) {
+  const bucket = getBucket();
+  return bucket.openDownloadStream(new ObjectId(String(fileId)));
+}
+
+/**
+ * Look up a file by its logical key and return a URL to serve it.
+ * For GridFS, we return a relative API path instead of a signed URL.
+ * @param {string} key
+ * @returns {Promise<string>}
+ */
+async function getSignedDownloadUrl(key) {
+  const bucket = getBucket();
+  const files = await bucket.find({ filename: key }).limit(1).toArray();
+  if (!files.length) throw new Error(`File not found: ${key}`);
+  return `/api/v1/files/${files[0]._id}`;
+}
+
+/**
+ * Delete a file from GridFS by ID.
+ * @param {string} fileId
+ */
+async function deleteFile(fileId) {
+  const bucket = getBucket();
+  await bucket.delete(new ObjectId(String(fileId)));
+  logger.log('GridFS deleted:', fileId);
+}
+
 function isConfigured() {
-  return !!(config.s3.bucket && config.s3.accessKey && config.s3.secretKey);
+  return !!mongoose.connection.db;
 }
 
-module.exports = { uploadBuffer, getSignedDownloadUrl, isConfigured };
+module.exports = { uploadBuffer, getFileStream, getSignedDownloadUrl, deleteFile, isConfigured };

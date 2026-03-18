@@ -9,6 +9,7 @@
 
 const logger = require('./utils/logger');
 const stt = require('./services/stt');
+const { createLiveSession: createDeepgramSession } = require('./services/stt');
 const llm = require('./services/llm');
 const tts = require('./services/tts');
 const vobizClient = require('./services/vobizClient');
@@ -576,6 +577,36 @@ class EnhancedCallSession {
 
     // Speculative early response: played before STT returns on outbound availability_check
     this._speculativeResponseSent = false;
+
+    // Deepgram live streaming — provides transcript before VAD timeout
+    this.dgSession = null;
+    this.dgFinalText = '';      // Set by Deepgram speech_final event
+    this.dgInterimText = '';    // Set by Deepgram interim events
+  }
+
+  // Open Deepgram live WebSocket for this call session
+  openDeepgramStream() {
+    if (this.dgSession || this._ended) return;
+    this.dgSession = createDeepgramSession({
+      language: this.language,
+      onInterim: (text) => { this.dgInterimText = text; },
+      onFinal: (text) => {
+        this.dgFinalText = text;
+        this.dgInterimText = '';
+        logger.debug('Deepgram speech_final:', { callSid: this.callSid, text });
+      },
+      onError: (err) => {
+        logger.warn('Deepgram live error:', err?.message || err);
+        this.dgSession = null;
+      }
+    });
+  }
+
+  closeDeepgramStream() {
+    if (this.dgSession) {
+      try { this.dgSession.close(); } catch (e) { }
+      this.dgSession = null;
+    }
   }
 
   normalizeLanguageCode(language) {
@@ -903,6 +934,8 @@ module.exports = function setupWs(app) {
       session.streamSid = streamSid;
       sessions.set(callUuid, session);
       costControl.trackCall(callUuid);
+      // Open Deepgram live stream immediately for low-latency transcription
+      session.openDeepgramStream();
 
       logger.log('Call session started', {
         callUuid,
@@ -1332,6 +1365,11 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session.pcmBuffer.push(pcmChunk);
       session.totalPcmBytes += pcmChunk.length;
 
+      // Feed PCM chunk to Deepgram live stream for early transcript
+      if (session.dgSession) {
+        try { session.dgSession.send(pcmChunk); } catch (e) { /* ignore */ }
+      }
+
       // Force processing if buffer is too large OR speech has lasted too long
       const speechDurationMs = session.speechStartedAt !== null
         ? Date.now() - session.speechStartedAt
@@ -1510,8 +1548,17 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     timeSinceCallStart: `${((Date.now() - session.startTime) / 1000).toFixed(1)}s`
   });
 
+  // Use Deepgram live transcript if already available (speech_final fired before VAD timeout)
   const sttStart = Date.now();
-  let sttResult = await stt.transcribe(wavBuffer, session.callSid, 'audio/wav', session.language);
+  let sttResult;
+  if (session.dgFinalText) {
+    sttResult = { text: session.dgFinalText, confidence: 0.92, empty: false, latencyMs: 0, audioDurationSec };
+    session.dgFinalText = '';
+    session.dgInterimText = '';
+    logger.log('STT: using Deepgram live transcript (0ms)', { callSid: session.callSid, text: sttResult.text });
+  } else {
+    sttResult = await stt.transcribe(wavBuffer, session.callSid, 'audio/wav', session.language);
+  }
   let sttLatency = Date.now() - sttStart;
 
   // Safety net for ambiguous L16 streams:
@@ -1785,6 +1832,7 @@ async function cleanupSession(session, ws, pingInterval) {
 
   session._wsClosed = true;
   session.cancelOngoingOperations(); // Signal abort immediately so in-flight TTS/LLM bail out fast
+  session.closeDeepgramStream();     // Close Deepgram live WS
   clearTimeout(session.silenceTimer);
   clearTimeout(session.maxDurationTimer);
 

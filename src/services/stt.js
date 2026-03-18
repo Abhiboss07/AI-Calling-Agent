@@ -1,43 +1,61 @@
-const openai = require('./aiClient');
+/**
+ * STT Service — Deepgram (streaming + batch)
+ *
+ * Replaces: OpenAI Whisper
+ * Provides:
+ *   transcribe(wavBuffer, callSid, mime, language)     — batch PreRecorded API
+ *   createLiveSession({ language, onInterim, onFinal, onError })  — live streaming
+ */
+
+const { createClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
 const logger = require('../utils/logger');
 const metrics = require('./metrics');
 const costControl = require('./costControl');
-const { getLanguage, normalizeLanguageCode } = require('../config/languages');
+const { normalizeLanguageCode } = require('../config/languages');
+const config = require('../config');
 
-function computePcm16Rms(pcmBuffer) {
-  if (!pcmBuffer || pcmBuffer.length < 2) return 0;
-  const sampleCount = Math.floor(pcmBuffer.length / 2);
-  let sumSq = 0;
-  for (let i = 0; i < sampleCount; i++) {
-    const sample = pcmBuffer.readInt16LE(i * 2) / 32768;
-    sumSq += sample * sample;
-  }
-  return Math.sqrt(sumSq / sampleCount);
+// ── Language mapping: internal code → Deepgram language ──────────────────────
+const DG_LANGUAGE_MAP = {
+  'en-IN': 'en-IN',
+  'hi-IN': 'hi',
+  'ta-IN': 'ta',
+  'te-IN': 'te',
+  'kn-IN': 'kn',
+  'ml-IN': 'ml',
+  'mr-IN': 'mr',
+  'bn-IN': 'bn',
+  'gu-IN': 'gu',
+  'hinglish': 'hi'    // best approximation for mixed Hindi-English
+};
+
+function toDgLanguage(language) {
+  return DG_LANGUAGE_MAP[language] || 'en-IN';
+}
+
+function getDeepgramClient() {
+  if (!config.deepgramApiKey) throw new Error('DEEPGRAM_API_KEY missing');
+  return createClient(config.deepgramApiKey);
 }
 
 function normalizeTranscriptText(text) {
   let out = String(text || '').trim();
   if (!out) return '';
-
   const replacements = [
     [/\b(yeahh|yea|yup|yupp)\b/gi, 'yes'],
     [/\b(haanji|hanji)\b/gi, 'haan ji'],
     [/\b(naah|nah)\b/gi, 'no'],
     [/\b(okay+)\b/gi, 'ok']
   ];
-
   for (const [pattern, replacement] of replacements) {
     out = out.replace(pattern, replacement);
   }
-
   return out.trim();
 }
 
-// Input: WAV buffer (8kHz mono 16-bit PCM with proper header)
+// ── Batch Transcription (PreRecorded) ────────────────────────────────────────
+// Drop-in replacement for Whisper — accepts WAV buffer, returns { text, confidence, empty }
 async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN') {
-  if (!buffer || buffer.length === 0) {
-    return { text: '', confidence: 0, empty: true };
-  }
+  if (!buffer || buffer.length === 0) return { text: '', confidence: 0, empty: true };
 
   // 44-byte WAV header + at least 1200 bytes of PCM data
   if (buffer.length < 844) {
@@ -45,117 +63,58 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
     return { text: '', confidence: 0, empty: true };
   }
 
-  // Guard: cap to ~30 seconds to prevent excessive costs
+  // Cap at 30 seconds
   if (buffer.length > 480044) {
-    logger.warn('STT: buffer too large, truncating to 30s', buffer.length, 'bytes');
+    logger.warn('STT: buffer too large, truncating to 30s');
     buffer = buffer.subarray(0, 480044);
   }
 
-  // WAV at 8kHz mono 16-bit => 16000 bytes/sec
   const dataBytes = Math.max(0, buffer.length - 44);
-  const durationSec = dataBytes / 16000;
-  const pcmRms = computePcm16Rms(buffer.subarray(44));
-
-  // Drop ultra-low-energy short snippets before paying Whisper cost.
-  // This avoids false transcriptions from line hiss/comfort noise.
-  if (durationSec <= 0.5 && pcmRms < 0.0008) {
-    logger.log(`STT: prefilter low-energy audio skipped (${durationSec.toFixed(1)}s, rms=${pcmRms.toFixed(4)})`, { callSid });
-    return { text: '', confidence: 0, empty: true };
-  }
+  const durationSec = dataBytes / 16000; // 8kHz 16-bit = 16000 bytes/sec
 
   try {
     const startMs = Date.now();
     metrics.incrementSttRequest(true);
 
-    const langCode = String(language || '').toLowerCase().trim();
-    let whisperLang;
-    if (langCode && langCode !== 'auto') {
-      const normalizedLanguage = normalizeLanguageCode(language, 'en-IN');
-      // For hinglish (mixed Hindi-English), don't set language so Whisper auto-detects
-      if (normalizedLanguage === 'hinglish') {
-        whisperLang = undefined;
-      } else {
-        const langConfig = getLanguage(normalizedLanguage);
-        whisperLang = langConfig?.whisperCode || undefined;
+    const dgLang = toDgLanguage(normalizeLanguageCode(language, 'en-IN'));
+    const deepgram = getDeepgramClient();
+
+    const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
+      buffer,
+      {
+        model: 'nova-2',
+        language: dgLang,
+        smart_format: true,
+        punctuate: true,
+        utterances: false,
+        filler_words: false,
+        diarize: false
       }
+    );
+
+    if (error) {
+      logger.error('Deepgram batch STT error:', error);
+      metrics.incrementSttRequest(false);
+      return { text: '', confidence: 0, empty: true, error: String(error) };
     }
 
-    const resp = await openai.transcribeAudio(buffer, mime, whisperLang);
     const latencyMs = Date.now() - startMs;
-    const rawText = String(resp.text || '').trim();
+    const alternative = result?.results?.channels?.[0]?.alternatives?.[0];
+    const rawText = String(alternative?.transcript || '').trim();
+    const confidence = alternative?.confidence ?? 0.8;
     const text = normalizeTranscriptText(rawText);
-    const confidence = resp?.segments?.[0]?.avg_logprob
-      ? Math.exp(resp.segments[0].avg_logprob)
-      : 0.8;
 
-    // Log raw Whisper output BEFORE any filtering (critical for debugging)
-    logger.log(`STT raw (${latencyMs}ms, ${durationSec.toFixed(1)}s audio): "${rawText}"`, { callSid });
+    logger.log(`STT (Deepgram ${latencyMs}ms, ${durationSec.toFixed(1)}s): "${rawText}"`);
 
     if (callSid) costControl.addSttUsage(callSid, durationSec);
 
-    // Filter noise-only transcriptions
+    // Noise filter
     const noisePattern = /^[.\s…]+$/i;
     if (!text || text.length < 2 || noisePattern.test(text)) {
-      logger.log(`STT: noise filtered "${text}"`, { callSid, latencyMs });
       return { text: '', confidence: 0, empty: true };
     }
 
-    // Filter known Whisper hallucination phrases (produced on noise/silence input)
-    // NOTE: Only include phrases that are NEVER real caller speech
-    const WHISPER_HALLUCINATIONS = new Set([
-      'blooper', 'bloopers', 'the end', 'thanks for watching',
-      'thank you for watching', 'subscribe', 'like and subscribe',
-      'please subscribe', 'subtitles by', 'amara.org', 'transcribed by',
-      'music', 'applause', 'laughter', 'silence', 'inaudible',
-      'foreign', 'sigh', 'cough'
-    ]);
-    const lowerText = text.toLowerCase().trim();
-    if (WHISPER_HALLUCINATIONS.has(lowerText)) {
-      logger.log(`STT: hallucination filtered "${text}"`, { callSid, latencyMs });
-      return { text: '', confidence: 0, empty: true };
-    }
-
-    // Additional short-utterance guard for common Whisper noise artifacts.
-    if (durationSec <= 0.8) {
-      const SAFE_SHORT_UTTERANCES = new Set([
-        'yes', 'no', 'ok', 'okay', 'hello', 'hi', 'hey',
-        'haan', 'haan ji', 'han', 'ji', 'ha', 'ha ji',
-        'nahi', 'nahin', 'hmm', 'hmmm', 'accha', 'achha',
-        'namaste', 'namaskar', 'theek hai', 'thik hai',
-        'bilkul', 'zaroor', 'boliye', 'bolo', 'haa',
-        'sure', 'yeah', 'yep', 'right', 'correct'
-      ]);
-      const SHORT_AMBIGUOUS = new Set([
-        'and i\'ll', 'oh', 'uh', 'uhh', 'huh',
-        'margaret', 'margaret?'
-      ]);
-
-      // Strip punctuation for safe utterance matching ("Hello." → "hello")
-      const strippedText = lowerText.replace(/[^a-z0-9\s]/gi, '').trim();
-      const words = strippedText.split(/\s+/).filter(Boolean);
-      const looksAmbiguousShort = SHORT_AMBIGUOUS.has(strippedText)
-        || (words.length <= 2 && confidence < 0.55 && !SAFE_SHORT_UTTERANCES.has(strippedText));
-
-      if (looksAmbiguousShort) {
-        logger.log(`STT: short ambiguous filtered "${text}"`, {
-          callSid,
-          latencyMs,
-          durationSec: Number(durationSec.toFixed(2)),
-          confidence: Number(confidence.toFixed(2))
-        });
-        return { text: '', confidence: 0, empty: true };
-      }
-    }
-
-    logger.log(`STT: "${text}" (${latencyMs}ms, ${durationSec.toFixed(1)}s audio)`, { callSid });
-
-    return {
-      text,
-      confidence,
-      empty: false,
-      latencyMs,
-      audioDurationSec: durationSec
-    };
+    return { text, confidence, empty: false, latencyMs, audioDurationSec: durationSec };
   } catch (err) {
     logger.error('STT transcription error:', err.message || err);
     metrics.incrementSttRequest(false);
@@ -163,4 +122,94 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
   }
 }
 
-module.exports = { transcribe, normalizeTranscriptText };
+// ── Live Streaming Session ────────────────────────────────────────────────────
+// Creates a Deepgram live WebSocket connection.
+// Sends PCM16 LE 8kHz chunks via session.send(buffer).
+// Returns { send(buffer), close() }.
+function createLiveSession({ language = 'en-IN', onInterim, onFinal, onError } = {}) {
+  if (!config.deepgramApiKey) {
+    logger.warn('Deepgram live session skipped: DEEPGRAM_API_KEY missing');
+    return null;
+  }
+
+  let closed = false;
+  let connection = null;
+
+  try {
+    const deepgram = getDeepgramClient();
+    const dgLang = toDgLanguage(normalizeLanguageCode(language, 'en-IN'));
+
+    connection = deepgram.listen.live({
+      model: 'nova-2',
+      language: dgLang,
+      smart_format: true,
+      interim_results: true,
+      endpointing: 300,         // ms of silence to trigger speech_final
+      utterance_end_ms: 1000,   // ms after last word before utterance end
+      encoding: 'linear16',
+      sample_rate: 8000,
+      channels: 1,
+      punctuate: true,
+      filler_words: false
+    });
+
+    connection.on(LiveTranscriptionEvents.Open, () => {
+      logger.debug('Deepgram live session opened');
+    });
+
+    connection.on(LiveTranscriptionEvents.Transcript, (data) => {
+      if (closed) return;
+      const alt = data?.channel?.alternatives?.[0];
+      const text = normalizeTranscriptText(alt?.transcript || '');
+      if (!text) return;
+
+      if (data.is_final && data.speech_final) {
+        // Authoritative endpoint
+        if (typeof onFinal === 'function') onFinal(text);
+      } else if (data.is_final) {
+        // Sentence boundary but stream still open
+        if (typeof onFinal === 'function') onFinal(text);
+      } else {
+        // Partial interim result
+        if (typeof onInterim === 'function') onInterim(text);
+      }
+    });
+
+    connection.on(LiveTranscriptionEvents.Error, (err) => {
+      if (!closed) {
+        logger.warn('Deepgram live error:', err?.message || err);
+        if (typeof onError === 'function') onError(err);
+      }
+    });
+
+    connection.on(LiveTranscriptionEvents.Close, () => {
+      closed = true;
+      logger.debug('Deepgram live session closed');
+    });
+
+  } catch (err) {
+    logger.warn('Failed to create Deepgram live session:', err.message);
+    if (typeof onError === 'function') onError(err);
+    return null;
+  }
+
+  return {
+    send(pcmBuffer) {
+      if (closed || !connection) return;
+      try {
+        connection.send(pcmBuffer);
+      } catch (e) {
+        logger.debug('Deepgram send error:', e.message);
+      }
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      try {
+        if (connection) connection.requestClose();
+      } catch (e) { /* ignore */ }
+    }
+  };
+}
+
+module.exports = { transcribe, createLiveSession, normalizeTranscriptText };

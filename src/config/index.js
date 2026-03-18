@@ -8,14 +8,10 @@ const path = require('path');
 dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
 
 // Validation
-const _provider = process.env.AI_PROVIDER || 'gemini';
-const _aiKeyVar = _provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY';
-const REQUIRED = ['VOBIZ_AUTH_ID', 'VOBIZ_AUTH_TOKEN', 'VOBIZ_CALLER_ID', _aiKeyVar];
+const REQUIRED = ['VOBIZ_AUTH_ID', 'VOBIZ_AUTH_TOKEN', 'VOBIZ_CALLER_ID', 'DEEPGRAM_API_KEY', 'SARVAM_API_KEY', 'GEMINI_API_KEY'];
 const missing = REQUIRED.filter((k) => !process.env[k]);
 if (missing.length) {
-  // use stderr directly here since logger depends on config (circular)
   process.stderr.write(`[CONFIG] FATAL: Missing required env vars: ${missing.join(', ')}\n`);
-  // Don't exit in dev mode - allow dashboard to run
   if (process.env.NODE_ENV === 'production') process.exit(1);
 }
 
@@ -39,19 +35,22 @@ module.exports = {
     callerId: process.env.VOBIZ_CALLER_ID
   },
 
-  aiProvider: _provider,           // 'gemini' (default) or 'openai'
-  openaiApiKey: process.env.OPENAI_API_KEY,
+  // AI providers — Gemini is primary, OpenAI is fallback
+  aiProvider: 'gemini',
   geminiApiKey: process.env.GEMINI_API_KEY,
+  openaiApiKey: process.env.OPENAI_API_KEY,    // fallback only
 
-  mongodbUri: process.env.MONGODB_URI, // Atlas URI required
+  // New providers
+  deepgramApiKey: process.env.DEEPGRAM_API_KEY,
+  sarvamApiKey: process.env.SARVAM_API_KEY,
 
-  s3: {
-    bucket: process.env.S3_BUCKET,
-    region: process.env.S3_REGION || 'auto',
-    accessKey: process.env.S3_ACCESS_KEY,
-    secretKey: process.env.S3_SECRET_KEY,
-    endpoint: process.env.S3_ENDPOINT
+  // Email (Gmail SMTP with app password)
+  gmail: {
+    user: process.env.GMAIL_USER,
+    appPassword: process.env.GMAIL_APP_PASSWORD
   },
+
+  mongodbUri: process.env.MONGODB_URI,
 
   callMaxMinutes: envNumber('CALL_MAX_MINUTES', 10),
   campaignMonthlyBudget: envNumber('CAMPAIGN_MONTHLY_BUDGET', 10000),
@@ -85,16 +84,17 @@ module.exports = {
   },
 
   llm: {
-    model: process.env.LLM_MODEL || (_provider === 'gemini' ? 'gemini-2.0-flash' : 'gpt-4o-mini'),
+    geminiModel: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+    openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    // keep .model for backward-compat references
+    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
     maxHistory: envNumber('LLM_MAX_HISTORY', 10),
     historyTtlMs: envNumber('LLM_HISTORY_TTL_MS', 30 * 60 * 1000)
   },
 
   tts: {
-    model: process.env.TTS_MODEL || 'tts-1',
     cacheMaxEntries: envNumber('TTS_CACHE_MAX_ENTRIES', 100),
-    cacheMaxBytes: envNumber('TTS_CACHE_MAX_BYTES', 3 * 1024 * 1024),
-    resampleMode: process.env.TTS_RESAMPLE_MODE || 'sinc'
+    cacheMaxBytes: envNumber('TTS_CACHE_MAX_BYTES', 3 * 1024 * 1024)
   },
 
   budget: {

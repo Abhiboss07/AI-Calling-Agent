@@ -24,6 +24,21 @@ const upload = multer({
 const { getPublicBaseUrl } = require('../utils/urlHelper');
 
 // ──────────────────────────────────────────────────────────────────────────
+// GRIDFS FILE SERVING
+// ──────────────────────────────────────────────────────────────────────────
+
+// GET /api/v1/files/:id — Serve any file stored in GridFS (avatars, docs, recordings)
+router.get('/v1/files/:id', async (req, res) => {
+  try {
+    const fileStream = storage.getFileStream(req.params.id);
+    fileStream.on('error', () => res.status(404).json({ ok: false, error: 'File not found' }));
+    fileStream.pipe(res);
+  } catch (err) {
+    res.status(400).json({ ok: false, error: 'Invalid file ID' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 // CALLS
 // ──────────────────────────────────────────────────────────────────────────
 

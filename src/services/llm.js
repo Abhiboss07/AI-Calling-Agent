@@ -1,4 +1,6 @@
-const openai = require('./aiClient');
+// LLM: Gemini primary → OpenAI fallback
+const geminiClient = require('./geminiClient');
+const openaiClient = require('./openaiClient');
 const logger = require('../utils/logger');
 const costControl = require('./costControl');
 const metrics = require('./metrics');
@@ -402,19 +404,28 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       { role: 'user', content: userMsg }
     ];
 
-    if (!config.openaiApiKey) {
-      logger.warn('OpenAI API key missing; using fallback response');
+    if (!config.geminiApiKey && !config.openaiApiKey) {
+      logger.warn('No LLM API key configured; using fallback response');
       metrics.incrementLlmRequest(false);
       return { ...FALLBACK_RESPONSE };
     }
 
     metrics.incrementLlmRequest(true);
 
-    const resp = await openai.chatCompletion(messages, config.llm.model, {
-      temperature: 0.25,
-      max_tokens: 100,
-      response_format: { type: 'json_object' }
-    });
+    // Gemini primary → OpenAI fallback
+    let resp;
+    const llmOpts = { temperature: 0.25, max_tokens: 100, response_format: { type: 'json_object' } };
+    if (config.geminiApiKey) {
+      try {
+        resp = await geminiClient.chatCompletion(messages, config.llm.geminiModel, llmOpts);
+      } catch (geminiErr) {
+        logger.warn('Gemini LLM failed, falling back to OpenAI:', geminiErr.message);
+        if (!config.openaiApiKey) throw geminiErr;
+        resp = await openaiClient.chatCompletion(messages, config.llm.openaiModel, llmOpts);
+      }
+    } else {
+      resp = await openaiClient.chatCompletion(messages, config.llm.openaiModel, llmOpts);
+    }
 
     const assistant = resp.choices?.[0]?.message?.content || '';
 
@@ -546,8 +557,7 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
       { role: 'user', content: userMsg }
     ];
 
-    const activeApiKey = config.aiProvider === 'gemini' ? config.geminiApiKey : config.openaiApiKey;
-    if (!activeApiKey) {
+    if (!config.geminiApiKey && !config.openaiApiKey) {
       yield { type: 'sentence', text: FALLBACK_RESPONSE.speak };
       yield { ...FALLBACK_RESPONSE };
       return;
@@ -555,11 +565,19 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
 
     metrics.incrementLlmRequest(true);
 
-    const stream = await openai.chatCompletionStream(messages, config.llm.model, {
-      temperature: 0.25,
-      max_tokens: 100,
-      response_format: { type: 'json_object' }
-    });
+    const streamOpts = { temperature: 0.25, max_tokens: 100, response_format: { type: 'json_object' } };
+    let stream;
+    if (config.geminiApiKey) {
+      try {
+        stream = await geminiClient.chatCompletionStream(messages, config.llm.geminiModel, streamOpts);
+      } catch (geminiErr) {
+        logger.warn('Gemini stream LLM failed, falling back to OpenAI:', geminiErr.message);
+        if (!config.openaiApiKey) throw geminiErr;
+        stream = await openaiClient.chatCompletionStream(messages, config.llm.openaiModel, streamOpts);
+      }
+    } else {
+      stream = await openaiClient.chatCompletionStream(messages, config.llm.openaiModel, streamOpts);
+    }
 
     let fullJson = '';
     let extractedSpeak = '';
