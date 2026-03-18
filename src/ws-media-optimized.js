@@ -380,6 +380,64 @@ function detectUserTone(text) {
   return 'neutral';
 }
 
+// ── P3: Transcript Similarity (Jaccard on word sets) ───────────────────────
+// Returns 0..1. Texts with similarity >= 0.8 are considered the same utterance.
+function textSimilarity(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const setA = new Set(String(a).toLowerCase().split(/\s+/).filter(Boolean));
+  const setB = new Set(String(b).toLowerCase().split(/\s+/).filter(Boolean));
+  if (setA.size === 0 && setB.size === 0) return 1;
+  let intersection = 0;
+  for (const w of setA) { if (setB.has(w)) intersection++; }
+  return intersection / (setA.size + setB.size - intersection);
+}
+
+// ── P4: Intent confidence for cache ────────────────────────────────────────
+// Short focused transcripts with clear intent = high confidence.
+// Long/complex transcripts may have nuance the pattern cache can't handle.
+function computeIntentConfidence(text) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
+  if (words <= 3) return 0.95;
+  if (words <= 6) return 0.88;
+  if (words <= 10) return 0.78; // below threshold → skip cache
+  return 0.65;
+}
+
+// ── P2: Async-generator stream timeout wrapper ──────────────────────────────
+// Races each .next() call against a per-call timeout.
+// If LLM is silent for > timeoutMs, iteration ends and caller uses fallback.
+function withStreamTimeout(gen, timeoutMs) {
+  return {
+    [Symbol.asyncIterator]() {
+      const iter = gen[Symbol.asyncIterator]();
+      let timeoutId = null;
+      return {
+        async next() {
+          let rejectFn;
+          const timeoutP = new Promise((_, reject) => {
+            rejectFn = reject;
+            timeoutId = setTimeout(() => reject(new Error('LLM_STREAM_TIMEOUT')), timeoutMs);
+          });
+          try {
+            const result = await Promise.race([iter.next(), timeoutP]);
+            clearTimeout(timeoutId);
+            return result;
+          } catch (e) {
+            clearTimeout(timeoutId);
+            if (e.message === 'LLM_STREAM_TIMEOUT') return { done: true, value: undefined };
+            throw e;
+          }
+        },
+        async return(v) {
+          clearTimeout(timeoutId);
+          return iter.return ? iter.return(v) : { done: true, value: v };
+        }
+      };
+    }
+  };
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // FSM STATE → LLM SCRIPT STEP MAPPING
 // The FSM tracks high-level conversation states (INTRODUCING, QUALIFYING_LEAD,
@@ -643,7 +701,11 @@ class EnhancedCallSession {
         // Stable speculative LLM: debounce SPECULATIVE_STABILITY_MS before triggering
         // to ensure transcript is stable and avoid responding to partial sentences.
         if (this._speculativeTimer) clearTimeout(this._speculativeTimer);
-        if (!this.isProcessing && !this.isPlaying && text.length > 8) {
+        // Only speculate if transcript looks like a complete utterance:
+        //   ≥3 words AND (ends with sentence terminator OR ≥6 words = likely complete thought)
+        const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+        const looksComplete = /[.?!…]$/.test(text.trim()) || wordCount >= 6;
+        if (!this.isProcessing && !this.isPlaying && wordCount >= 3 && looksComplete) {
           this._speculativeTimer = setTimeout(() => {
             this._speculativeTimer = null;
             // Only fire if transcript is still the same and pipeline is idle
@@ -1778,17 +1840,27 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     ...fsmContext,
     step: fsmContext.step || mapFsmStateToStep(session.fsm.getState(), session.direction),
     turnCount: session.fsm.turnCount,
-    direction: session.direction
+    direction: session.direction,
+    // Tone adaptation: LLM adjusts style based on detected emotion
+    // angry → calm/empathetic | confused → guiding/clear | curious → informative
+    userTone: session._lastUserTone
   };
 
-  // ── 3a. Response cache — bypass LLM for common inputs (0ms) ─────────────
-  const cacheHit = responseCache.lookup(sttResult.text, {
+  // ── 3a. Response cache — smart filter: only use when STT is confident ────
+  // Low-confidence transcripts may have mis-heard words; avoid wrong canned replies
+  const sttConfident = (sttResult.confidence || 0) >= CACHE_MIN_CONFIDENCE;
+  const cacheHit = sttConfident ? responseCache.lookup(sttResult.text, {
     step: callState.step,
     direction: session.direction,
     language: session.language,
     agentName: config.agentName,
-    companyName: config.companyName
-  });
+    companyName: config.companyName,
+    budget: session.fsm.leadData?.budget || fsmContext.budget,
+    location: session.fsm.leadData?.location || fsmContext.location
+  }) : null;
+  if (!sttConfident && sttResult.confidence > 0) {
+    logger.debug(`[CACHE] Skipping cache — STT confidence too low (${(sttResult.confidence * 100).toFixed(0)}% < ${CACHE_MIN_CONFIDENCE * 100}%)`, { callSid: session.callSid });
+  }
 
   const llmStart = Date.now();
   let firstChunkMs = 0;
@@ -1799,7 +1871,12 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   if (cacheHit) {
     logger.log(`[CACHE] Cache hit: ${cacheHit.cacheId} (0ms LLM)`, { callSid: session.callSid });
 
-    // Immediately synthesize and play — no LLM needed
+    // Micro-pause: simulate human thinking before replying (cache responses are instant, add human delay)
+    const cachePauseMs = MICRO_PAUSE_MIN_MS + Math.floor(Math.random() * (MICRO_PAUSE_MAX_MS - MICRO_PAUSE_MIN_MS));
+    await new Promise(r => setTimeout(r, cachePauseMs));
+    if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
+
+    // Synthesize and play — no LLM needed
     const ttsStart = Date.now();
     const cacheTts = await withRetry(
       () => tts.synthesizeRaw(cacheHit.speak, session.callSid, session.language),
@@ -1890,6 +1967,18 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     return;
   }
 
+  // ── Pre-stream Response Validation ────────────────────────────────────────
+  // Check whether the user has already said something new while we built the stream.
+  // If so, the reply will be stale — discard and let the new VAD trigger a fresh turn.
+  if (session.dgFinalText && session.dgFinalText !== sttResult.text) {
+    logger.warn('[VALID] Pre-stream: user spoke new text while building LLM stream — discarding', {
+      callSid: session.callSid,
+      processed: sttResult.text.substring(0, 40),
+      newer: session.dgFinalText.substring(0, 40)
+    });
+    return;
+  }
+
   const burnRate = costControl.getEstimatedBurnRatePerMin(session.callSid);
   const costGuardActive = burnRate > TARGET_COST_PER_MIN_RS;
 
@@ -1899,6 +1988,11 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   let _fillerUsed = false;
   let _isFirstSentence = true;
   const _step = callState.step || '';
+
+  // Hard latency deadline: if we've used ≥700ms before first TTS chunk, activate
+  // emergency fast mode on remaining sentences (trim to 8 words, skip fillers)
+  const HARD_LATENCY_DEADLINE_MS = 700;
+  let _hardLatencyTripped = (Date.now() - llmStart) >= HARD_LATENCY_DEADLINE_MS;
 
   // Process LLM in streaming mode
   for await (const chunk of replyStream) {
@@ -1913,21 +2007,58 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
       let sentence = String(chunk.text || '').trim();
       if (!sentence) continue;
 
+      // ── Check hard latency deadline (>700ms elapsed = emergency trim) ──
+      if (!_hardLatencyTripped && (Date.now() - llmStart) >= HARD_LATENCY_DEADLINE_MS) {
+        _hardLatencyTripped = true;
+        logger.warn(`[LATENCY] Hard deadline hit at ${Date.now() - llmStart}ms — emergency fast mode`, { callSid: session.callSid });
+        if (!session._optimizerConfig) session._optimizerConfig = optimizerConfig;
+        session._optimizerConfig = { ...session._optimizerConfig, fastMode: true };
+      }
+      const effectiveFastMode = optimizerConfig.fastMode || _hardLatencyTripped;
+
       // ── Apply human speech naturalisation ──────────────────────────────
       const processed = humanSpeech.processStreamSentence(sentence, {
         isFirst: _isFirstSentence,
         step: _step,
         language: session.language,
-        fastMode: optimizerConfig.fastMode
+        fastMode: effectiveFastMode
       });
       sentence = processed.text;
       _speechIssues += processed.issues.length;
       if (processed.addedFiller) _fillerUsed = true;
       _isFirstSentence = false;
 
+      // Emergency trim if hard latency tripped and sentence is still long
+      if (_hardLatencyTripped) {
+        const words = sentence.split(/\s+/);
+        if (words.length > 10) sentence = words.slice(0, 10).join(' ') + '.';
+      }
+
       if (firstChunkMs === 0) {
         firstChunkMs = Date.now() - llmStart;
         logger.debug(`Time to first sentence: ${firstChunkMs}ms`);
+
+        // ── Response Validation ─────────────────────────────────────────────
+        // If the user spoke new words while LLM was thinking, discard this reply.
+        // This prevents stale responses from playing after mid-thought corrections.
+        if (session.dgFinalText && session.dgFinalText !== sttResult.text) {
+          logger.warn('[VALID] User spoke new text during LLM — discarding stale reply', {
+            callSid: session.callSid,
+            processed: sttResult.text.substring(0, 40),
+            newer: session.dgFinalText.substring(0, 40)
+          });
+          return;
+        }
+
+        // ── Micro-Pause (human thinking simulation) ─────────────────────────
+        // Skip for speculative LLM replies (already had a head start — no dead air)
+        if (!speculativeReply) {
+          const thinkMs = MICRO_PAUSE_MIN_MS + Math.floor(Math.random() * (MICRO_PAUSE_MAX_MS - MICRO_PAUSE_MIN_MS));
+          logger.debug(`[PAUSE] Micro-pause ${thinkMs}ms (tone: ${session._lastUserTone})`, { callSid: session.callSid });
+          await new Promise(r => setTimeout(r, thinkMs));
+          if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
+        }
+
         // Transition FSM to speaking
         session.fsm.transition('intent_classified', { response: '(streaming)' });
       }

@@ -349,6 +349,51 @@ function trimToMaxWords(text, maxWords = 20) {
   return lastPunct > 10 ? partial.substring(0, lastPunct + 1) : partial + '.';
 }
 
+// ── Hard LLM timeout (Priority 6) ────────────────────────────────────────────
+const LLM_HARD_TIMEOUT_MS = 580; // Hard limit: reject if no response within 580ms
+
+function withLlmTimeout(promise, callSid, label = 'LLM') {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label}_TIMEOUT_${LLM_HARD_TIMEOUT_MS}ms`)), LLM_HARD_TIMEOUT_MS)
+    )
+  ]);
+}
+
+// ── Response Validation (Priority 2) ─────────────────────────────────────────
+// Validates that the LLM response makes sense given the conversation context.
+// Returns {valid, reason} — if invalid, caller should use FALLBACK_RESPONSE.
+function validateResponse(reply, transcript, step) {
+  if (!reply?.speak || reply.speak.trim().length < 3) {
+    return { valid: false, reason: 'empty_speak' };
+  }
+
+  // Echo detection: agent must not repeat the user verbatim
+  if (transcript && reply.speak.toLowerCase().trim() === transcript.toLowerCase().trim()) {
+    return { valid: false, reason: 'echo_response' };
+  }
+
+  // Hangup guard: only allow hangup at close/reschedule steps
+  const closeSteps = new Set(['close', 'reschedule_time', 'closing']);
+  if (reply.action === 'hangup' && !closeSteps.has(step)) {
+    const hasFarewell = /thank you|goodbye|bye|dhanyavaad|shukriya/i.test(reply.speak);
+    if (!hasFarewell) {
+      return { valid: false, reason: 'premature_hangup' };
+    }
+  }
+
+  // Step regression guard: LLM must not jump back to intro steps once qualified
+  const progressedSteps = ['purpose', 'property_type', 'location_budget', 'qualify_budget',
+    'qualify_timeline', 'investment_timeline', 'book_visit', 'closing'];
+  const regressSteps   = ['identify', 'greeting', 'availability_check'];
+  if (progressedSteps.includes(step) && regressSteps.includes(reply.nextStep)) {
+    return { valid: false, reason: 'step_regression' };
+  }
+
+  return { valid: true, reason: null };
+}
+
 async function generateReply({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific, maxTokens, fastMode, modelPref }) {
   try {
     const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
@@ -397,6 +442,16 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       systemContent += '\nSPEED MODE ACTIVE: ONE sentence only. Max 12 words. Be direct.';
     }
 
+    // Tone adaptation: adjust response style to match detected user emotion
+    const userTone = callState?.userTone || 'neutral';
+    if (userTone === 'angry') {
+      systemContent += '\nTONE ALERT: Customer sounds frustrated. Respond with empathy and calm. Acknowledge their concern before proceeding. Do NOT be defensive.';
+    } else if (userTone === 'confused') {
+      systemContent += '\nTONE ALERT: Customer seems confused. Use simple, clear language. Guide step-by-step. Avoid jargon.';
+    } else if (userTone === 'curious') {
+      systemContent += '\nTONE ALERT: Customer is curious and engaged. Be informative and enthusiastic. Offer relevant details proactively.';
+    }
+
     if (languageCode === 'hinglish') {
       systemContent += '\nIMPORTANT: Respond in natural Hinglish (Roman script Hindi mixed with English). Example: "Aapka budget kitna hai? Hum aapko best options dikhayenge." Match the customer\'s language style.';
     } else if (languageCode === 'hi-IN') {
@@ -435,28 +490,34 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
     const resolvedTokens = maxTokens || 100;
     const llmOpts = { temperature: 0.25, max_tokens: resolvedTokens, response_format: { type: 'json_object' } };
 
-    // Gemini primary → OpenAI fallback (respects modelPref from optimizer)
+    // OpenAI primary → Gemini fallback (explicit 'gemini' modelPref = cost-save fallback only)
     let resp;
-    let _modelUsed = 'gemini';
-    const preferOpenAI = modelPref === 'openai';
+    let _modelUsed = 'openai';
+    const useGemini = modelPref === 'gemini' && config.geminiApiKey && !config.openaiApiKey;
 
-    if (preferOpenAI && config.openaiApiKey) {
-      logger.debug('[OPTIMIZER] Using OpenAI (optimizer preference)', { callSid });
-      _modelUsed = 'openai';
-      resp = await openaiClient.chatCompletion(messages, config.llm.openaiModel, llmOpts);
+    if (!useGemini && config.openaiApiKey) {
+      resp = await withLlmTimeout(
+        openaiClient.chatCompletion(messages, config.llm.openaiModel, llmOpts),
+        callSid, 'openai'
+      );
     } else if (config.geminiApiKey) {
       try {
-        resp = await geminiClient.chatCompletion(messages, config.llm.geminiModel, llmOpts);
+        _modelUsed = 'gemini';
+        resp = await withLlmTimeout(
+          geminiClient.chatCompletion(messages, config.llm.geminiModel, llmOpts),
+          callSid, 'gemini'
+        );
       } catch (geminiErr) {
         logger.warn('Gemini LLM failed, falling back to OpenAI:', geminiErr.message);
         if (!config.openaiApiKey) throw geminiErr;
         _modelUsed = 'openai';
-        logger.warn('[OPTIMIZER] Fallback model used: OpenAI', { callSid });
         resp = await openaiClient.chatCompletion(messages, config.llm.openaiModel, llmOpts);
       }
     } else {
-      _modelUsed = 'openai';
-      resp = await openaiClient.chatCompletion(messages, config.llm.openaiModel, llmOpts);
+      resp = await withLlmTimeout(
+        openaiClient.chatCompletion(messages, config.llm.openaiModel, llmOpts),
+        callSid, 'openai'
+      );
     }
 
     const assistant = resp.choices?.[0]?.message?.content || '';
@@ -495,12 +556,26 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
     if (fastMode && result.speak) {
       result.speak = trimToMaxWords(result.speak, 12);
     }
+    // Validate response before returning
+    const validation = validateResponse(result, lastTranscript, step);
+    if (!validation.valid) {
+      logger.warn(`[VALIDATE] Invalid response (${validation.reason}) — using safe fallback`, { callSid });
+      result.speak = phrase(languageCode, 'availabilityReask') || FALLBACK_RESPONSE.speak;
+      result.action = 'collect';
+      result.nextStep = step || 'handle';
+      result.reasoning = `validation_fixed_${validation.reason}`;
+    }
     result._modelUsed = _modelUsed;
     return result;
   } catch (err) {
     logger.error('LLM error', err.message || err);
     metrics.incrementLlmRequest(false);
     const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
+    // Timeout → use fast deterministic fallback, not hangup
+    if (err.message?.includes('TIMEOUT')) {
+      logger.warn(`[LLM] Hard timeout hit — returning safe continue response`, { callSid });
+      return { ...FALLBACK_RESPONSE, speak: 'Could you please repeat that?', action: 'collect', nextStep: step || 'handle', _modelUsed: 'timeout' };
+    }
     return {
       ...FALLBACK_RESPONSE,
       speak: (getLanguage(languageCode)?.farewell) || 'Thank you for your time. We will call you back. Goodbye.',
@@ -568,6 +643,16 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
       systemContent += '\nSPEED MODE ACTIVE: ONE sentence only. Max 12 words. Be direct.';
     }
 
+    // Tone adaptation: adjust response style to match detected user emotion
+    const userTone = callState?.userTone || 'neutral';
+    if (userTone === 'angry') {
+      systemContent += '\nTONE ALERT: Customer sounds frustrated. Respond with empathy and calm. Acknowledge their concern before proceeding. Do NOT be defensive.';
+    } else if (userTone === 'confused') {
+      systemContent += '\nTONE ALERT: Customer seems confused. Use simple, clear language. Guide step-by-step. Avoid jargon.';
+    } else if (userTone === 'curious') {
+      systemContent += '\nTONE ALERT: Customer is curious and engaged. Be informative and enthusiastic. Offer relevant details proactively.';
+    }
+
     if (languageCode === 'hinglish') {
       systemContent += '\nIMPORTANT: Respond in natural Hinglish (Roman script Hindi mixed with English). Example: "Aapka budget kitna hai? Hum aapko best options dikhayenge." Match the customer\'s language style.';
     } else if (languageCode === 'hi-IN') {
@@ -605,25 +690,22 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
     const resolvedTokens = maxTokens || 100;
     const streamOpts = { temperature: 0.25, max_tokens: resolvedTokens, response_format: { type: 'json_object' } };
     let stream;
-    let _modelUsed = 'gemini';
-    const preferOpenAI = modelPref === 'openai';
+    let _modelUsed = 'openai';
+    const useGeminiStream = modelPref === 'gemini' && config.geminiApiKey && !config.openaiApiKey;
 
-    if (preferOpenAI && config.openaiApiKey) {
-      logger.debug('[OPTIMIZER] Stream using OpenAI (optimizer preference)', { callSid });
-      _modelUsed = 'openai';
+    if (!useGeminiStream && config.openaiApiKey) {
       stream = await openaiClient.chatCompletionStream(messages, config.llm.openaiModel, streamOpts);
     } else if (config.geminiApiKey) {
       try {
+        _modelUsed = 'gemini';
         stream = await geminiClient.chatCompletionStream(messages, config.llm.geminiModel, streamOpts);
       } catch (geminiErr) {
-        logger.warn('Gemini stream LLM failed, falling back to OpenAI:', geminiErr.message);
+        logger.warn('Gemini stream failed, falling back to OpenAI:', geminiErr.message);
         if (!config.openaiApiKey) throw geminiErr;
         _modelUsed = 'openai';
-        logger.warn('[OPTIMIZER] Fallback model used: OpenAI (stream)', { callSid });
         stream = await openaiClient.chatCompletionStream(messages, config.llm.openaiModel, streamOpts);
       }
     } else {
-      _modelUsed = 'openai';
       stream = await openaiClient.chatCompletionStream(messages, config.llm.openaiModel, streamOpts);
     }
 
@@ -726,6 +808,14 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
     if (fastMode && finalResponse.speak) {
       finalResponse.speak = trimToMaxWords(finalResponse.speak, 12);
     }
+    // Validate final response
+    const streamValidation = validateResponse(finalResponse, lastTranscript, step);
+    if (!streamValidation.valid) {
+      logger.warn(`[VALIDATE] Stream response invalid (${streamValidation.reason}) — correcting`, { callSid });
+      finalResponse.action = streamValidation.reason === 'premature_hangup' ? 'collect' : finalResponse.action;
+      if (streamValidation.reason === 'step_regression') finalResponse.nextStep = step;
+      finalResponse.reasoning = `${finalResponse.reasoning}_validated`;
+    }
     finalResponse._modelUsed = _modelUsed;
     yield finalResponse;
     return;
@@ -746,4 +836,4 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
   }
 }
 
-module.exports = { generateReply, generateReplyStream, clearHistory, getHistory, phrase };
+module.exports = { generateReply, generateReplyStream, clearHistory, getHistory, phrase, deterministicTurnReply };

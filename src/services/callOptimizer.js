@@ -40,7 +40,7 @@ function getState(callSid) {
       callSid,
       maxTokens: systemAdjustments.defaultMaxTokens,
       fastMode: false,
-      modelPref: 'gemini',
+      modelPref: 'openai',   // OpenAI is primary for real-time calls; lower/more consistent latency
       recentLatencies: [],       // last 5 turns: {stt, llm, tts, total, ts}
       interventions: 0,
       qualityData: {
@@ -85,7 +85,7 @@ function recordTurn(callSid, { sttMs = 0, llmMs = 0, ttsMs = 0, totalMs = 0, mod
   state.recentLatencies.push({ stt: sttMs, llm: llmMs, tts: ttsMs, total: totalMs, ts: Date.now() });
   if (state.recentLatencies.length > 5) state.recentLatencies.shift();
 
-  if (modelUsed === 'openai') state.qualityData.llmFallbacks++;
+  if (modelUsed === 'gemini') state.qualityData.llmFallbacks++;          // Gemini used = fallback event
   if (modelUsed === 'gemini' && llmMs > LLM_SWITCH_MODEL_MS) state.qualityData.geminiSlowTurns++;
 
   const actions = [];
@@ -114,20 +114,13 @@ function recordTurn(callSid, { sttMs = 0, llmMs = 0, ttsMs = 0, totalMs = 0, mod
     actions.push(`Reduced max_tokens ${prevTokens} → ${REDUCED_TOKENS} (LLM=${llmMs}ms > ${LLM_FAST_THRESHOLD_MS}ms)`);
   }
 
-  // ── 3. Model switching: Gemini slow 2 consecutive turns ─────────────────
-  const recentGeminiSlow = state.recentLatencies.slice(-2)
-    .filter(l => l.llm > LLM_SWITCH_MODEL_MS).length;
-  if (recentGeminiSlow >= 2 && state.modelPref === 'gemini') {
+  // ── 3. Model preference: OpenAI is always primary.
+  //       Only switch to Gemini if OpenAI has been unavailable / erroring.
+  //       If currently on Gemini (fallback) and it's been slow, force back to OpenAI.
+  if (state.modelPref === 'gemini' && llmMs > LLM_SWITCH_MODEL_MS) {
     state.modelPref = 'openai';
     state.interventions++;
-    actions.push(`Switched model pref: gemini → openai (Gemini slow for 2 turns: ${llmMs}ms)`);
-  } else if (state.modelPref === 'openai') {
-    // Check last 3 turns — if OpenAI has been fast, give Gemini another chance
-    const avgRecent = _avg(state.recentLatencies.slice(-3).map(l => l.llm));
-    if (avgRecent < 400) {
-      state.modelPref = 'gemini';
-      actions.push(`Restored model pref: openai → gemini (recent avg LLM=${avgRecent}ms)`);
-    }
+    actions.push(`Forced back to OpenAI — Gemini slow (${llmMs}ms > ${LLM_SWITCH_MODEL_MS}ms)`);
   }
 
   // Log all actions
@@ -249,15 +242,22 @@ async function finalizeCall(callSid, { durationSec = 0, leadQualityScore = 0 } =
     logger.log(`[OPTIMIZER] System: restored default max_tokens to ${systemAdjustments.defaultMaxTokens} (good quality: ${overallScore})`);
   }
 
-  // ── Persist score to MongoDB ───────────────────────────────────────────
+  // ── Persist score to MongoDB — fire-and-forget, never block main pipeline ─
   try {
-    const Call = require('../models/call.model');
-    await Call.findOneAndUpdate(
-      { callSid },
-      { $set: { qualityScore: score, avgLatencyMs: score.avgLatencyMs } }
-    );
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState === 1) {   // 1 = connected
+      const Call = require('../models/call.model');
+      Call.findOneAndUpdate(
+        { callSid },
+        { $set: { qualityScore: score, avgLatencyMs: score.avgLatencyMs } }
+      ).maxTimeMS(3000).exec().catch(err =>
+        logger.warn('[OPTIMIZER] DB quality score write failed:', err.message)
+      );
+    } else {
+      logger.debug('[OPTIMIZER] MongoDB not ready — skipping quality score write');
+    }
   } catch (err) {
-    logger.warn('[OPTIMIZER] Failed to save quality score:', err.message);
+    logger.warn('[OPTIMIZER] Quality score persistence error:', err.message);
   }
 
   return score;

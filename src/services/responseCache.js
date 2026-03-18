@@ -54,7 +54,12 @@ const PATTERNS = [
   {
     id: 'pricing',
     regex: /\b(price|cost|rate|kitna|how much|budget|affordable|expensive|charge|fee)\b/i,
-    speak: (ctx) => `We have options starting from 35 lakhs up to premium properties. The right choice really depends on your budget and requirements. What range are you considering?`,
+    speak: (ctx) => {
+      if (ctx.budget) {
+        return `For a budget around ${ctx.budget}, we have excellent options with great ROI. Shall I share specific projects that match?`;
+      }
+      return `We have options starting from 35 lakhs up to premium properties. What budget range are you considering?`;
+    },
     action: 'collect',
     nextStep: 'qualify_budget'
   },
@@ -63,7 +68,12 @@ const PATTERNS = [
   {
     id: 'location',
     regex: /\b(where|location|area|city|kahan|which place|address|locality)\b/i,
-    speak: (ctx) => `We have projects across major cities including Mumbai, Pune, Bangalore, Hyderabad, and Delhi NCR. Which city are you interested in?`,
+    speak: (ctx) => {
+      if (ctx.location) {
+        return `Yes, we have great projects near ${ctx.location}. Would you like details on connectivity and amenities for that area?`;
+      }
+      return `We have projects across Mumbai, Pune, Bangalore, Hyderabad, and Delhi NCR. Which city are you interested in?`;
+    },
     action: 'collect',
     nextStep: 'location_budget'
   },
@@ -191,7 +201,8 @@ function lookup(transcript, ctx = {}) {
   if (!transcript || transcript.trim().length < 2) return null;
 
   const text = transcript.trim();
-  const { step = '', direction = 'outbound', agentName = 'Priya', companyName = 'our company' } = ctx;
+  const { step = '', direction = 'outbound', agentName = 'Priya', companyName = 'our company',
+    budget = null, location = null } = ctx;
 
   for (const pattern of PATTERNS) {
     // Check step filter
@@ -203,7 +214,7 @@ function lookup(transcript, ctx = {}) {
 
     // Build the speak text
     const speak = typeof pattern.speak === 'function'
-      ? pattern.speak({ agentName, companyName, step, language: ctx.language })
+      ? pattern.speak({ agentName, companyName, step, language: ctx.language, budget, location })
       : pattern.speak;
 
     logger.debug(`[CACHE] Hit: ${pattern.id} → "${speak.substring(0, 60)}"`);
