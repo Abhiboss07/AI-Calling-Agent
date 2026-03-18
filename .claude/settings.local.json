@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://localhost:4040/api/tunnels)",
+      "Bash(curl -s -X POST http://localhost:3000/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"akverma@gmail.com\"\",\"\"password\"\":\"\"00000000\"\"}')",
+      "Bash(curl -s http://localhost:3000/api/v1/campaigns -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2OTlmZDJlODI0MWIzMDk1OGE0YzQ4ZWYiLCJpYXQiOjE3NzM0MTA1OTYsImV4cCI6MTc3NDAxNTM5Nn0.1DCCz8nWFsdXeB74bfzwGbouN9NmnVX0WR5J6qtk0w8\")",
+      "Bash(curl -s http://localhost:3000/api/v1/calls -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2OTlmZDJlODI0MWIzMDk1OGE0YzQ4ZWYiLCJpYXQiOjE3NzM0MTA1OTYsImV4cCI6MTc3NDAxNTM5Nn0.1DCCz8nWFsdXeB74bfzwGbouN9NmnVX0WR5J6qtk0w8\")",
+      "Bash(node -e \":*)",
+      "Bash(curl -s -X POST http://localhost:3000/api/v1/calls/start -H \"Content-Type: application/json\" -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2OTlmZDJlODI0MWIzMDk1OGE0YzQ4ZWYiLCJpYXQiOjE3NzM0MTA1OTYsImV4cCI6MTc3NDAxNTM5Nn0.1DCCz8nWFsdXeB74bfzwGbouN9NmnVX0WR5J6qtk0w8\" -d '{\"\"campaignId\"\":\"\"69b41388251eef58af24a056\"\",\"\"phoneNumber\"\":\"\"+919580818926\"\"}')",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/health)",
+      "Bash(curl -s http://localhost:3000/health)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/health/ready)",
+      "Bash(curl -s http://localhost:3000/health/ready)",
+      "Bash(curl -s http://localhost:3000/)",
+      "Bash(curl -s -X POST http://localhost:3000/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"wrong@example.com\"\",\"\"password\"\":\"\"wrongpass\"\"}')",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" -X POST http://localhost:3000/api/v1/auth/login -H \"Content-Type: application/json\" -d '{}')",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2OTlmZDJlODI0MWIzMDk1OGE0YzQ4ZWYiLCJpYXQiOjE3NzM0MTA1OTYsImV4cCI6MTc3NDAxNTM5Nn0.1DCCz8nWFsdXeB74bfzwGbouN9NmnVX0WR5J6qtk0w8\")",
+      "Bash(curl -s http://localhost:3000/api/v1/auth/me -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" http://localhost:3000/api/v1/auth/me)",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" -X POST http://localhost:3000/api/v1/auth/signup -H \"Content-Type: application/json\" -d '{\"\"name\"\":\"\"Test User\"\",\"\"email\"\":\"\"testuser_newXXX99@example.com\"\",\"\"password\"\":\"\"testpass123\"\"}')",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" -X POST http://localhost:3000/api/v1/auth/verify -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"testuser@example.com\"\",\"\"code\"\":\"\"123456\"\"}')",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" -X POST http://localhost:3000/api/v1/auth/resend-code -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"nonexistent@example.com\"\"}')",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" -X POST http://localhost:3000/api/v1/auth/resend-code -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"akverma@gmail.com\"\"}')",
+      "Bash(curl -s http://localhost:3000/api/v1/calls -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(curl -s \"http://localhost:3000/api/v1/calls?status=completed&perPage=2\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" \"http://localhost:3000/api/v1/calls/000000000000000000000001\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(CAMPAIGN_ID=\"69b41388251eef58af24a056\")",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" \"http://localhost:3000/api/v1/campaigns/$CAMPAIGN_ID\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(DOC_ID=\"69b4206cb79d2e989b21badd\")",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" -X DELETE \"http://localhost:3000/api/v1/documents/$DOC_ID\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(netstat -ano)"
+    ]
+  }
+}
