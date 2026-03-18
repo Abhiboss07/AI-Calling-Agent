@@ -41,12 +41,16 @@ RUN chown -R appuser:appgroup /app
 # Switch to non-root user
 USER appuser
 
-# Expose port
+# Production environment — must be set so the app binds to 0.0.0.0 (not localhost)
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+
+# Expose port (Railway overrides PORT via env var — this is just documentation)
 EXPOSE 3000
 
 # Health check — Docker/ECS/K8s will use this
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -sf http://localhost:3000/health || exit 1
+  CMD curl -sf http://localhost:${PORT:-3000}/health || exit 1
 
 # Use tini as PID 1 for proper signal handling (SIGTERM, SIGINT)
 # Without tini, Node.js doesn't receive signals properly in containers

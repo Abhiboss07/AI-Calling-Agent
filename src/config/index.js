@@ -27,7 +27,7 @@ function clamp(value, min, max) {
 module.exports = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: envNumber('PORT', 3000),
-  host: process.env.HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost'),
+  host: process.env.HOST || '0.0.0.0',
 
   vobiz: {
     authId: process.env.VOBIZ_AUTH_ID,
