@@ -202,11 +202,6 @@ async function warmupPipeline() {
 let isShuttingDown = false;
 
 async function start() {
-  await db.connect();
-
-  // ── Validate all required API keys at startup ────────────────────────────
-  await validateApiKeys();
-
   const app = express();
   expressWs(app, null, {
     wsOptions: {
@@ -366,9 +361,6 @@ async function start() {
   // Start monitoring WebSocket endpoint for real-time updates
   startMonitoring(app);
 
-  // ── Model + pipeline warmup (reduces first-call latency) ────────────────
-  warmupPipeline();
-
   // ── Global error handler ────────────────────────────────────────────────
   app.use((err, req, res, next) => {
     logger.error(`[${req.requestId}] Route error:`, err.message, err.stack?.split('\n')[1]);
@@ -386,6 +378,14 @@ async function start() {
   const server = app.listen(config.port, config.host, () => {
     logger.log(`🚀 AI Calling Agent v2.0.0 listening on ${config.host}:${config.port}`);
     logger.log(`   PID: ${process.pid} | Env: ${config.nodeEnv} | Agent: ${config.agentName}`);
+
+    // ── Connect to MongoDB + validate API keys AFTER binding port ──────────
+    // This ensures Railway/K8s health checks pass immediately while the DB
+    // and API connections are established asynchronously in the background.
+    db.connect()
+      .then(() => validateApiKeys())
+      .then(() => warmupPipeline())
+      .catch(err => logger.error('Startup background init error:', err.message));
   });
 
   // WebSocket upgrade timeout
