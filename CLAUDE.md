@@ -79,7 +79,7 @@ The FSM drives the conversation script (outbound real estate flow). The FSM's `_
 | LLM | `src/services/llm.js` | GPT-4o-mini with deterministic fast-path |
 | FSM | `src/services/conversationFSM.js` | Conversation state machine + intent classification |
 | Vobiz client | `src/services/vobizClient.js` | REST API for outbound call initiation and termination |
-| Cost control | `src/services/costControlOptimized.js` | Per-call cost tracking (STT/TTS/LLM/telephony) |
+| Cost control | `src/services/costControl.js` | Per-call cost tracking (STT/TTS/LLM/telephony) |
 
 ### Audio Codec Details
 
@@ -113,12 +113,10 @@ Loaded from `config/ai_calling_agent_system_prompt.txt` (configurable via `SYSTE
 - `METRICS_API_KEY` — if set, required on `GET /api/v1/metrics` as `X-Api-Key` header.
 - Pipeline tuning (VAD, barge-in, silence detection) is centralized in `src/config/index.js` with clamped env overrides.
 
-### Active vs Inactive Files
+### Active Files
 
 - `src/ws-media-optimized.js` — **active** (used by server.js)
-- `src/ws-media.js` — legacy, not imported; kept for reference
-- `src/services/costControlOptimized.js` — **active**
-- `src/services/costControl.js` — legacy wrapper, still required by some routes
+- `src/services/costControl.js` — **active** (used by routes and ws-media-optimized.js)
 
 ### Barge-In
 
