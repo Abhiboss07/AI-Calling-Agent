@@ -922,4 +922,14 @@ router.get('/v1/intents/stats', async (req, res) => {
   }
 });
 
+// GET /api/v1/optimizer/stats — system-level optimizer adjustments
+router.get('/v1/optimizer/stats', (req, res) => {
+  try {
+    const callOptimizer = require('../services/callOptimizer');
+    res.json({ ok: true, data: callOptimizer.getSystemAdjustments() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;

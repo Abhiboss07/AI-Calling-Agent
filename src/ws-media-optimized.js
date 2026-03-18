@@ -21,6 +21,8 @@ const costControl = require('./services/costControl');
 const callDebugger = require('./services/callDebugger');
 const callRecorder = require('./services/callRecorder');
 const intentTracker = require('./services/intentTracker');
+const callOptimizer = require('./services/callOptimizer');
+const responseCache = require('./services/responseCache');
 const { withRetry } = require('./utils/retry');
 const { ConversationFSM, States } = require('./services/conversationFSM');
 const config = require('./config');
@@ -590,6 +592,13 @@ class EnhancedCallSession {
     // Per-turn counter for latency tracking
     this._turnNumber = 0;
 
+    // WebSocket reference (set after session creation) — used for speculative LLM
+    this.ws = null;
+
+    // Speculative LLM: start LLM on speech_final before VAD fires
+    this._speculativeText = null;
+    this._speculativeLLMPromise = null;
+
     // Start debug session
     callDebugger.startSession(callUuid, {
       direction,
@@ -611,6 +620,10 @@ class EnhancedCallSession {
         this.dgFinalText = text;
         this.dgInterimText = '';
         logger.debug('Deepgram speech_final:', { callSid: this.callSid, text });
+        // Speculative LLM: start LLM generation before VAD fires (~100-300ms lead)
+        if (!this.isProcessing && !this.isPlaying && text.length > 8) {
+          this._startSpeculativeLLM(text);
+        }
       },
       onError: (err) => {
         logger.warn('Deepgram live error:', err?.message || err);
@@ -623,6 +636,36 @@ class EnhancedCallSession {
     if (this.dgSession) {
       try { this.dgSession.close(); } catch (e) { }
       this.dgSession = null;
+    }
+  }
+
+  // Start speculative LLM call immediately on speech_final, before VAD fires.
+  // Saves ~100-300ms of LLM lead time. Uses generateReply (batch) for simplicity.
+  _startSpeculativeLLM(transcript) {
+    try {
+      const optimizerConfig = callOptimizer.getCallConfig(this.callSid);
+      const callState = {
+        ...this.fsm.getLLMContext(),
+        turnCount: this.fsm.turnCount,
+        direction: this.direction
+      };
+      this._speculativeText = transcript;
+      this._speculativeLLMPromise = llm.generateReply({
+        callState,
+        lastTranscript: transcript,
+        customerName: this.fsm.leadData.name || this.callerNumber,
+        callSid: this.callSid,
+        language: this.language,
+        callDirection: this.direction,
+        honorific: this.fsm.leadData.honorific || 'sir_maam',
+        maxTokens: optimizerConfig.maxTokens,
+        fastMode: optimizerConfig.fastMode,
+        modelPref: optimizerConfig.modelPref
+      });
+      logger.debug('[SPEC] Speculative LLM started on speech_final', { callSid: this.callSid, transcript: transcript.substring(0, 40) });
+    } catch (err) {
+      this._speculativeLLMPromise = null;
+      this._speculativeText = null;
     }
   }
 
@@ -949,6 +992,7 @@ module.exports = function setupWs(app) {
       // Create new session
       session = new EnhancedCallSession(callUuid, callerNumber, language, direction);
       session.streamSid = streamSid;
+      session.ws = ws;  // Store ws ref for speculative LLM pipeline
       sessions.set(callUuid, session);
       costControl.trackCall(callUuid);
       // Open Deepgram live stream immediately for low-latency transcription
@@ -1245,6 +1289,7 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       session._echoCooldownUntil = Date.now() + ECHO_COOLDOWN_MS;
       metrics.incrementInterrupt();
       callDebugger.recordInterruption(session.callSid);
+      callOptimizer.recordInterruption(session.callSid);
     }
     return;
   }
@@ -1535,6 +1580,12 @@ function startPipeline(session, ws, pcmChunks) {
   session.currentPipelinePromise = pipelinePromise;
 }
 
+// Convert a single generateReply result to a stream-compatible async generator
+async function* _singleReplyToStream(reply) {
+  if (reply?.speak) yield { type: 'sentence', text: reply.speak };
+  yield reply;
+}
+
 async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal) {
   const pipelineStart = Date.now();
 
@@ -1625,6 +1676,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
 
   if (sttResult.empty || !sttResult.text) {
     logger.log('STT returned empty — skipping pipeline', { callSid: session.callSid, pcmBytes: pcmData.length });
+    callOptimizer.recordEmptyStt(session.callSid);
     return;
   }
 
@@ -1668,8 +1720,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     return;
   }
 
-  // 3. LLM with FSM context (Streaming)
-  // Bridge FSM state → script step for deterministic turn logic in LLM
+  // 3. LLM with FSM context
   const fsmContext = session.fsm.getLLMContext();
   const callState = {
     ...fsmContext,
@@ -1678,19 +1729,109 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     direction: session.direction
   };
 
-  const llmStart = Date.now();
-  logger.log('LLM pipeline starting', { callSid: session.callSid, step: callState.step, fsmState: session.fsm.getState(), direction: session.direction });
-
-  const replyStream = llm.generateReplyStream({
-    callState,
-    script: { companyName: config.companyName },
-    lastTranscript: sttResult.text,
-    customerName: session.fsm.leadData.name || session.callerNumber,
-    callSid: session.callSid,
+  // ── 3a. Response cache — bypass LLM for common inputs (0ms) ─────────────
+  const cacheHit = responseCache.lookup(sttResult.text, {
+    step: callState.step,
+    direction: session.direction,
     language: session.language,
-    callDirection: session.direction,
-    honorific: session.fsm.leadData.honorific || 'sir_maam'
+    agentName: config.agentName,
+    companyName: config.companyName
   });
+
+  const llmStart = Date.now();
+  let firstChunkMs = 0;
+  let fullSentence = '';
+  let finalAction = null;
+  let ttsLatencyTotal = 0;
+
+  if (cacheHit) {
+    logger.log(`[CACHE] Cache hit: ${cacheHit.cacheId} (0ms LLM)`, { callSid: session.callSid });
+
+    // Immediately synthesize and play — no LLM needed
+    const ttsStart = Date.now();
+    const cacheTts = await withRetry(
+      () => tts.synthesizeRaw(cacheHit.speak, session.callSid, session.language),
+      1, 0, 'TTS-cache'
+    );
+    ttsLatencyTotal = Date.now() - ttsStart;
+    firstChunkMs = 0;
+    fullSentence = cacheHit.speak;
+    finalAction = cacheHit.action;
+
+    if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
+    if (cacheTts?.mulawBuffer && wsOpen && ws.readyState === 1) {
+      if (cacheTts.pcmBuffer) callRecorder.addOutbound(session.callSid, cacheTts.pcmBuffer, Date.now() - session.startTime);
+      session.fsm.transition('intent_classified', { response: cacheHit.speak });
+      await sendAudioThroughStream(session, ws, cacheTts.mulawBuffer);
+    }
+
+    // Skip to post-pipeline (no streaming loop needed)
+    // Jump to quality tracking block below
+    const completeLatency = Date.now() - llmStart;
+    session.fsm.transition('speech_complete');
+    metrics.addPipelineLatency(sttLatency, completeLatency, ttsLatencyTotal);
+
+    session._turnNumber = (session._turnNumber || 0) + 1;
+    const totalLatency = sttLatency + completeLatency;
+    const optimizerResult = callOptimizer.recordTurn(session.callSid, {
+      sttMs: sttLatency, llmMs: 0, ttsMs: ttsLatencyTotal, totalMs: totalLatency, modelUsed: 'cache'
+    });
+    if (optimizerResult.changed) {
+      session._optimizerConfig = optimizerResult.config;
+    }
+
+    callDebugger.recordTurn(session.callSid, {
+      turnNumber: session._turnNumber, transcript: sttResult.text, response: fullSentence,
+      stt_time: sttLatency, llm_time: 0, tts_time: ttsLatencyTotal, total_time: totalLatency,
+      fsmState: session.fsm.getState(), fsmIntent: detectedIntent, action: finalAction,
+      sttSource: 'cache', llmProvider: 'cache', ttsCached: ttsLatencyTotal < 20, audioDurationSec
+    });
+
+    if (finalAction === 'hangup') {
+      await endCallGracefully(session, ws, null, 'agent_hangup');
+    } else if (!costControl.isWithinBudget(session.callSid)) {
+      await endCallGracefully(session, ws, 'Our call duration limit is reached. We will call you back. Goodbye.', 'budget_exceeded');
+    }
+    return;
+  }
+
+  // ── 3b. Speculative LLM result (started on speech_final) ────────────────
+  let speculativeReply = null;
+  if (session._speculativeLLMPromise && session._speculativeText === sttResult.text) {
+    try {
+      speculativeReply = await session._speculativeLLMPromise;
+      logger.debug('[SPEC] Used speculative LLM result', { callSid: session.callSid });
+    } catch (err) {
+      logger.debug('[SPEC] Speculative LLM failed, falling back to stream', err.message);
+    }
+    session._speculativeLLMPromise = null;
+    session._speculativeText = null;
+  } else {
+    // Stale or mismatched speculative result
+    session._speculativeLLMPromise = null;
+    session._speculativeText = null;
+  }
+
+  // Get optimizer config for this turn
+  const optimizerConfig = session._optimizerConfig || callOptimizer.getCallConfig(session.callSid);
+
+  logger.log('LLM pipeline starting', { callSid: session.callSid, step: callState.step, fsmState: session.fsm.getState(), direction: session.direction, maxTokens: optimizerConfig.maxTokens, fastMode: optimizerConfig.fastMode });
+
+  const replyStream = speculativeReply
+    ? _singleReplyToStream(speculativeReply)  // Replay speculative result as stream
+    : llm.generateReplyStream({
+        callState,
+        script: { companyName: config.companyName },
+        lastTranscript: sttResult.text,
+        customerName: session.fsm.leadData.name || session.callerNumber,
+        callSid: session.callSid,
+        language: session.language,
+        callDirection: session.direction,
+        honorific: session.fsm.leadData.honorific || 'sir_maam',
+        maxTokens: optimizerConfig.maxTokens,
+        fastMode: optimizerConfig.fastMode,
+        modelPref: optimizerConfig.modelPref
+      });
 
   if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
     logger.debug('Pipeline cancelled after STT', session.callSid);
@@ -1700,14 +1841,14 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   const burnRate = costControl.getEstimatedBurnRatePerMin(session.callSid);
   const costGuardActive = burnRate > TARGET_COST_PER_MIN_RS;
 
-  let firstChunkMs = 0;
-  let fullSentence = '';
-  let finalAction = null;
-  let ttsLatencyTotal = 0;
-
   // Process LLM in streaming mode
   for await (const chunk of replyStream) {
     if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
+
+    // Capture model used from final response object
+    if (chunk._modelUsed) {
+      session._lastLlmProvider = chunk._modelUsed;
+    }
 
     if (chunk.type === 'sentence') {
       let sentence = String(chunk.text || '').trim();
@@ -1757,7 +1898,8 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   }
 
   const completeLatency = Date.now() - llmStart;
-  logger.log(`LLM complete (${completeLatency}ms). First chunk at ${firstChunkMs}ms. | Action: ${finalAction}`);
+  const _modelUsed = session._lastLlmProvider || 'gemini';
+  logger.log(`LLM complete (${completeLatency}ms). First chunk at ${firstChunkMs}ms. | Action: ${finalAction} | Model: ${_modelUsed}`);
 
   // Record agent transcript
   session.transcriptEntries.push({
@@ -1771,9 +1913,24 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   session.fsm.transition('speech_complete');
   metrics.addPipelineLatency(sttLatency, completeLatency, ttsLatencyTotal);
 
-  // Per-turn latency tracking
+  // Per-turn latency tracking + optimizer feedback
   session._turnNumber = (session._turnNumber || 0) + 1;
   const totalLatency = sttLatency + completeLatency;
+  const sttSource = sttResult.latencyMs === 0 ? 'deepgram_live' : 'batch';
+
+  // Record to optimizer → may adjust config for next turn
+  const optimizerResult = callOptimizer.recordTurn(session.callSid, {
+    sttMs: sttLatency,
+    llmMs: firstChunkMs,
+    ttsMs: ttsLatencyTotal,
+    totalMs: totalLatency,
+    modelUsed: _modelUsed
+  });
+  if (optimizerResult.changed) {
+    session._optimizerConfig = optimizerResult.config;
+  }
+  if (_modelUsed === 'openai') callOptimizer.recordLlmFallback(session.callSid);
+
   callDebugger.recordTurn(session.callSid, {
     turnNumber: session._turnNumber,
     transcript: sttResult.text,
@@ -1783,10 +1940,10 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     tts_time: ttsLatencyTotal,
     total_time: totalLatency,
     fsmState: session.fsm.getState(),
-    fsmIntent: fsmResult.intent || fsmResult.data?.intent,
+    fsmIntent: detectedIntent,
     action: finalAction,
-    sttSource: session.dgFinalText === '' && sttResult.latencyMs === 0 ? 'deepgram_live' : 'batch',
-    llmProvider: session._lastLlmProvider || 'gemini',
+    sttSource,
+    llmProvider: _modelUsed,
     ttsCached: ttsLatencyTotal < 20,
     audioDurationSec
   });
@@ -2011,6 +2168,12 @@ async function finalizeCall(session) {
     endReason: session._endReason || 'ws_close',
     finalFsmState: session.fsm?.getState() || 'unknown'
   }).catch(err => logger.warn('Call debug finalize error:', err.message));
+
+  // Compute and save quality score
+  callOptimizer.finalizeCall(session.callSid, {
+    durationSec: Math.round((Date.now() - session.startTime) / 1000),
+    leadQualityScore: session.fsm?.leadData?.qualityScore || 0
+  }).catch(err => logger.warn('Optimizer finalize error:', err.message));
 
   // Save audio recording
   callRecorder.finalize(session.callSid, session._callDbId || null)

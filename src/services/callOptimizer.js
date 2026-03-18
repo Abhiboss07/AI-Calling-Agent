@@ -1,0 +1,260 @@
+/**
+ * Call Optimizer — real-time adaptive optimization engine
+ *
+ * Tracks per-call latency trends and adjusts DURING the call:
+ *   - max_tokens: reduced when LLM is slow (100 → 60 → 40)
+ *   - fastMode: short response hints when total latency > 1000ms
+ *   - modelPref: switch Gemini → OpenAI when Gemini latency > 700ms (2 turns)
+ *
+ * Cross-call system learning:
+ *   - If average call latencyScore < 70 → reduce global default max_tokens
+ *   - If average call latencyScore > 85 → restore default max_tokens
+ *
+ * Logs every optimization decision with [OPTIMIZER] prefix.
+ */
+
+const logger = require('../utils/logger');
+
+// ── Thresholds ────────────────────────────────────────────────────────────────
+const LLM_FAST_THRESHOLD_MS    = 500;   // LLM > 500ms → reduce tokens
+const TOTAL_FAST_MODE_MS       = 1000;  // total > 1000ms → enter fast mode
+const LLM_SWITCH_MODEL_MS      = 700;   // Gemini > 700ms (2 turns) → prefer OpenAI
+const FAST_MODE_TOKENS         = 40;
+const NORMAL_TOKENS            = 100;
+const REDUCED_TOKENS           = 60;
+
+// ── System-level learning (cross-call, in-process) ───────────────────────────
+const systemAdjustments = {
+  defaultMaxTokens: NORMAL_TOKENS,
+  totalCalls: 0,
+  lowScoreCalls: 0,
+  interventionCount: 0
+};
+
+// ── Per-call state ────────────────────────────────────────────────────────────
+const callStates = new Map();
+
+function getState(callSid) {
+  if (!callStates.has(callSid)) {
+    callStates.set(callSid, {
+      callSid,
+      maxTokens: systemAdjustments.defaultMaxTokens,
+      fastMode: false,
+      modelPref: 'gemini',
+      recentLatencies: [],       // last 5 turns: {stt, llm, tts, total, ts}
+      interventions: 0,
+      qualityData: {
+        interruptions: 0,
+        emptyStts: 0,
+        llmFallbacks: 0,
+        turns: 0,
+        geminiSlowTurns: 0
+      }
+    });
+  }
+  return callStates.get(callSid);
+}
+
+// ── Public: get current call configuration ───────────────────────────────────
+/**
+ * Returns the current optimization settings for this call.
+ * Called before each LLM invocation.
+ */
+function getCallConfig(callSid) {
+  const state = getState(callSid);
+  return {
+    maxTokens: state.maxTokens,
+    fastMode: state.fastMode,
+    modelPref: state.modelPref
+  };
+}
+
+// ── Public: record a completed turn ──────────────────────────────────────────
+/**
+ * Update optimizer state after each pipeline turn.
+ * Returns {changed, actions} describing what was adjusted.
+ */
+function recordTurn(callSid, { sttMs = 0, llmMs = 0, ttsMs = 0, totalMs = 0, modelUsed = 'gemini' } = {}) {
+  const state = getState(callSid);
+  state.qualityData.turns++;
+
+  // Store latency snapshot
+  state.recentLatencies.push({ stt: sttMs, llm: llmMs, tts: ttsMs, total: totalMs, ts: Date.now() });
+  if (state.recentLatencies.length > 5) state.recentLatencies.shift();
+
+  if (modelUsed === 'openai') state.qualityData.llmFallbacks++;
+  if (modelUsed === 'gemini' && llmMs > LLM_SWITCH_MODEL_MS) state.qualityData.geminiSlowTurns++;
+
+  const actions = [];
+  let prevTokens = state.maxTokens;
+  let prevFastMode = state.fastMode;
+  let prevModelPref = state.modelPref;
+
+  // ── 1. Fast mode: total > 1000ms ────────────────────────────────────────
+  if (totalMs >= TOTAL_FAST_MODE_MS && !state.fastMode) {
+    state.fastMode = true;
+    state.maxTokens = FAST_MODE_TOKENS;
+    state.interventions++;
+    systemAdjustments.interventionCount++;
+    actions.push(`Entered FAST MODE (total=${totalMs}ms > ${TOTAL_FAST_MODE_MS}ms) → max_tokens=${FAST_MODE_TOKENS}`);
+  } else if (totalMs < 700 && state.fastMode) {
+    // Recover from fast mode if latency improves
+    state.fastMode = false;
+    state.maxTokens = systemAdjustments.defaultMaxTokens;
+    actions.push(`Exited fast mode (total=${totalMs}ms < 700ms)`);
+  }
+
+  // ── 2. Token reduction: LLM > 500ms (without full fast mode) ────────────
+  if (!state.fastMode && llmMs > LLM_FAST_THRESHOLD_MS && state.maxTokens > REDUCED_TOKENS) {
+    state.maxTokens = REDUCED_TOKENS;
+    state.interventions++;
+    actions.push(`Reduced max_tokens ${prevTokens} → ${REDUCED_TOKENS} (LLM=${llmMs}ms > ${LLM_FAST_THRESHOLD_MS}ms)`);
+  }
+
+  // ── 3. Model switching: Gemini slow 2 consecutive turns ─────────────────
+  const recentGeminiSlow = state.recentLatencies.slice(-2)
+    .filter(l => l.llm > LLM_SWITCH_MODEL_MS).length;
+  if (recentGeminiSlow >= 2 && state.modelPref === 'gemini') {
+    state.modelPref = 'openai';
+    state.interventions++;
+    actions.push(`Switched model pref: gemini → openai (Gemini slow for 2 turns: ${llmMs}ms)`);
+  } else if (state.modelPref === 'openai') {
+    // Check last 3 turns — if OpenAI has been fast, give Gemini another chance
+    const avgRecent = _avg(state.recentLatencies.slice(-3).map(l => l.llm));
+    if (avgRecent < 400) {
+      state.modelPref = 'gemini';
+      actions.push(`Restored model pref: openai → gemini (recent avg LLM=${avgRecent}ms)`);
+    }
+  }
+
+  // Log all actions
+  for (const action of actions) {
+    logger.warn(`[OPTIMIZER] ${callSid?.slice(-8)}: ${action}`);
+  }
+
+  return {
+    changed: actions.length > 0,
+    actions,
+    config: getCallConfig(callSid)
+  };
+}
+
+// ── Public: record specific events ───────────────────────────────────────────
+function recordInterruption(callSid) {
+  const state = callStates.get(callSid);
+  if (state) state.qualityData.interruptions++;
+}
+
+function recordEmptyStt(callSid) {
+  const state = callStates.get(callSid);
+  if (state) state.qualityData.emptyStts++;
+}
+
+function recordLlmFallback(callSid) {
+  const state = callStates.get(callSid);
+  if (state) state.qualityData.llmFallbacks++;
+}
+
+// ── Public: compute quality score and finalize ────────────────────────────────
+/**
+ * Compute a 0-100 quality score for the call.
+ * Saves to MongoDB and updates system-level adjustments.
+ */
+async function finalizeCall(callSid, { durationSec = 0, leadQualityScore = 0 } = {}) {
+  const state = callStates.get(callSid);
+  callStates.delete(callSid);
+  if (!state) return null;
+
+  const { recentLatencies, qualityData } = state;
+
+  // Compute scores
+  const allLatencies = recentLatencies.map(l => l.total);
+  const avgTotal = allLatencies.length ? _avg(allLatencies) : 0;
+  const allLlm = recentLatencies.map(l => l.llm);
+  const avgLlm = allLlm.length ? _avg(allLlm) : 0;
+
+  // latencyScore: 100 at 400ms, 0 at 1500ms
+  const latencyScore = Math.round(Math.max(0, Math.min(100, 100 - ((avgTotal - 400) / 11))));
+
+  // interruptionHandling: fewer interruptions = better (0 interrupts on N turns = 100)
+  const turns = Math.max(1, qualityData.turns);
+  const interruptionScore = Math.round(Math.max(0, 100 - (qualityData.interruptions / turns) * 200));
+
+  // sttAccuracy: based on empty STT count
+  const sttScore = Math.round(Math.max(0, 100 - (qualityData.emptyStts / turns) * 100));
+
+  // responseQuality: FSM lead score × 2 + bonus for full conversation
+  const responseScore = Math.min(100, Math.round((leadQualityScore || 0) * 2 + Math.min(turns * 8, 40)));
+
+  // overallScore: weighted
+  const overallScore = Math.round(
+    latencyScore * 0.30 +
+    interruptionScore * 0.20 +
+    sttScore * 0.20 +
+    responseScore * 0.30
+  );
+
+  const score = {
+    latencyScore,
+    interruptionHandling: interruptionScore,
+    sttAccuracy: sttScore,
+    responseQuality: responseScore,
+    overallScore,
+    avgLatencyMs: Math.round(avgTotal),
+    avgLlmMs: Math.round(avgLlm),
+    fastModeUsed: state.fastMode || state.interventions > 0,
+    interventions: state.interventions
+  };
+
+  logger.log('[OPTIMIZER] Call quality score', { callSid, ...score });
+
+  // ── System-level cross-call learning ──────────────────────────────────
+  systemAdjustments.totalCalls++;
+  if (overallScore < 70) {
+    systemAdjustments.lowScoreCalls++;
+    if (systemAdjustments.defaultMaxTokens > 60) {
+      systemAdjustments.defaultMaxTokens -= 10;
+      logger.warn(`[OPTIMIZER] System: reduced default max_tokens to ${systemAdjustments.defaultMaxTokens} (low quality call score: ${overallScore})`);
+    }
+  } else if (overallScore > 85 && systemAdjustments.defaultMaxTokens < NORMAL_TOKENS) {
+    systemAdjustments.defaultMaxTokens = Math.min(NORMAL_TOKENS, systemAdjustments.defaultMaxTokens + 5);
+    logger.log(`[OPTIMIZER] System: restored default max_tokens to ${systemAdjustments.defaultMaxTokens} (good quality: ${overallScore})`);
+  }
+
+  // ── Persist score to MongoDB ───────────────────────────────────────────
+  try {
+    const Call = require('../models/call.model');
+    await Call.findOneAndUpdate(
+      { callSid },
+      { $set: { qualityScore: score, avgLatencyMs: score.avgLatencyMs } }
+    );
+  } catch (err) {
+    logger.warn('[OPTIMIZER] Failed to save quality score:', err.message);
+  }
+
+  return score;
+}
+
+// ── Public: get system health snapshot ───────────────────────────────────────
+function getSystemAdjustments() {
+  return { ...systemAdjustments };
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function _avg(arr) {
+  return arr.length ? Math.round(arr.reduce((s, v) => s + v, 0) / arr.length) : 0;
+}
+
+module.exports = {
+  getCallConfig,
+  recordTurn,
+  recordInterruption,
+  recordEmptyStt,
+  recordLlmFallback,
+  finalizeCall,
+  getSystemAdjustments,
+  // Constants exposed for use in ws-media-optimized
+  FAST_MODE_TOKENS,
+  NORMAL_TOKENS,
+  TOTAL_FAST_MODE_MS
+};

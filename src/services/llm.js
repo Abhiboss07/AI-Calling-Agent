@@ -333,7 +333,22 @@ function enforceScriptFlow(parsed, context) {
   return safe;
 }
 
-async function generateReply({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific }) {
+/**
+ * Trim a response to max N words, cutting at the last sentence boundary.
+ */
+function trimToMaxWords(text, maxWords = 20) {
+  if (!text) return text;
+  const words = text.split(/\s+/);
+  if (words.length <= maxWords) return text;
+  // Find last sentence boundary within limit
+  const partial = words.slice(0, maxWords).join(' ');
+  const lastPunct = Math.max(
+    partial.lastIndexOf('.'), partial.lastIndexOf('?'), partial.lastIndexOf('!')
+  );
+  return lastPunct > 10 ? partial.substring(0, lastPunct + 1) : partial + '.';
+}
+
+async function generateReply({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific, maxTokens, fastMode, modelPref }) {
   try {
     const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
     const langConfig = getLanguage(languageCode);
@@ -377,6 +392,9 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       systemContent += '\nInbound flow requirement: greet briefly and handle user request directly.';
     }
     systemContent += '\nStyle requirement: short conversational lines, one question at a time, no robotic repetition.';
+    if (fastMode) {
+      systemContent += '\nSPEED MODE ACTIVE: ONE sentence only. Max 12 words. Be direct.';
+    }
 
     if (languageCode === 'hinglish') {
       systemContent += '\nIMPORTANT: Respond in natural Hinglish (Roman script Hindi mixed with English). Example: "Aapka budget kitna hai? Hum aapko best options dikhayenge." Match the customer\'s language style.';
@@ -412,18 +430,31 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
 
     metrics.incrementLlmRequest(true);
 
-    // Gemini primary → OpenAI fallback
+    // Dynamic token count from optimizer
+    const resolvedTokens = maxTokens || 100;
+    const llmOpts = { temperature: 0.25, max_tokens: resolvedTokens, response_format: { type: 'json_object' } };
+
+    // Gemini primary → OpenAI fallback (respects modelPref from optimizer)
     let resp;
-    const llmOpts = { temperature: 0.25, max_tokens: 100, response_format: { type: 'json_object' } };
-    if (config.geminiApiKey) {
+    let _modelUsed = 'gemini';
+    const preferOpenAI = modelPref === 'openai';
+
+    if (preferOpenAI && config.openaiApiKey) {
+      logger.debug('[OPTIMIZER] Using OpenAI (optimizer preference)', { callSid });
+      _modelUsed = 'openai';
+      resp = await openaiClient.chatCompletion(messages, config.llm.openaiModel, llmOpts);
+    } else if (config.geminiApiKey) {
       try {
         resp = await geminiClient.chatCompletion(messages, config.llm.geminiModel, llmOpts);
       } catch (geminiErr) {
         logger.warn('Gemini LLM failed, falling back to OpenAI:', geminiErr.message);
         if (!config.openaiApiKey) throw geminiErr;
+        _modelUsed = 'openai';
+        logger.warn('[OPTIMIZER] Fallback model used: OpenAI', { callSid });
         resp = await openaiClient.chatCompletion(messages, config.llm.openaiModel, llmOpts);
       }
     } else {
+      _modelUsed = 'openai';
       resp = await openaiClient.chatCompletion(messages, config.llm.openaiModel, llmOpts);
     }
 
@@ -456,14 +487,15 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       }
     }
 
-    return enforceScriptFlow(parsed, {
-      step,
-      languageCode,
-      customerName,
-      endSignal,
-      lastTranscript,
-      callDirection: direction
+    const result = enforceScriptFlow(parsed, {
+      step, languageCode, customerName, endSignal, lastTranscript, callDirection: direction
     });
+    // Auto-trim in fast mode
+    if (fastMode && result.speak) {
+      result.speak = trimToMaxWords(result.speak, 12);
+    }
+    result._modelUsed = _modelUsed;
+    return result;
   } catch (err) {
     logger.error('LLM error', err.message || err);
     metrics.incrementLlmRequest(false);
@@ -479,7 +511,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
 
 // ── Streaming LLM Reply Generator ───────────────────────────────────────────
 
-async function* generateReplyStream({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific }) {
+async function* generateReplyStream({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific, maxTokens, fastMode, modelPref }) {
   try {
     const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
     const langConfig = getLanguage(languageCode);
@@ -530,6 +562,9 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
       systemContent += '\nInbound flow requirement: greet briefly and handle user request directly.';
     }
     systemContent += '\nStyle requirement: short conversational lines, one question at a time, no robotic repetition.';
+    if (fastMode) {
+      systemContent += '\nSPEED MODE ACTIVE: ONE sentence only. Max 12 words. Be direct.';
+    }
 
     if (languageCode === 'hinglish') {
       systemContent += '\nIMPORTANT: Respond in natural Hinglish (Roman script Hindi mixed with English). Example: "Aapka budget kitna hai? Hum aapko best options dikhayenge." Match the customer\'s language style.';
@@ -565,17 +600,28 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
 
     metrics.incrementLlmRequest(true);
 
-    const streamOpts = { temperature: 0.25, max_tokens: 100, response_format: { type: 'json_object' } };
+    const resolvedTokens = maxTokens || 100;
+    const streamOpts = { temperature: 0.25, max_tokens: resolvedTokens, response_format: { type: 'json_object' } };
     let stream;
-    if (config.geminiApiKey) {
+    let _modelUsed = 'gemini';
+    const preferOpenAI = modelPref === 'openai';
+
+    if (preferOpenAI && config.openaiApiKey) {
+      logger.debug('[OPTIMIZER] Stream using OpenAI (optimizer preference)', { callSid });
+      _modelUsed = 'openai';
+      stream = await openaiClient.chatCompletionStream(messages, config.llm.openaiModel, streamOpts);
+    } else if (config.geminiApiKey) {
       try {
         stream = await geminiClient.chatCompletionStream(messages, config.llm.geminiModel, streamOpts);
       } catch (geminiErr) {
         logger.warn('Gemini stream LLM failed, falling back to OpenAI:', geminiErr.message);
         if (!config.openaiApiKey) throw geminiErr;
+        _modelUsed = 'openai';
+        logger.warn('[OPTIMIZER] Fallback model used: OpenAI (stream)', { callSid });
         stream = await openaiClient.chatCompletionStream(messages, config.llm.openaiModel, streamOpts);
       }
     } else {
+      _modelUsed = 'openai';
       stream = await openaiClient.chatCompletionStream(messages, config.llm.openaiModel, streamOpts);
     }
 
@@ -668,13 +714,13 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
     }
 
     const finalResponse = enforceScriptFlow(parsed, {
-      step,
-      languageCode,
-      customerName,
-      endSignal,
-      lastTranscript,
-      callDirection: direction
+      step, languageCode, customerName, endSignal, lastTranscript, callDirection: direction
     });
+    // Auto-trim in fast mode
+    if (fastMode && finalResponse.speak) {
+      finalResponse.speak = trimToMaxWords(finalResponse.speak, 12);
+    }
+    finalResponse._modelUsed = _modelUsed;
     yield finalResponse;
     return;
   } catch (err) {

@@ -165,14 +165,17 @@ async function warmupPipeline() {
     const ttsService = require('./services/tts');
     const llmService = require('./services/llm');
 
-    // 1. TTS warmup — pre-synthesize common intro phrases so they're in cache
-    const warmPhrases = [
+    // 1. TTS warmup — pre-synthesize common phrases (intro + response cache) so they're in TTS cache
+    const responseCache = require('./services/responseCache');
+    const cachePhrases = responseCache.getAllPhrases({ agentName: config.agentName, companyName: config.companyName });
+    const introPhrases = [
       'Hello, this is a call from ' + config.agentName,
       'Hello, am I speaking with you?',
       'Hello, is this a good time to talk?',
       'Thank you for your time',
       'Have a great day!'
     ];
+    const warmPhrases = [...new Set([...introPhrases, ...cachePhrases])];
     const { attempted, warmed } = await ttsService.prewarmPhrases(warmPhrases, config.defaultLanguage || 'en-IN');
     logger.log(`✅ TTS warmup: ${warmed}/${attempted} phrases cached`);
 
