@@ -22,7 +22,12 @@
     "mock-test:tricky": "node scripts/mock-test.js --scenario=tricky",
     "stress-test": "node scripts/stress-test.js",
     "stress-test:10": "node scripts/stress-test.js --calls=10 --turns=4",
-    "stress-test:20": "node scripts/stress-test.js --calls=20 --turns=3"
+    "stress-test:20": "node scripts/stress-test.js --calls=20 --turns=3",
+    "realistic-test": "node scripts/realistic-test.js --scenario=all",
+    "realistic-test:interruption": "node scripts/realistic-test.js --scenario=interruption",
+    "realistic-test:hinglish": "node scripts/realistic-test.js --scenario=hinglish",
+    "realistic-test:noise": "node scripts/realistic-test.js --scenario=background_noise",
+    "realistic-test:objections": "node scripts/realistic-test.js --scenario=objections"
   },
   "engines": {
     "node": "20.x"

@@ -112,6 +112,71 @@ const PATTERNS = [
     speak: () => `Thank you for your time. Have a wonderful day. Goodbye!`,
     action: 'hangup',
     nextStep: 'close'
+  },
+
+  // ── Price objection — too expensive ──────────────────────────────────────
+  {
+    id: 'price_too_high',
+    regex: /\b(too expensive|too costly|bahut zyada|zyada hai|out of (my )?budget|can't afford|not affordable)\b/i,
+    speak: (ctx) => `I understand. We have flexible payment options and EMI plans starting from low down payments. What budget range would work for you?`,
+    action: 'collect',
+    nextStep: 'qualify_budget'
+  },
+
+  // ── EMI / loan / finance query ────────────────────────────────────────────
+  {
+    id: 'emi_query',
+    regex: /\b(emi|loan|finance|home loan|bank loan|monthly installment|installment|kist)\b/i,
+    speak: () => `Yes, we have tie-ups with major banks for easy home loans. EMI can start as low as 25,000 per month depending on the property. Shall I share the details?`,
+    action: 'collect',
+    nextStep: 'qualify_budget'
+  },
+
+  // ── Think about it / call me later ───────────────────────────────────────
+  {
+    id: 'think_about_it',
+    regex: /\b(let me think|i('ll| will) think|think about it|maybe later|will decide|sochna hai|soch ke batata|baad mein batata)\b/i,
+    speak: () => `Absolutely, no rush at all! I can also send you the brochure and pricing details on WhatsApp so you have everything in hand. Would that be helpful?`,
+    action: 'collect',
+    nextStep: 'close'
+  },
+
+  // ── Which project / tell me more ─────────────────────────────────────────
+  {
+    id: 'which_project',
+    regex: /\b(which project|what project|tell me (more|about)|which property|kaunsa project|project kaun)\b/i,
+    speak: (ctx) => `We have premium residential projects with excellent connectivity, world-class amenities, and strong appreciation potential. Would you like me to share specific details based on your location and budget?`,
+    action: 'collect',
+    nextStep: 'purpose'
+  },
+
+  // ── Callback time confirmation ────────────────────────────────────────────
+  {
+    id: 'callback_confirm',
+    regex: /\b(call (me )?(at|after|around|on)|call (tomorrow|evening|morning|weekend)|(\d{1,2})\s*(am|pm|baje|o'?clock))\b/i,
+    steps: ['reschedule_time'],
+    speak: () => `Perfect, noted! I will call you back at that time. Thank you for your time. Have a great day!`,
+    action: 'hangup',
+    nextStep: 'close'
+  },
+
+  // ── Repeated hello / not hearing ─────────────────────────────────────────
+  {
+    id: 'hello_repeat',
+    regex: /^(hello[?!.,\s]*){2,}$|^(hello|hallo|helo)\s*(hello|hallo|helo)[?!.,\s]*$/i,
+    speak: () => `Yes, hello! I can hear you clearly. Please go ahead.`,
+    action: 'continue',
+    nextStep: null
+  },
+
+  // ── Ready to book / confirm visit ─────────────────────────────────────────
+  {
+    id: 'confirm_visit_date',
+    regex: /\b((this )?(saturday|sunday|weekend|monday|tuesday|wednesday|thursday|friday)|tomorrow|next week|(morning|afternoon|evening) (visit|time))\b/i,
+    steps: ['book_visit'],
+    speak: () => `Wonderful! I have noted your preferred visit time. Our team will confirm the appointment and send you the address. See you then!`,
+    action: 'collect',
+    nextStep: 'closing'
   }
 ];
 

@@ -23,6 +23,7 @@ const callRecorder = require('./services/callRecorder');
 const intentTracker = require('./services/intentTracker');
 const callOptimizer = require('./services/callOptimizer');
 const responseCache = require('./services/responseCache');
+const humanSpeech = require('./services/humanSpeechEngine');
 const { withRetry } = require('./utils/retry');
 const { ConversationFSM, States } = require('./services/conversationFSM');
 const config = require('./config');
@@ -346,7 +347,7 @@ const VAD_THRESHOLD = config.pipeline.vadThreshold;
 const SPEECH_START_CHUNKS = config.pipeline.speechStartChunks;
 const SPEECH_END_CHUNKS = config.pipeline.speechEndChunks;
 const BARGE_IN_MIN_PLAYBACK_MS = config.pipeline.bargeInMinPlaybackMs;
-const BARGE_IN_REQUIRED_CHUNKS = 5; // Increased to prevent false positives from line noise
+const BARGE_IN_REQUIRED_CHUNKS = 2; // 2 chunks × 20ms = 40ms → instant (<50ms) interrupt
 const BARGE_IN_RMS_MULTIPLIER = config.pipeline.bargeInRmsMultiplier;
 const MIN_UTTERANCE_BYTES = config.pipeline.minUtteranceBytes;
 const MAX_BUFFER_BYTES = config.pipeline.maxBufferBytes;
@@ -363,6 +364,21 @@ const VOICE_MARGIN = 0.006; // Additive margin above noise floor for voice detec
 const L16_MIN_THRESHOLD = 0.0002; // Very low threshold for quiet L16 PSTN audio
 const L16_VOICE_MARGIN = 0.0004;  // Small margin — L16 PSTN RMS is typically 0.0003-0.001
 const PRE_SPEECH_CHUNKS = config.pipeline.preSpeechChunks || 6;
+const MICRO_PAUSE_MIN_MS = 150; // Minimum thinking pause before first TTS sentence
+const MICRO_PAUSE_MAX_MS = 300; // Maximum thinking pause (randomized for human feel)
+const SPECULATIVE_STABILITY_MS = 300; // Debounce before triggering speculative LLM
+const CACHE_MIN_CONFIDENCE = 0.85; // Minimum STT confidence required to use response cache
+
+// ── Tone Detection ─────────────────────────────────────────────────────────────
+// Classifies user speech tone to drive adaptive LLM response style
+function detectUserTone(text) {
+  if (!text) return 'neutral';
+  const t = String(text).toLowerCase();
+  if (/\b(useless|stupid|terrible|frustrated|angry|worst|hate|disgusting|annoying|pathetic|rubbish|waste)\b/.test(t)) return 'angry';
+  if (/\b(don'?t understand|confused|what do you mean|explain again|unclear|not sure|lost|what\?|huh\?)\b/.test(t)) return 'confused';
+  if (/\b(how|what|why|tell me more|explain|interested|want to know|curious|details|more info|features)\b/.test(t)) return 'curious';
+  return 'neutral';
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // FSM STATE → LLM SCRIPT STEP MAPPING
@@ -598,6 +614,10 @@ class EnhancedCallSession {
     // Speculative LLM: start LLM on speech_final before VAD fires
     this._speculativeText = null;
     this._speculativeLLMPromise = null;
+    this._speculativeTimer = null;  // Debounce timer for stability check
+
+    // Humanization state
+    this._lastUserTone = 'neutral'; // angry | confused | curious | neutral
 
     // Start debug session
     callDebugger.startSession(callUuid, {
@@ -620,9 +640,17 @@ class EnhancedCallSession {
         this.dgFinalText = text;
         this.dgInterimText = '';
         logger.debug('Deepgram speech_final:', { callSid: this.callSid, text });
-        // Speculative LLM: start LLM generation before VAD fires (~100-300ms lead)
+        // Stable speculative LLM: debounce SPECULATIVE_STABILITY_MS before triggering
+        // to ensure transcript is stable and avoid responding to partial sentences.
+        if (this._speculativeTimer) clearTimeout(this._speculativeTimer);
         if (!this.isProcessing && !this.isPlaying && text.length > 8) {
-          this._startSpeculativeLLM(text);
+          this._speculativeTimer = setTimeout(() => {
+            this._speculativeTimer = null;
+            // Only fire if transcript is still the same and pipeline is idle
+            if (this.dgFinalText === text && !this.isProcessing && !this._ended) {
+              this._startSpeculativeLLM(text);
+            }
+          }, SPECULATIVE_STABILITY_MS);
         }
       },
       onError: (err) => {
@@ -675,6 +703,13 @@ class EnhancedCallSession {
 
   // Cancel any ongoing pipeline operations
   cancelOngoingOperations() {
+    // Cancel stability debounce timer immediately
+    if (this._speculativeTimer) {
+      clearTimeout(this._speculativeTimer);
+      this._speculativeTimer = null;
+    }
+    this._speculativeLLMPromise = null;
+    this._speculativeText = null;
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
@@ -1275,21 +1310,32 @@ function processAudioChunk(session, ws, mulawBytes, pcmChunk, rms) {
       : Math.max(0.15, floor + (VOICE_MARGIN * 1.5));
 
     if (playbackMs >= BARGE_IN_MIN_PLAYBACK_MS && rms >= bargeThreshold) {
+      if (session.interruptVoiceChunks === 0) {
+        session._bargeInDetectMs = Date.now(); // track when user first spoke
+      }
       session.interruptVoiceChunks++;
     } else {
       session.interruptVoiceChunks = 0;
+      session._bargeInDetectMs = 0;
     }
 
     if (session.interruptVoiceChunks >= BARGE_IN_REQUIRED_CHUNKS) {
-      try { ws.send(JSON.stringify({ event: 'clearAudio' })); } catch { }
+      const interruptLatencyMs = session._bargeInDetectMs ? Date.now() - session._bargeInDetectMs : 0;
+      session._bargeInDetectMs = 0;
+      // Instant interrupt: send both clear variants for maximum compatibility
+      try { ws.send(JSON.stringify({ event: 'clearAudio', streamSid: session.streamSid })); } catch { }
+      try { ws.send(JSON.stringify({ event: 'clear', streamSid: session.streamSid })); } catch { }
+      // Stop playback loop immediately
       session.isPlaying = false;
       session.playbackQueue = [];
       session.audioResidue = Buffer.alloc(0);
+      // Abort all in-flight LLM/TTS + cancel speculative timer
       session.cancelOngoingOperations();
       session._echoCooldownUntil = Date.now() + ECHO_COOLDOWN_MS;
       metrics.incrementInterrupt();
       callDebugger.recordInterruption(session.callSid);
-      callOptimizer.recordInterruption(session.callSid);
+      callOptimizer.recordInterruption(session.callSid, interruptLatencyMs);
+      logger.debug(`[BARGE-IN] Instant interrupt fired in ${interruptLatencyMs}ms`, { callSid: session.callSid });
     }
     return;
   }
@@ -1685,6 +1731,12 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   const detectedIntent = fsmResult.intent || fsmResult.data?.intent || 'unknown';
   logger.log(`STT (${sttLatency}ms): "${sttResult.text}" | Intent: ${detectedIntent} | State: ${session.fsm.getState()}`);
 
+  // Tone adaptation: detect user emotional state, adapt LLM response style
+  session._lastUserTone = detectUserTone(sttResult.text);
+  if (session._lastUserTone !== 'neutral') {
+    logger.debug(`[TONE] Detected user tone: ${session._lastUserTone}`, { callSid: session.callSid });
+  }
+
   // Track intent accuracy (non-blocking)
   intentTracker.record({
     callSid: session.callSid,
@@ -1841,6 +1893,13 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   const burnRate = costControl.getEstimatedBurnRatePerMin(session.callSid);
   const costGuardActive = burnRate > TARGET_COST_PER_MIN_RS;
 
+  // ── Human Speech Engine state for this turn ──────────────────────────────
+  let _speechIssues = 0;
+  let _speechWordCount = 0;
+  let _fillerUsed = false;
+  let _isFirstSentence = true;
+  const _step = callState.step || '';
+
   // Process LLM in streaming mode
   for await (const chunk of replyStream) {
     if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
@@ -1854,6 +1913,18 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
       let sentence = String(chunk.text || '').trim();
       if (!sentence) continue;
 
+      // ── Apply human speech naturalisation ──────────────────────────────
+      const processed = humanSpeech.processStreamSentence(sentence, {
+        isFirst: _isFirstSentence,
+        step: _step,
+        language: session.language,
+        fastMode: optimizerConfig.fastMode
+      });
+      sentence = processed.text;
+      _speechIssues += processed.issues.length;
+      if (processed.addedFiller) _fillerUsed = true;
+      _isFirstSentence = false;
+
       if (firstChunkMs === 0) {
         firstChunkMs = Date.now() - llmStart;
         logger.debug(`Time to first sentence: ${firstChunkMs}ms`);
@@ -1863,6 +1934,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
 
       if (costGuardActive && fullSentence.length > 120) continue; // Skip further sentences if guard is active
 
+      _speechWordCount += sentence.split(/\s+/).filter(Boolean).length;
       fullSentence += sentence + ' ';
 
       // If speculative response already played this exact phrase, skip TTS+playback
@@ -1930,6 +2002,13 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     session._optimizerConfig = optimizerResult.config;
   }
   if (_modelUsed === 'openai') callOptimizer.recordLlmFallback(session.callSid);
+
+  // Record speech naturalness data for quality scoring
+  callOptimizer.recordSpeechTurn(session.callSid, {
+    wordCount: _speechWordCount,
+    issueCount: _speechIssues,
+    fillerUsed: _fillerUsed
+  });
 
   callDebugger.recordTurn(session.callSid, {
     turnNumber: session._turnNumber,

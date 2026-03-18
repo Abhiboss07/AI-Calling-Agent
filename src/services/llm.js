@@ -1,4 +1,5 @@
 // LLM: Gemini primary → OpenAI fallback
+const humanSpeech = require('./humanSpeechEngine');
 const geminiClient = require('./geminiClient');
 const openaiClient = require('./openaiClient');
 const logger = require('../utils/logger');
@@ -534,8 +535,9 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
 
     const fastReply = deterministicTurnReply(step, languageCode, lastTranscript, direction);
     if (fastReply) {
-      yield { type: 'sentence', text: fastReply.speak };
-      yield fastReply;
+      const { text: cleanText } = humanSpeech.qualityCheck(fastReply.speak, { fastMode });
+      yield { type: 'sentence', text: cleanText };
+      yield { ...fastReply, speak: cleanText };
       return;
     }
 
@@ -662,8 +664,10 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
                   sentenceBuffer += textContent;
                   extractedSpeak += textContent;
 
-                  if (sentenceBuffer.trim().length > 0) {
-                    yield { type: 'sentence', text: sentenceBuffer.trim() };
+                  const trimmed = sentenceBuffer.trim();
+                  if (trimmed.length > 0) {
+                    const { text: cleanSentence } = humanSpeech.qualityCheck(trimmed, { fastMode });
+                    yield { type: 'sentence', text: cleanSentence };
                     sentenceBuffer = '';
                   }
                 } else {
@@ -672,7 +676,8 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
 
                   // Yield sentence immediately upon punctuation or pause markers
                   if (/[.,?!:-]\s*$/.test(sentenceBuffer)) {
-                    yield { type: 'sentence', text: sentenceBuffer.trim() };
+                    const { text: cleanSentence } = humanSpeech.qualityCheck(sentenceBuffer.trim(), { fastMode });
+                    yield { type: 'sentence', text: cleanSentence };
                     sentenceBuffer = '';
                   }
                 }
@@ -685,7 +690,8 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
 
     // Flush remaining buffer
     if (sentenceBuffer.trim().length > 0) {
-      yield { type: 'sentence', text: sentenceBuffer.trim() };
+      const { text: cleanFinal } = humanSpeech.qualityCheck(sentenceBuffer.trim(), { fastMode });
+      yield { type: 'sentence', text: cleanFinal };
     }
 
     if (callSid) {

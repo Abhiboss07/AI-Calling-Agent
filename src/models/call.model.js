@@ -5,6 +5,7 @@ const QualityScoreSchema = new mongoose.Schema({
   interruptionHandling: { type: Number, default: 0 },
   sttAccuracy:          { type: Number, default: 0 },
   responseQuality:      { type: Number, default: 0 },
+  naturalnessScore:     { type: Number, default: 0 },
   overallScore:         { type: Number, default: 0 },
   avgLatencyMs:         { type: Number, default: 0 },
   avgLlmMs:             { type: Number, default: 0 },

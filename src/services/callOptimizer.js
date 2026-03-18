@@ -16,9 +16,9 @@
 const logger = require('../utils/logger');
 
 // ── Thresholds ────────────────────────────────────────────────────────────────
-const LLM_FAST_THRESHOLD_MS    = 500;   // LLM > 500ms → reduce tokens
-const TOTAL_FAST_MODE_MS       = 1000;  // total > 1000ms → enter fast mode
-const LLM_SWITCH_MODEL_MS      = 700;   // Gemini > 700ms (2 turns) → prefer OpenAI
+const LLM_FAST_THRESHOLD_MS    = 450;   // LLM > 450ms → reduce tokens
+const TOTAL_FAST_MODE_MS       = 900;   // total > 900ms → enter fast mode
+const LLM_SWITCH_MODEL_MS      = 650;   // Gemini > 650ms (2 turns) → prefer OpenAI
 const FAST_MODE_TOKENS         = 40;
 const NORMAL_TOKENS            = 100;
 const REDUCED_TOKENS           = 60;
@@ -48,7 +48,10 @@ function getState(callSid) {
         emptyStts: 0,
         llmFallbacks: 0,
         turns: 0,
-        geminiSlowTurns: 0
+        geminiSlowTurns: 0,
+        naturalnessIssues: 0,
+        speechWordCounts: [],
+        fillersUsed: 0
       }
     });
   }
@@ -97,11 +100,11 @@ function recordTurn(callSid, { sttMs = 0, llmMs = 0, ttsMs = 0, totalMs = 0, mod
     state.interventions++;
     systemAdjustments.interventionCount++;
     actions.push(`Entered FAST MODE (total=${totalMs}ms > ${TOTAL_FAST_MODE_MS}ms) → max_tokens=${FAST_MODE_TOKENS}`);
-  } else if (totalMs < 700 && state.fastMode) {
+  } else if (totalMs < 600 && state.fastMode) {
     // Recover from fast mode if latency improves
     state.fastMode = false;
     state.maxTokens = systemAdjustments.defaultMaxTokens;
-    actions.push(`Exited fast mode (total=${totalMs}ms < 700ms)`);
+    actions.push(`Exited fast mode (total=${totalMs}ms < 600ms)`);
   }
 
   // ── 2. Token reduction: LLM > 500ms (without full fast mode) ────────────
@@ -140,9 +143,21 @@ function recordTurn(callSid, { sttMs = 0, llmMs = 0, ttsMs = 0, totalMs = 0, mod
 }
 
 // ── Public: record specific events ───────────────────────────────────────────
-function recordInterruption(callSid) {
+function recordInterruption(callSid, latencyMs = 0) {
   const state = callStates.get(callSid);
-  if (state) state.qualityData.interruptions++;
+  if (!state) return;
+  state.qualityData.interruptions++;
+  if (latencyMs > 0) {
+    logger.debug(`[OPTIMIZER] Interruption latency: ${latencyMs}ms`, { callSid });
+  }
+}
+
+function recordSpeechTurn(callSid, { wordCount = 0, issueCount = 0, fillerUsed = false } = {}) {
+  const state = callStates.get(callSid);
+  if (!state) return;
+  if (wordCount > 0) state.qualityData.speechWordCounts.push(wordCount);
+  state.qualityData.naturalnessIssues += issueCount;
+  if (fillerUsed) state.qualityData.fillersUsed++;
 }
 
 function recordEmptyStt(callSid) {
@@ -186,12 +201,24 @@ async function finalizeCall(callSid, { durationSec = 0, leadQualityScore = 0 } =
   // responseQuality: FSM lead score × 2 + bonus for full conversation
   const responseScore = Math.min(100, Math.round((leadQualityScore || 0) * 2 + Math.min(turns * 8, 40)));
 
-  // overallScore: weighted
+  // naturalnessScore: from humanSpeechEngine stats
+  let naturalnessScore = 75; // default mid-score
+  try {
+    const humanSpeech = require('./humanSpeechEngine');
+    naturalnessScore = humanSpeech.computeNaturalnessScore({
+      issues: Array(qualityData.naturalnessIssues).fill('issue'),
+      wordCounts: qualityData.speechWordCounts,
+      fillersUsed: qualityData.fillersUsed
+    });
+  } catch { /* humanSpeechEngine not available */ }
+
+  // overallScore: weighted (added naturalnessScore)
   const overallScore = Math.round(
-    latencyScore * 0.30 +
+    latencyScore * 0.25 +
     interruptionScore * 0.20 +
-    sttScore * 0.20 +
-    responseScore * 0.30
+    sttScore * 0.15 +
+    responseScore * 0.25 +
+    naturalnessScore * 0.15
   );
 
   const score = {
@@ -199,6 +226,7 @@ async function finalizeCall(callSid, { durationSec = 0, leadQualityScore = 0 } =
     interruptionHandling: interruptionScore,
     sttAccuracy: sttScore,
     responseQuality: responseScore,
+    naturalnessScore,
     overallScore,
     avgLatencyMs: Math.round(avgTotal),
     avgLlmMs: Math.round(avgLlm),
@@ -251,6 +279,7 @@ module.exports = {
   recordInterruption,
   recordEmptyStt,
   recordLlmFallback,
+  recordSpeechTurn,
   finalizeCall,
   getSystemAdjustments,
   // Constants exposed for use in ws-media-optimized
