@@ -395,10 +395,11 @@ function validateResponse(reply, transcript, step) {
 }
 
 async function generateReply({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific, maxTokens, fastMode, modelPref }) {
+  // Hoist step so catch block can reference it in timeout fallback
+  const step = callState?.step || '';
   try {
     const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
     const langConfig = getLanguage(languageCode);
-    const step = callState?.step || '';
     const direction = String(callDirection || callState?.direction || 'inbound').toLowerCase() === 'outbound' ? 'outbound' : 'inbound';
     const endSignal = isConversationEndSignal(lastTranscript || '');
 
@@ -588,10 +589,10 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
 // ── Streaming LLM Reply Generator ───────────────────────────────────────────
 
 async function* generateReplyStream({ callState, script, lastTranscript, customerName, callSid, language, knowledgeBase, callDirection, honorific, maxTokens, fastMode, modelPref }) {
+  const step = callState?.step || '';  // hoisted for catch block access
   try {
     const languageCode = normalizeLanguageCode(language || config.language?.default || 'en-IN');
     const langConfig = getLanguage(languageCode);
-    const step = callState?.step || '';
     const direction = String(callDirection || callState?.direction || 'inbound').toLowerCase() === 'outbound' ? 'outbound' : 'inbound';
     const endSignal = isConversationEndSignal(lastTranscript || '');
 

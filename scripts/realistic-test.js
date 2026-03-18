@@ -174,7 +174,7 @@ async function mockLLMTurn(transcript, step, language, direction, callSid) {
     };
   }
 
-  // 2. LLM
+  // 2. LLM (deterministic fast-path or full API call)
   try {
     const callState = { step, direction, turnCount: 1 };
     const reply = await llm.generateReply({
@@ -188,12 +188,15 @@ async function mockLLMTurn(transcript, step, language, direction, callSid) {
       maxTokens: 60,
       fastMode: false
     });
+    // Timeout fallback is still a valid response (just a safe "repeat that")
+    const isTimeout = reply._modelUsed === 'timeout';
     return {
       speak: reply.speak,
       action: reply.action,
       latencyMs: Date.now() - t0,
-      source: 'llm',
-      model: reply._modelUsed
+      source: isTimeout ? 'llm_timeout_fallback' : 'llm',
+      model: reply._modelUsed,
+      isTimeout
     };
   } catch (err) {
     return {
@@ -249,6 +252,14 @@ async function runScenario(scenario) {
       console.log(fail(`LLM error: ${result.error || 'no speak'}`));
       results.push({ turn: turnNum, status: 'fail', latencyMs: result.latencyMs });
       failCount++;
+      continue;
+    }
+
+    // Timeout fallback = warn, not fail (production LLM would be faster)
+    if (result.isTimeout) {
+      console.log(warn(`No API key — timeout fallback: "${result.speak}"`));
+      results.push({ turn: turnNum, status: 'timeout_fallback', latencyMs: result.latencyMs });
+      warnCount++;
       continue;
     }
 

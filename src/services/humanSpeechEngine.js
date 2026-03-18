@@ -85,7 +85,8 @@ function _lang(language) {
 
 // ── Step → filler category mapping ───────────────────────────────────────────
 function _stepCategory(step) {
-  if (['pricing', 'budget', 'qualify_budget'].includes(step))           return 'pricing';
+  if (['pricing', 'budget'].includes(step))                             return 'pricing';
+  if (['qualify_budget', 'qualify_timeline'].includes(step))            return 'thinking';
   if (['location', 'location_budget'].includes(step))                   return 'location';
   if (['purpose', 'property_type', 'investment_timeline'].includes(step)) return 'thinking';
   if (['book_visit', 'closing'].includes(step))                         return 'booking';
@@ -176,7 +177,7 @@ function processStreamSentence(text, { isFirst = false, step = '', language = 'e
   let addedFiller = false;
 
   if (isFirst && !fastMode && step && result.length > 0) {
-    const EXISTING_FILLER = /^(okay|sure|hmm|right|got it|understood|great|perfect|excellent|wonderful|theek|bilkul|samjha|haan|ठीक|हाँ|बिल्कुल)/i;
+    const EXISTING_FILLER = /^(okay|sure|hmm|right|got it|understood|great|perfect|excellent|wonderful|theek|bilkul|samjha|haan|ठीक|हाँ|बिल्कुल|i completely|i understand|absolutely|no problem|thank you for)/i;
     if (!EXISTING_FILLER.test(result)) {
       const filler = getFiller(step, language);
       result = `${filler} ${result}`;
