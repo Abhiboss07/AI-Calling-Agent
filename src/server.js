@@ -355,18 +355,23 @@ async function start() {
   });
 
   app.use('/vobiz', vobizRoutes);
-  app.use('/api/v1/auth', authRoutes);  // Public auth routes
 
-  // Public test endpoint — must be before the auth-protected /api middleware
+  // ── Public auth routes — MUST be registered before any verifyToken middleware ──
+  // Routes: /signup /register /login /verify /resend-code /google
+  app.use('/api/v1/auth', authRoutes);
+
+  // ── Public test-call endpoint (no auth) ──────────────────────────────────────
   app.post('/api/v1/calls/test-start', (req, res, next) => {
     req.url = '/v1/calls/test-start';
     apiRoutes(req, res, next);
   });
 
-  app.use('/api', verifyToken, apiRoutes);                               // Protected API routes
-  app.use('/api/v1/campaigns', verifyToken, campaignRoutes);             // Campaign CRUD
-  app.use('/api/v1/knowledge-bases', verifyToken, knowledgeBaseRoutes);  // Knowledge-base CRUD
-  app.use('/monitor', monitoringRoutes);  // Monitoring API routes
+  // ── Protected routes — verifyToken applied explicitly, never touches /auth ───
+  app.use('/api/v1/campaigns', verifyToken, campaignRoutes);
+  app.use('/api/v1/knowledge-bases', verifyToken, knowledgeBaseRoutes);
+  app.use('/api/v1', verifyToken, apiRoutes);   // all remaining /api/v1/* routes
+
+  app.use('/monitor', monitoringRoutes);
 
   // WebSocket for Vobiz Media Streams
   setupWs(app);

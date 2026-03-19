@@ -16,9 +16,9 @@ function genCode() {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// POST /api/v1/auth/signup
+// POST /api/v1/auth/signup  (also aliased as /register)
 // ──────────────────────────────────────────────────────────────────
-router.post('/signup', async (req, res) => {
+async function handleSignup(req, res) {
     try {
         const { name, email, password } = req.body;
 
@@ -78,7 +78,10 @@ router.post('/signup', async (req, res) => {
         logger.error('Signup error', err.message);
         res.status(500).json({ ok: false, error: err.message || 'Signup failed' });
     }
-});
+}
+
+router.post('/signup', handleSignup);
+router.post('/register', handleSignup);   // alias — same public handler, no auth
 
 // ──────────────────────────────────────────────────────────────────
 // POST /api/v1/auth/verify
