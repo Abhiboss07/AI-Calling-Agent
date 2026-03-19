@@ -76,17 +76,22 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
     const dgLang = toDgLanguage(normalizeLanguageCode(language, 'en-IN'));
     const deepgram = getDeepgramClient();
 
+    logger.debug(`STT RAW LENGTH: ${buffer.length} bytes, ${durationSec.toFixed(2)}s`);
+
     // SDK v5: client.listen.v1.media.transcribeFile(buffer, options) → { data, rawResponse }
+    // nova-2-phonecall is optimized for 8kHz telephony (vs nova-2 which expects 16kHz+)
     const response = await deepgram.listen.v1.media.transcribeFile(
       buffer,
       {
-        model: 'nova-2',
+        model: 'nova-2-phonecall',
         language: dgLang,
         smart_format: true,
         punctuate: true,
         utterances: false,
         filler_words: false,
-        diarize: false
+        diarize: false,
+        encoding: 'linear16',
+        sample_rate: 8000
       }
     );
 
@@ -137,7 +142,7 @@ function createLiveSession({ language = 'en-IN', onInterim, onFinal, onError } =
   const sendQueue = [];
 
   deepgram.listen.v1.connect({
-    model: 'nova-2',
+    model: 'nova-2-phonecall',
     language: dgLang,
     smart_format: true,
     interim_results: true,

@@ -1715,7 +1715,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   // Skip noise-only utterances: short + low energy, OR L16 first utterance with marginal RMS
   const isFirstUtterance = session.transcriptEntries.filter(e => e.speaker === 'customer').length === 0;
   const l16NoiseGuard = isFirstUtterance && session._audioCodec === 'l16' && utteranceRms < 0.002;
-  if ((audioDurationSec <= 0.8 && utteranceRms < 0.001) || l16NoiseGuard) {
+  if ((audioDurationSec <= 0.8 && utteranceRms < 0.0005) || l16NoiseGuard) {
     logger.log('Skipping low-energy utterance before STT', {
       callSid: session.callSid,
       pcmBytes: pcmData.length,
