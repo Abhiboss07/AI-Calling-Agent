@@ -94,7 +94,12 @@ const { getPublicBaseUrl } = require('../utils/urlHelper');
 // Without these, Vobiz rejects the URL as "not valid" before the call even starts.
 // ══════════════════════════════════════════════════════════════════════════════
 router.get('/answer', (req, res) => {
-    res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    // GET is only for Vobiz URL validation — actual webhook is POST
+    const base = getPublicBaseUrl(req);
+    const wsUrl = `${base.replace(/^http/i, 'ws')}/stream`;
+    res.type('text/plain').send(
+        `[AI Calling Agent] Vobiz answer webhook is active (POST only)\nWebSocket endpoint: ${wsUrl}\nSend POST requests from Vobiz to this URL.`
+    );
 });
 
 router.get('/hangup', (req, res) => res.sendStatus(200));
