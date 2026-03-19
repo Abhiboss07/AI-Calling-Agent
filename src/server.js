@@ -369,7 +369,7 @@ async function start() {
   // ── Protected routes — verifyToken applied explicitly, never touches /auth ───
   app.use('/api/v1/campaigns', verifyToken, campaignRoutes);
   app.use('/api/v1/knowledge-bases', verifyToken, knowledgeBaseRoutes);
-  app.use('/api/v1', verifyToken, apiRoutes);   // all remaining /api/v1/* routes
+  app.use('/api', verifyToken, apiRoutes);   // routes inside use /v1/* prefix already
 
   app.use('/monitor', monitoringRoutes);
 
