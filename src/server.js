@@ -1,17 +1,30 @@
-const express = require('express');
-const expressWs = require('express-ws');
-const config = require('./config');
-const logger = require('./utils/logger');
-const db = require('./services/db');
-const vobizRoutes = require('./routes/vobiz');
-const authRoutes = require('./routes/auth');
-const apiRoutes = require('./routes/api');
-const campaignRoutes = require('./routes/campaigns');
-const knowledgeBaseRoutes = require('./routes/knowledgeBase');
-const { verifyToken } = require('./middleware/auth');
-const setupWs = require('./ws-media-optimized');
-const metrics = require('./services/metrics');
-const { startMonitoring, router: monitoringRoutes } = require('./services/monitoring');
+// ── Startup diagnostics (must be before any require that can throw) ──────────
+process.stdout.write(`[BOOT] Node ${process.version} starting — PID ${process.pid} — PORT=${process.env.PORT || 3000} HOST=${process.env.HOST || '0.0.0.0'} NODE_ENV=${process.env.NODE_ENV || 'unset'}\n`);
+
+let express, expressWs, config, logger, db;
+let vobizRoutes, authRoutes, apiRoutes, campaignRoutes, knowledgeBaseRoutes;
+let verifyToken, setupWs, metrics, startMonitoring, monitoringRoutes;
+
+try {
+  express = require('express');
+  expressWs = require('express-ws');
+  config = require('./config');
+  logger = require('./utils/logger');
+  db = require('./services/db');
+  vobizRoutes = require('./routes/vobiz');
+  authRoutes = require('./routes/auth');
+  apiRoutes = require('./routes/api');
+  campaignRoutes = require('./routes/campaigns');
+  knowledgeBaseRoutes = require('./routes/knowledgeBase');
+  ({ verifyToken } = require('./middleware/auth'));
+  setupWs = require('./ws-media-optimized');
+  metrics = require('./services/metrics');
+  ({ startMonitoring, router: monitoringRoutes } = require('./services/monitoring'));
+  process.stdout.write('[BOOT] All modules loaded OK\n');
+} catch (bootErr) {
+  process.stderr.write(`[BOOT] FATAL module load error: ${bootErr.message}\n${bootErr.stack}\n`);
+  process.exit(1);
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // RATE LIMITER (in-memory)
