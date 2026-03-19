@@ -101,7 +101,9 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
 
     // SDK v5: transcribeFile with explicit encoding (raw PCM, no WAV header).
     // nova-2-phonecall is trained on telephony 8kHz audio.
-    // IMPORTANT: encoding + sample_rate must match the raw buffer exactly.
+    // IMPORTANT: SDK v5's MediaTranscribeRequestOctetStream does NOT include sample_rate
+    // or channels fields — pass them via requestOptions.queryParams (3rd argument) or
+    // they are silently dropped and Deepgram returns 400 "corrupt or unsupported data".
     const response = await deepgram.listen.v1.media.transcribeFile(
       buffer,
       {
@@ -113,8 +115,12 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
         filler_words: false,
         diarize: false,
         encoding: 'linear16',
-        sample_rate: 8000,
-        channels: 1
+      },
+      {
+        queryParams: {
+          sample_rate: 8000,
+          channels: 1
+        }
       }
     );
 

@@ -256,16 +256,12 @@ function canStartGreeting(session) {
   return (session._l16ProbeCount || 0) >= 3;
 }
 
-// Generic decoder that picks the right codec
+// Generic decoder that picks the right codec based on what the session declared.
 function decodeToPcm16(audioBuffer, session) {
   const codec = normalizeAudioEncoding(session?._audioEncoding);
-  if (codec === 'l16') {
-    return decodeL16ToPcm16(audioBuffer, session);
-  }
-  if (codec === 'alaw') {
-    return alawToPcm16(audioBuffer);
-  }
-  return mulawToPcm16(audioBuffer); // default to mulaw
+  if (codec === 'l16') return decodeL16ToPcm16(audioBuffer, session);
+  if (codec === 'alaw') return alawToPcm16(audioBuffer);
+  return mulawToPcm16(audioBuffer);
 }
 
 function buildWavBuffer(pcmData) {
@@ -647,9 +643,9 @@ class EnhancedCallSession {
     this._finalized = false;
     this._wsClosed = false;
     this._lastPong = Date.now();
-    this._audioEncoding = 'audio/x-mulaw';
-    this._audioCodec = 'mulaw';
-    this._l16Endian = 'unknown';
+    this._audioEncoding = 'audio/x-l16';  // Vobiz declares L16; start event will confirm
+    this._audioCodec = 'l16';
+    this._l16Endian = 'le';               // Vobiz L16 is little-endian
     this._l16EndianVotes = { le: 0, be: 0 };
 
     // Echo cool-down: discard audio for a brief period after playback ends
@@ -1218,17 +1214,9 @@ module.exports = function setupWs(app) {
             let codec = normalizeAudioEncoding(encoding);
             const inferredL16Endian = codec === 'l16' ? inferL16EndiannessFromEncoding(encoding) : null;
 
-            // Vobiz PSTN always sends μ-law regardless of what the start event claims.
-            // Override L16 → mulaw unless VOBIZ_TRUST_L16=true is explicitly set.
-            if (codec === 'l16' && shouldOverrideL16ToMulaw()) {
-              logger.warn('[CODEC] Start event claims L16 — overriding to mulaw (Vobiz telephony is PCMU by default)', {
-                callSid: sess.callSid, declaredEncoding: encoding
-              });
-              codec = 'mulaw';
-              sess._audioEncoding = 'audio/x-mulaw';
-            } else {
-              sess._audioEncoding = encoding;
-            }
+            // Trust the declared encoding from Vobiz start event.
+            // Vobiz sends L16 PCM16 8kHz as declared (confirmed by chunk byte analysis).
+            sess._audioEncoding = encoding;
 
             sess._audioCodec = codec;
             if (codec === 'l16' && inferredL16Endian) {
