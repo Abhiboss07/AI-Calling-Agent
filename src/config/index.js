@@ -68,7 +68,7 @@ module.exports = {
 
   // Pipeline tuning constants (centralized, configurable via env)
   pipeline: {
-    vadThreshold: clamp(envNumber('VAD_THRESHOLD', 0.005), 0.002, 0.05),
+    vadThreshold: clamp(envNumber('VAD_THRESHOLD', 0.002), 0.0002, 0.05),
     speechStartChunks: clamp(envNumber('SPEECH_START_CHUNKS', 3), 1, 6),
     speechEndChunks: clamp(envNumber('SPEECH_END_CHUNKS', 6), 4, 8),
     bargeInMinPlaybackMs: clamp(envNumber('BARGE_IN_MIN_PLAYBACK_MS', 250), 0, 800),

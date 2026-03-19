@@ -363,9 +363,9 @@ const STREAM_CLOSE_DRAIN_MS = 1500;
 const ECHO_COOLDOWN_MS = 120;   // Discard audio for 120ms after playback ends (Vobiz L16 has minimal echo)
 const MAX_SPEECH_DURATION_MS = 2000; // Force processing after 2s of continuous speech for fast responses
 const NOISE_CALIBRATION_CHUNKS = 8;  // ~160ms of audio to calibrate noise floor after cool-down
-const VOICE_MARGIN = 0.006; // Additive margin above noise floor for voice detection
+const VOICE_MARGIN = 0.002; // Additive margin above noise floor for voice detection (lowered for telephony)
 const L16_MIN_THRESHOLD = 0.0002; // Very low threshold for quiet L16 PSTN audio
-const L16_VOICE_MARGIN = 0.0004;  // Small margin — L16 PSTN RMS is typically 0.0003-0.001
+const L16_VOICE_MARGIN = 0.0002;  // Small margin — L16 PSTN RMS is typically 0.0003-0.001
 const PRE_SPEECH_CHUNKS = config.pipeline.preSpeechChunks || 6;
 const MICRO_PAUSE_MIN_MS = 150; // Minimum thinking pause before first TTS sentence
 const MICRO_PAUSE_MAX_MS = 300; // Maximum thinking pause (randomized for human feel)
@@ -1715,25 +1715,29 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   const audioDurationSec = pcmData.length / 16000;
   const utteranceRms = computeRms(pcmData);
 
-  // Skip noise-only utterances: short + low energy, OR L16 first utterance with marginal RMS
-  const isFirstUtterance = session.transcriptEntries.filter(e => e.speaker === 'customer').length === 0;
-  const l16NoiseGuard = isFirstUtterance && session._audioCodec === 'l16' && utteranceRms < 0.002;
-  if ((audioDurationSec <= 0.8 && utteranceRms < 0.0005) || l16NoiseGuard) {
-    logger.log('Skipping low-energy utterance before STT', {
+  // VAD already confirmed voice energy — skip RMS filtering here.
+  // Only gate on minimum duration: 0.5s = 8000 bytes at 8kHz PCM16.
+  // Short bursts (<0.5s) produce unreliable transcripts regardless of model.
+  const MIN_STT_BYTES = 8000; // 0.5s at 8kHz 16-bit = 8000 bytes/sec × 0.5
+  if (pcmData.length < MIN_STT_BYTES) {
+    logger.log('Skipping utterance — below 0.5s minimum for STT', {
       callSid: session.callSid,
       pcmBytes: pcmData.length,
-      audioDuration: `${audioDurationSec.toFixed(1)}s`,
+      audioDuration: `${audioDurationSec.toFixed(2)}s`,
       rms: utteranceRms.toFixed(4)
     });
     return;
   }
 
+  // Audio is PCM16 LE 8kHz (decoded from μ-law by mulawToPcm16 in processAudioChunk)
   logger.log('STT input', {
     callSid: session.callSid,
     pcmBytes: pcmData.length,
-    audioDuration: `${audioDurationSec.toFixed(1)}s`,
+    audioDuration: `${audioDurationSec.toFixed(2)}s`,
+    rms: utteranceRms.toFixed(4),
     timeSinceCallStart: `${((Date.now() - session.startTime) / 1000).toFixed(1)}s`
   });
+  logger.log(`STT RAW LENGTH: ${pcmData.length} bytes (wav: ${wavBuffer.length})`);
 
   // Use Deepgram live transcript if already available (speech_final fired before VAD timeout)
   const sttStart = Date.now();
@@ -1751,37 +1755,8 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   }
   let sttLatency = Date.now() - sttStart;
 
-  // Safety net for ambiguous L16 streams:
-  // if primary STT is empty despite high-energy audio, retry once with swapped endianness.
-  if ((!sttResult || sttResult.empty || !sttResult.text) &&
-    session._audioCodec === 'l16' &&
-    audioDurationSec >= 1.0 &&
-    utteranceRms >= 0.01) {
-    const altStart = Date.now();
-    const altPcmData = removeDcOffset(swapPcm16Endian(pcmData));
-    const altWavBuffer = buildWavBuffer(altPcmData);
-    const altStt = await stt.transcribe(altWavBuffer, session.callSid, 'audio/wav', session.language);
-    sttLatency += Date.now() - altStart;
-
-    if (altStt && !altStt.empty && altStt.text) {
-      const previousEndian = session._l16Endian || 'unknown';
-      session._l16Endian = previousEndian === 'be' ? 'le' : 'be';
-      session._l16EndianVotes = session._l16Endian === 'le' ? { le: 3, be: 0 } : { le: 0, be: 3 };
-      logger.log('Recovered STT with alternate L16 endian', {
-        callSid: session.callSid,
-        previousEndian,
-        selectedEndian: session._l16Endian,
-        text: altStt.text
-      });
-      sttResult = altStt;
-    } else {
-      logger.log('Alternate endian STT also empty', {
-        callSid: session.callSid,
-        pcmBytes: pcmData.length,
-        audioDuration: `${audioDurationSec.toFixed(1)}s`
-      });
-    }
-  }
+  // Endian retry disabled — using little-endian PCM16 (standard μ-law decode output).
+  // Re-enable if STT consistently fails on L16 streams with swapped byte order.
 
   if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
     logger.debug('Pipeline cancelled after STT', session.callSid);
