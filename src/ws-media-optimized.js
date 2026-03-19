@@ -231,6 +231,19 @@ function decodeL16ToPcm16(audioBuffer, session) {
   return chosenPcm;
 }
 
+// ── μ-law mislabeling detection / override ───────────────────────────────────
+// Vobiz PSTN streams are always μ-law (PCMU G.711) 8kHz.
+// The start event sometimes incorrectly claims 'linear16'.
+// When that happens, decodeToPcm16 passes bytes through raw — garbled for STT.
+//
+// Strategy: if declared codec is L16, override to mulaw UNLESS the caller
+// explicitly opts in to trusting the declared encoding via VOBIZ_TRUST_L16=true.
+//
+// Set VOBIZ_TRUST_L16=true only if you have confirmed genuine L16 input.
+function shouldOverrideL16ToMulaw() {
+  return String(process.env.VOBIZ_TRUST_L16 || 'false').toLowerCase() !== 'true';
+}
+
 function getNoiseFloorCap(session) {
   return session?._audioCodec === 'l16' ? 0.001 : 0.15;
 }
@@ -1202,18 +1215,30 @@ module.exports = function setupWs(app) {
           const sess = initializeSession({ callUuid, callerNumber, streamSid, language, direction, autoGreet: false });
 
           if (sess) {
-            const codec = normalizeAudioEncoding(encoding);
+            let codec = normalizeAudioEncoding(encoding);
             const inferredL16Endian = codec === 'l16' ? inferL16EndiannessFromEncoding(encoding) : null;
-            sess._audioEncoding = encoding;
+
+            // Vobiz PSTN always sends μ-law regardless of what the start event claims.
+            // Override L16 → mulaw unless VOBIZ_TRUST_L16=true is explicitly set.
+            if (codec === 'l16' && shouldOverrideL16ToMulaw()) {
+              logger.warn('[CODEC] Start event claims L16 — overriding to mulaw (Vobiz telephony is PCMU by default)', {
+                callSid: sess.callSid, declaredEncoding: encoding
+              });
+              codec = 'mulaw';
+              sess._audioEncoding = 'audio/x-mulaw';
+            } else {
+              sess._audioEncoding = encoding;
+            }
+
             sess._audioCodec = codec;
-            if (inferredL16Endian) {
+            if (codec === 'l16' && inferredL16Endian) {
               sess._l16Endian = inferredL16Endian;
             }
-            logger.log('Audio encoding detected', {
+            logger.log('Audio encoding set', {
               callSid: sess.callSid,
-              encoding,
-              codec,
-              l16Endian: sess._l16Endian
+              declared: encoding,
+              effective: codec,
+              l16Endian: sess._l16Endian || 'n/a'
             });
             // Stream established. Greeting stays pending until 500ms VAD calibration finishes.
             if (streamSid) {
@@ -1242,19 +1267,24 @@ module.exports = function setupWs(app) {
 
           const rawBytes = Buffer.from(payload, 'base64');
 
-          // Diagnostic: log first 5 media chunks to see raw data
+          // Diagnostic: log first 3 media chunks for codec verification
           session._mediaLogCount = (session._mediaLogCount || 0) + 1;
-          if (session._mediaLogCount <= 5) {
-            logger.log('Media payload dump', {
+          if (session._mediaLogCount <= 3) {
+            logger.log('Media chunk', {
               callSid: session.callSid,
               chunk: session._mediaLogCount,
-              track: msg.media?.track || 'none',
-              payloadLen: payload.length,
               rawLen: rawBytes.length,
               hexFirst20: rawBytes.slice(0, 20).toString('hex'),
-              encoding: session._audioEncoding,
-              msgKeys: Object.keys(msg.media || msg).join(',')
+              effectiveCodec: session._audioCodec,
             });
+          }
+
+          // Save first chunk raw bytes for offline verification
+          if (session._mediaLogCount === 1) {
+            try {
+              require('fs').writeFileSync('/tmp/vobiz_chunk1_raw.bin', rawBytes);
+              logger.log(`[DEBUG] Raw chunk1 → /tmp/vobiz_chunk1_raw.bin (${rawBytes.length}B) — decode with: python3 -c "import audioop; open('/tmp/c1.pcm','wb').write(audioop.ulaw2lin(open('/tmp/vobiz_chunk1_raw.bin','rb').read(),2))"`);
+            } catch (_) { /* ignore */ }
           }
 
           const pcmChunk = removeDcOffset(decodeToPcm16(rawBytes, session));

@@ -54,16 +54,17 @@ function normalizeTranscriptText(text) {
   return out.trim();
 }
 
-// ── One-time audio dump for verification (first call only) ───────────────────
+// ── One-time audio dump for verification (first utterance only) ──────────────
 let _dumpDone = false;
 function _maybeDump(pcmBuffer) {
   if (_dumpDone) return;
   _dumpDone = true;
   try {
-    const path = '/tmp/stt_debug.raw';
-    fs.writeFileSync(path, pcmBuffer);
-    logger.log(`[STT DEBUG] Wrote ${pcmBuffer.length} bytes to ${path} — verify with: ffmpeg -f s16le -ar 8000 -ac 1 -i ${path} /tmp/stt_debug.wav`);
-  } catch (e) { /* ignore in production */ }
+    const rawPath = '/tmp/stt_decoded_pcm.raw';
+    fs.writeFileSync(rawPath, pcmBuffer);
+    logger.log(`[STT DEBUG] Saved decoded PCM: ${pcmBuffer.length}B → ${rawPath}`);
+    logger.log(`[STT DEBUG] Verify: ffmpeg -f s16le -ar 8000 -ac 1 -i ${rawPath} /tmp/stt_decoded.wav && play /tmp/stt_decoded.wav`);
+  } catch (e) { /* ignore */ }
 }
 
 // ── Batch Transcription (PreRecorded) ────────────────────────────────────────
