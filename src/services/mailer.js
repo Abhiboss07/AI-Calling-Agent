@@ -14,7 +14,10 @@ const transporter = nodemailer.createTransport({
   auth: {
     user: config.gmail.user,
     pass: config.gmail.appPassword
-  }
+  },
+  connectionTimeout: 5000,   // fail fast if SMTP unreachable (e.g. no credentials)
+  greetingTimeout: 5000,
+  socketTimeout: 10000
 });
 
 /**
