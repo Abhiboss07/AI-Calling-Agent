@@ -26,6 +26,7 @@ const responseCache = require('./services/responseCache');
 const conversationMemory = require('./services/conversationMemory');
 const humanSpeech = require('./services/humanSpeechEngine');
 const conversationStyle = require('./services/conversationStyle');
+const fillerEngine = require('./services/fillerEngine');
 const { withRetry } = require('./utils/retry');
 const { ConversationFSM, States } = require('./services/conversationFSM');
 const config = require('./config');
@@ -560,6 +561,8 @@ async function prewarmCriticalGreetings() {
 
 // Start prewarming immediately on module load
 prewarmCriticalGreetings();
+// Pre-cache filler phrases so Level 2 responses have zero synthesis latency
+fillerEngine.prewarm(tts, ['en-IN', 'hinglish', 'hi-IN', 'ta-IN', 'te-IN']).catch(() => {});
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ENHANCED CALL SESSION WITH FSM
@@ -2027,6 +2030,13 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
 
   logger.log('LLM pipeline starting', { callSid: session.callSid, step: callState.step, fsmState: session.fsm.getState(), direction: session.direction, maxTokens: optimizerConfig.maxTokens, fastMode: optimizerConfig.fastMode });
 
+  // ── LEVEL 2: Filler timer — plays "Hmm..." if LLM takes > 150ms ──────────
+  // Skipped when: speculative reply ready, pipeline already cancelled, WS closed.
+  // Cancelled the instant the first real LLM sentence chunk arrives.
+  const _fillerHandle = wsOpen && !speculativeReply
+    ? fillerEngine.start(session, ws, sendAudioThroughStream, tts)
+    : null;
+
   // ── P2: Build stream with 700ms first-token timeout ──────────────────────
   // If LLM is silent for > LLM_HARD_TIMEOUT_MS, the stream iterator returns done
   // and the pipeline falls through to the fallback block below.
@@ -2057,6 +2067,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   const replyStream = speculativeReply ? rawStream : withStreamTimeout(rawStream, LLM_STREAM_TIMEOUT_MS);
 
   if (abortSignal.aborted || pipelineId !== session.lastPipelineId) {
+    if (_fillerHandle) _fillerHandle.cancel();
     logger.debug('Pipeline cancelled after STT', session.callSid);
     return;
   }
@@ -2068,6 +2079,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     ? textSimilarity(session.dgFinalText, sttResult.text)
     : 1.0;
   if (session.dgFinalText && preStreamSim < 0.8) {
+    if (_fillerHandle) _fillerHandle.cancel();
     logger.warn(`[VALID] Pre-stream: new utterance detected (sim=${preStreamSim.toFixed(2)}) — discarding stale reply`, {
       callSid: session.callSid,
       processed: sttResult.text.substring(0, 40),
@@ -2136,6 +2148,11 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
       if (firstChunkMs === 0) {
         firstChunkMs = Date.now() - llmStart;
         logger.debug(`Time to first sentence: ${firstChunkMs}ms`);
+
+        // ── Cancel filler — real response is arriving ─────────────────────
+        // Pass clearQueue=true only if filler audio is already playing so we
+        // flush the queue before real audio starts (avoids overlap).
+        if (_fillerHandle) _fillerHandle.cancel(session._fillerPlaying === true);
 
         // ── P3: In-stream response validation (similarity-based) ────────────
         // Discard if user said something meaningfully different while LLM was thinking.
@@ -2262,6 +2279,8 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     fillerUsed: _fillerUsed
   });
 
+  const _fillerMetrics = _fillerHandle ? _fillerHandle.metrics() : { fillerUsed: false, fillerPhrase: null, fillerDurationMs: 0, llmDelayMs: firstChunkMs };
+
   callDebugger.recordTurn(session.callSid, {
     turnNumber: session._turnNumber,
     transcript: sttResult.text,
@@ -2276,7 +2295,11 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     sttSource,
     llmProvider: _modelUsed,
     ttsCached: ttsLatencyTotal < 20,
-    audioDurationSec
+    audioDurationSec,
+    fillerUsed: _fillerMetrics.fillerUsed,
+    fillerPhrase: _fillerMetrics.fillerPhrase,
+    fillerDurationMs: _fillerMetrics.fillerDurationMs,
+    llmDelayMs: _fillerMetrics.llmDelayMs
   });
 
   // Handle actions
