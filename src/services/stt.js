@@ -1,10 +1,14 @@
 /**
  * STT Service — Deepgram SDK v5
  *
- * Batch:  transcribe(wavBuffer, callSid, mime, language)
+ * Batch:  transcribe(pcmBuffer, callSid, mime, language)
+ *         Receives raw PCM16 LE 8kHz (NO WAV header). Sends with explicit
+ *         encoding/sample_rate so Deepgram doesn't guess format.
  * Live:   createLiveSession({ language, onInterim, onFinal, onError })
+ *         Receives raw PCM chunks via send(buffer) → socket.sendMedia()
  */
 
+const fs = require('fs');
 const { DeepgramClient } = require('@deepgram/sdk');
 const logger = require('../utils/logger');
 const metrics = require('./metrics');
@@ -50,24 +54,40 @@ function normalizeTranscriptText(text) {
   return out.trim();
 }
 
+// ── One-time audio dump for verification (first call only) ───────────────────
+let _dumpDone = false;
+function _maybeDump(pcmBuffer) {
+  if (_dumpDone) return;
+  _dumpDone = true;
+  try {
+    const path = '/tmp/stt_debug.raw';
+    fs.writeFileSync(path, pcmBuffer);
+    logger.log(`[STT DEBUG] Wrote ${pcmBuffer.length} bytes to ${path} — verify with: ffmpeg -f s16le -ar 8000 -ac 1 -i ${path} /tmp/stt_debug.wav`);
+  } catch (e) { /* ignore in production */ }
+}
+
 // ── Batch Transcription (PreRecorded) ────────────────────────────────────────
+// Receives raw PCM16 LE 8kHz (NO WAV header).
+// Deepgram reads encoding/sample_rate from the request params, not a WAV header.
 async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN') {
   if (!buffer || buffer.length === 0) return { text: '', confidence: 0, empty: true };
 
-  // 44-byte WAV header + at least 1200 bytes of PCM data
-  if (buffer.length < 844) {
+  // Minimum: 0.5s = 8000 bytes at 8kHz PCM16
+  if (buffer.length < 8000) {
     logger.debug('STT: buffer too small', buffer.length, 'bytes');
     return { text: '', confidence: 0, empty: true };
   }
 
-  // Cap at 30 seconds
-  if (buffer.length > 480044) {
+  // Cap at 30 seconds = 480000 bytes raw PCM
+  if (buffer.length > 480000) {
     logger.warn('STT: buffer too large, truncating to 30s');
-    buffer = buffer.subarray(0, 480044);
+    buffer = buffer.subarray(0, 480000);
   }
 
-  const dataBytes = Math.max(0, buffer.length - 44);
-  const durationSec = dataBytes / 16000; // 8kHz 16-bit = 16000 bytes/sec
+  const durationSec = buffer.length / 16000; // 8kHz 16-bit = 16000 bytes/sec
+
+  // Dump first utterance to disk for offline verification
+  _maybeDump(buffer);
 
   try {
     const startMs = Date.now();
@@ -76,10 +96,11 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
     const dgLang = toDgLanguage(normalizeLanguageCode(language, 'en-IN'));
     const deepgram = getDeepgramClient();
 
-    logger.debug(`STT RAW LENGTH: ${buffer.length} bytes, ${durationSec.toFixed(2)}s`);
+    logger.log(`STT: sending ${buffer.length} bytes raw PCM16 LE 8kHz to Deepgram`);
 
-    // SDK v5: client.listen.v1.media.transcribeFile(buffer, options) → { data, rawResponse }
-    // nova-2-phonecall is optimized for 8kHz telephony (vs nova-2 which expects 16kHz+)
+    // SDK v5: transcribeFile with explicit encoding (raw PCM, no WAV header).
+    // nova-2-phonecall is trained on telephony 8kHz audio.
+    // IMPORTANT: encoding + sample_rate must match the raw buffer exactly.
     const response = await deepgram.listen.v1.media.transcribeFile(
       buffer,
       {
@@ -91,7 +112,8 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
         filler_words: false,
         diarize: false,
         encoding: 'linear16',
-        sample_rate: 8000
+        sample_rate: 8000,
+        channels: 1
       }
     );
 

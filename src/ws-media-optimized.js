@@ -1710,8 +1710,9 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   }
 
   // 1. STT
-  const pcmData = Buffer.concat(pcmChunks);
-  const wavBuffer = buildWavBuffer(pcmData);
+  const rawPcm = Buffer.concat(pcmChunks);
+  // Ensure even byte count (PCM16 must have 2 bytes per sample)
+  const pcmData = rawPcm.length % 2 !== 0 ? rawPcm.slice(0, rawPcm.length - 1) : rawPcm;
   const audioDurationSec = pcmData.length / 16000;
   const utteranceRms = computeRms(pcmData);
 
@@ -1729,7 +1730,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     return;
   }
 
-  // Audio is PCM16 LE 8kHz (decoded from μ-law by mulawToPcm16 in processAudioChunk)
+  // Audio is PCM16 LE 8kHz (decoded from μ-law by mulawToPcm16 — NO WAV header)
   logger.log('STT input', {
     callSid: session.callSid,
     pcmBytes: pcmData.length,
@@ -1737,7 +1738,9 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     rms: utteranceRms.toFixed(4),
     timeSinceCallStart: `${((Date.now() - session.startTime) / 1000).toFixed(1)}s`
   });
-  logger.log(`STT RAW LENGTH: ${pcmData.length} bytes (wav: ${wavBuffer.length})`);
+  logger.log(`STT RAW LENGTH: ${pcmData.length} bytes`);
+  // PCM sanity check: first 20 bytes should NOT be all-zero or repeating
+  logger.log(`PCM CHECK: ${pcmData.slice(0, 20).toString('hex')}`);
 
   // Use Deepgram live transcript if already available (speech_final fired before VAD timeout)
   const sttStart = Date.now();
@@ -1748,8 +1751,9 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     session.dgInterimText = '';
     logger.log('STT: using Deepgram live transcript (0ms)', { callSid: session.callSid, text: sttResult.text });
   } else {
+    // Pass raw PCM (no WAV header) — stt.transcribe declares encoding explicitly
     sttResult = await withRetry(
-      () => stt.transcribe(wavBuffer, session.callSid, 'audio/wav', session.language),
+      () => stt.transcribe(pcmData, session.callSid, 'audio/wav', session.language),
       1, 0, 'STT'
     );
   }
