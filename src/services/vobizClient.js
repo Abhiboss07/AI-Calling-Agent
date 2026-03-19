@@ -65,6 +65,8 @@ async function makeOutboundCall(to, from, answerUrl, hangupUrl) {
     const toNumber   = stripPlus(to);
     const fromNumber = stripPlus(from || config.vobiz.callerId);
 
+    logger.log('Phone formats:', { input: to, vobiz: toNumber });
+
     const payload = {
         to:             toNumber,
         from:           fromNumber,
