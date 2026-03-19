@@ -40,6 +40,11 @@ function parsePossibleNumber(...values) {
     return null;
 }
 
+// Strip leading '+' — Vobiz API expects digits only (no E.164 plus sign)
+function stripPlus(number) {
+    return String(number || '').replace(/^\+/, '');
+}
+
 function ensureClient() {
     if (!isConfigured) {
         throw new Error('Vobiz client not configured. Set VOBIZ_AUTH_ID and VOBIZ_AUTH_TOKEN.');
@@ -48,35 +53,50 @@ function ensureClient() {
 
 /**
  * Make an outbound call via Vobiz REST API
- * @param {string} to - Destination phone number (E.164)
- * @param {string} from - Caller ID (E.164), defaults to config
- * @param {string} answerUrl - URL Vobiz requests when call is answered
- * @param {string} hangupUrl - URL Vobiz notifies when call ends
+ * @param {string} to - Destination phone number (E.164 or digits)
+ * @param {string} from - Caller ID, defaults to config
+ * @param {string} answerUrl - URL Vobiz POSTs when call is answered
+ * @param {string} hangupUrl - URL Vobiz POSTs when call ends
  * @returns {Object} - { callUuid, message, ... }
  */
 async function makeOutboundCall(to, from, answerUrl, hangupUrl) {
     ensureClient();
-    const callerNumber = from || config.vobiz.callerId;
-    logger.log('Vobiz: dialing', to, 'from', callerNumber);
 
-    const resp = await axios.post(`${getAccountUrl()}/Call/`, {
-        to,
-        from: callerNumber,
-        answer_url: answerUrl,
-        answer_method: 'POST',
-        hangup_url: hangupUrl,
-        hangup_method: 'POST',
-        ring_timeout: 30,
-        machine_detection: 'false'
-    }, { headers: getHeaders() });
+    const toNumber   = stripPlus(to);
+    const fromNumber = stripPlus(from || config.vobiz.callerId);
 
-    const data = resp.data;
-    return {
-        callUuid: data.request_uuid || data.call_uuid || data.callUuid,
-        sid: data.request_uuid || data.call_uuid || data.callUuid,
-        message: data.message,
-        raw: data
+    const payload = {
+        to:             toNumber,
+        from:           fromNumber,
+        answer_url:     answerUrl,
+        answer_method:  'POST',
+        hangup_url:     hangupUrl,
+        hangup_method:  'POST',
+        ring_timeout:   30,
+        machine_detection: false
     };
+
+    logger.log('Vobiz: dialing', toNumber, 'from', fromNumber, '| answer_url:', answerUrl);
+
+    try {
+        const resp = await axios.post(`${getAccountUrl()}/Call/`, payload, { headers: getHeaders() });
+        const data = resp.data;
+        logger.log('Vobiz: call initiated', JSON.stringify(data));
+        return {
+            callUuid: data.request_uuid || data.call_uuid || data.callUuid,
+            sid:      data.request_uuid || data.call_uuid || data.callUuid,
+            message:  data.message,
+            raw:      data
+        };
+    } catch (err) {
+        const vobizError = err.response?.data;
+        logger.error('Vobiz: call failed', JSON.stringify(vobizError || err.message));
+        logger.error('Vobiz: payload was', JSON.stringify(payload));
+        throw new Error(
+            vobizError?.error || vobizError?.message || vobizError?.api_id ||
+            JSON.stringify(vobizError) || err.message
+        );
+    }
 }
 
 /**

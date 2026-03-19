@@ -101,7 +101,9 @@ router.post('/v1/calls/test-start', async (req, res) => {
 router.post('/v1/calls/start', async (req, res) => {
   try {
     const { campaignId, phoneNumber, fromNumber, language, force } = req.body;
-    if (!campaignId || !phoneNumber) return res.status(400).json({ ok: false, error: 'campaignId and phoneNumber required' });
+    if (!phoneNumber) return res.status(400).json({ ok: false, error: 'phoneNumber required' });
+    // campaignId is optional for direct/test calls — use a default if not provided
+    const effectiveCampaignId = campaignId || 'direct';
 
     // FIX H1: Proper E.164 phone number validation
     const cleanPhone = phoneNumber.replace(/[^+\d]/g, '');
@@ -121,7 +123,7 @@ router.post('/v1/calls/start', async (req, res) => {
 
     if (!force) {
       const existingCall = await Call.findOne({
-        campaignId,
+        campaignId: effectiveCampaignId,
         phoneNumber: cleanPhone,
         status: { $in: ['queued', 'ringing', 'in-progress'] },
         createdAt: { $gte: fiveMinutesAgo }
@@ -134,9 +136,8 @@ router.post('/v1/calls/start', async (req, res) => {
         });
       }
     } else {
-      // If forcing, automatically fail any stuck previous calls to this number
       await Call.updateMany({
-        campaignId,
+        campaignId: effectiveCampaignId,
         phoneNumber: cleanPhone,
         status: { $in: ['queued', 'ringing', 'in-progress'] }
       }, { $set: { status: 'failed' } });
@@ -148,7 +149,7 @@ router.post('/v1/calls/start', async (req, res) => {
     const hangupUrl = `${publicBaseUrl}/vobiz/hangup`;
     const vbCall = await vobizClient.makeOutboundCall(cleanPhone, fromNumber || undefined, answerUrl, hangupUrl);
     const call = await Call.create({
-      campaignId,
+      campaignId: effectiveCampaignId,
       phoneNumber: cleanPhone,
       callSid: vbCall.callUuid,
       status: 'ringing',
