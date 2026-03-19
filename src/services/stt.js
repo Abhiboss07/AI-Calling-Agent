@@ -1,13 +1,11 @@
 /**
- * STT Service — Deepgram (streaming + batch)
+ * STT Service — Deepgram SDK v5
  *
- * Replaces: OpenAI Whisper
- * Provides:
- *   transcribe(wavBuffer, callSid, mime, language)     — batch PreRecorded API
- *   createLiveSession({ language, onInterim, onFinal, onError })  — live streaming
+ * Batch:  transcribe(wavBuffer, callSid, mime, language)
+ * Live:   createLiveSession({ language, onInterim, onFinal, onError })
  */
 
-const { createClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
+const { DeepgramClient } = require('@deepgram/sdk');
 const logger = require('../utils/logger');
 const metrics = require('./metrics');
 const costControl = require('./costControl');
@@ -34,7 +32,7 @@ function toDgLanguage(language) {
 
 function getDeepgramClient() {
   if (!config.deepgramApiKey) throw new Error('DEEPGRAM_API_KEY missing');
-  return createClient(config.deepgramApiKey);
+  return new DeepgramClient(config.deepgramApiKey);
 }
 
 function normalizeTranscriptText(text) {
@@ -53,7 +51,6 @@ function normalizeTranscriptText(text) {
 }
 
 // ── Batch Transcription (PreRecorded) ────────────────────────────────────────
-// Drop-in replacement for Whisper — accepts WAV buffer, returns { text, confidence, empty }
 async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN') {
   if (!buffer || buffer.length === 0) return { text: '', confidence: 0, empty: true };
 
@@ -79,7 +76,8 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
     const dgLang = toDgLanguage(normalizeLanguageCode(language, 'en-IN'));
     const deepgram = getDeepgramClient();
 
-    const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
+    // SDK v5: client.listen.v1.media.transcribeFile(buffer, options) → { data, rawResponse }
+    const response = await deepgram.listen.v1.media.transcribeFile(
       buffer,
       {
         model: 'nova-2',
@@ -92,12 +90,7 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
       }
     );
 
-    if (error) {
-      logger.error('Deepgram batch STT error:', error);
-      metrics.incrementSttRequest(false);
-      return { text: '', confidence: 0, empty: true, error: String(error) };
-    }
-
+    const result = response.data;
     const latencyMs = Date.now() - startMs;
     const alternative = result?.results?.channels?.[0]?.alternatives?.[0];
     const rawText = String(alternative?.transcript || '').trim();
@@ -116,14 +109,14 @@ async function transcribe(buffer, callSid, mime = 'audio/wav', language = 'en-IN
 
     return { text, confidence, empty: false, latencyMs, audioDurationSec: durationSec };
   } catch (err) {
-    logger.error('STT transcription error:', err.message || err);
+    logger.error('STT transcription error:', err?.response?.data || err.message || err);
     metrics.incrementSttRequest(false);
     return { text: '', confidence: 0, empty: true, error: err.message };
   }
 }
 
 // ── Live Streaming Session ────────────────────────────────────────────────────
-// Creates a Deepgram live WebSocket connection.
+// Creates a Deepgram live WebSocket connection (SDK v5).
 // Sends PCM16 LE 8kHz chunks via session.send(buffer).
 // Returns { send(buffer), close() }.
 function createLiveSession({ language = 'en-IN', onInterim, onFinal, onError } = {}) {
@@ -135,69 +128,84 @@ function createLiveSession({ language = 'en-IN', onInterim, onFinal, onError } =
   let closed = false;
   let connection = null;
 
-  try {
-    const deepgram = getDeepgramClient();
-    const dgLang = toDgLanguage(normalizeLanguageCode(language, 'en-IN'));
+  // SDK v5: client.listen.v1.connect(options) is async — returns V1Socket
+  // We return the wrapper immediately and connect in the background.
+  const deepgram = getDeepgramClient();
+  const dgLang = toDgLanguage(normalizeLanguageCode(language, 'en-IN'));
 
-    connection = deepgram.listen.live({
-      model: 'nova-2',
-      language: dgLang,
-      smart_format: true,
-      interim_results: true,
-      endpointing: 300,         // ms of silence to trigger speech_final
-      utterance_end_ms: 1000,   // ms after last word before utterance end
-      encoding: 'linear16',
-      sample_rate: 8000,
-      channels: 1,
-      punctuate: true,
-      filler_words: false
-    });
+  // Queue for audio sent before socket is open
+  const sendQueue = [];
 
-    connection.on(LiveTranscriptionEvents.Open, () => {
+  deepgram.listen.v1.connect({
+    model: 'nova-2',
+    language: dgLang,
+    smart_format: true,
+    interim_results: true,
+    endpointing: 300,
+    utterance_end_ms: 1000,
+    encoding: 'linear16',
+    sample_rate: 8000,
+    channels: 1,
+    punctuate: true,
+    filler_words: false
+  }).then((socket) => {
+    if (closed) {
+      socket.close();
+      return;
+    }
+    connection = socket;
+
+    socket.on('open', () => {
       logger.debug('Deepgram live session opened');
+      // Drain any queued audio
+      for (const buf of sendQueue) {
+        try { socket.sendMedia(buf); } catch (e) { /* ignore */ }
+      }
+      sendQueue.length = 0;
     });
 
-    connection.on(LiveTranscriptionEvents.Transcript, (data) => {
+    socket.on('message', (data) => {
       if (closed) return;
       const alt = data?.channel?.alternatives?.[0];
       const text = normalizeTranscriptText(alt?.transcript || '');
       if (!text) return;
 
       if (data.is_final && data.speech_final) {
-        // Authoritative endpoint
         if (typeof onFinal === 'function') onFinal(text);
       } else if (data.is_final) {
-        // Sentence boundary but stream still open
         if (typeof onFinal === 'function') onFinal(text);
       } else {
-        // Partial interim result
         if (typeof onInterim === 'function') onInterim(text);
       }
     });
 
-    connection.on(LiveTranscriptionEvents.Error, (err) => {
+    socket.on('error', (err) => {
       if (!closed) {
         logger.warn('Deepgram live error:', err?.message || err);
         if (typeof onError === 'function') onError(err);
       }
     });
 
-    connection.on(LiveTranscriptionEvents.Close, () => {
+    socket.on('close', () => {
       closed = true;
       logger.debug('Deepgram live session closed');
     });
 
-  } catch (err) {
+  }).catch((err) => {
     logger.warn('Failed to create Deepgram live session:', err.message);
     if (typeof onError === 'function') onError(err);
-    return null;
-  }
+  });
 
   return {
     send(pcmBuffer) {
-      if (closed || !connection) return;
+      if (closed) return;
+      if (!connection) {
+        // Buffer until connected
+        sendQueue.push(pcmBuffer);
+        return;
+      }
       try {
-        connection.send(pcmBuffer);
+        connection.sendMedia(pcmBuffer);
       } catch (e) {
         logger.debug('Deepgram send error:', e.message);
       }
@@ -205,8 +213,9 @@ function createLiveSession({ language = 'en-IN', onInterim, onFinal, onError } =
     close() {
       if (closed) return;
       closed = true;
+      sendQueue.length = 0;
       try {
-        if (connection) connection.requestClose();
+        if (connection) connection.close();
       } catch (e) { /* ignore */ }
     }
   };
