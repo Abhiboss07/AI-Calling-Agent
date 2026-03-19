@@ -356,6 +356,19 @@ async function start() {
 
   app.use('/vobiz', vobizRoutes);
 
+  // Debug route — lists all key endpoints (public, no auth)
+  app.get('/debug/routes', (req, res) => {
+    const base = config.baseUrl || `https://${req.get('host')}`;
+    res.json({
+      webhook_answer:  `${base}/vobiz/answer`,
+      webhook_hangup:  `${base}/vobiz/hangup`,
+      call_start:      `${base}/api/v1/calls/start`,
+      auth_login:      `${base}/api/v1/auth/login`,
+      auth_register:   `${base}/api/v1/auth/register`,
+      health:          `${base}/health`
+    });
+  });
+
   // ── Public auth routes — MUST be registered before any verifyToken middleware ──
   // Routes: /signup /register /login /verify /resend-code /google
   app.use('/api/v1/auth', authRoutes);
@@ -396,6 +409,9 @@ async function start() {
   const server = app.listen(config.port, config.host, () => {
     logger.log(`🚀 AI Calling Agent v2.0.0 listening on ${config.host}:${config.port}`);
     logger.log(`   PID: ${process.pid} | Env: ${config.nodeEnv} | Agent: ${config.agentName}`);
+    const base = config.baseUrl || `http://localhost:${config.port}`;
+    logger.log(`   Vobiz answer webhook : ${base}/vobiz/answer`);
+    logger.log(`   Vobiz hangup webhook : ${base}/vobiz/hangup`);
 
     // ── Connect to MongoDB + validate API keys AFTER binding port ──────────
     // This ensures Railway/K8s health checks pass immediately while the DB

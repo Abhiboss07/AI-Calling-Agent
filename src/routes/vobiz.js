@@ -90,6 +90,18 @@ function xmlEscape(str) {
 const { getPublicBaseUrl } = require('../utils/urlHelper');
 
 // ══════════════════════════════════════════════════════════════════════════════
+// GET HANDLERS — Vobiz validates answer_url with a GET request before calling.
+// Without these, Vobiz rejects the URL as "not valid" before the call even starts.
+// ══════════════════════════════════════════════════════════════════════════════
+router.get('/answer', (req, res) => {
+    res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+});
+
+router.get('/hangup', (req, res) => res.sendStatus(200));
+router.get('/stream-status', (req, res) => res.sendStatus(200));
+router.get('/fallback', (req, res) => res.sendStatus(200));
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ANSWER URL WEBHOOK — THE CRITICAL ENTRY POINT
 // ══════════════════════════════════════════════════════════════════════════════
 //
