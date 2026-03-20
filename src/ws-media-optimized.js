@@ -250,6 +250,9 @@ function getNoiseFloorCap(session) {
 
 function canStartGreeting(session) {
   if (!session) return false;
+  // Outbound calls must start greeting ASAP — delaying risks call drops.
+  // Connection beeps/static should not block the greeting.
+  if (session.direction === 'outbound') return true;
   if (session._audioCodec !== 'l16') return true;
   if (session._l16Endian && session._l16Endian !== 'unknown') return true;
   // Allow fallback after a few probe chunks even if still unresolved.
@@ -977,6 +980,10 @@ async function deliverInstantGreeting(session, ws) {
   session.speechStartedAt = null;
   session.speechChunkCount = 0;
   session.silentChunkCount = 0;
+  // Reset barge-in counters — pre-greeting line noise must not trigger
+  // an immediate interrupt once the greeting starts playing.
+  session.interruptVoiceChunks = 0;
+  session._bargeInDetectMs = 0;
 
   const cacheKey = `${session.language}:${session.direction}`;
   const cached = greetingCache.get(cacheKey);

@@ -55,7 +55,9 @@ function validateVobizSignature(req, res, next) {
 
     // HMAC-SHA256 verification using auth token
     try {
-        const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+        // Use public base URL (handles proxies like Railway/ngrok/Nginx)
+        // so the reconstructed URL matches what Vobiz actually called.
+        const url = `${getPublicBaseUrl(req)}${req.originalUrl}`;
         const expectedSig = crypto
             .createHmac('sha256', config.vobiz.authToken)
             .update(url)
@@ -96,7 +98,7 @@ const { getPublicBaseUrl } = require('../utils/urlHelper');
 router.get('/answer', (req, res) => {
     // GET is only for Vobiz URL validation — actual webhook is POST
     const base = getPublicBaseUrl(req);
-    const wsUrl = `${base.replace(/^http/i, 'ws')}/stream`;
+    const wsUrl = `${base.replace(/^https?/i, 'wss')}/stream`;
     res.type('text/plain').send(
         `[AI Calling Agent] Vobiz answer webhook is active (POST only)\nWebSocket endpoint: ${wsUrl}\nSend POST requests from Vobiz to this URL.`
     );
@@ -163,7 +165,9 @@ router.post('/answer', webhookRateLimit(60000, 100), validateVobizSignature, asy
     // call alive. Audio is sent back through the same WebSocket.
     const publicBaseUrl = getPublicBaseUrl(req);
     const statusUrl = `${publicBaseUrl}/vobiz/stream-status`;
-    const streamUrl = `${publicBaseUrl.replace(/^http/i, 'ws')}/stream`;
+    // Always use wss:// for the WebSocket URL — Vobiz requires secure connections
+    // and proxies may report http even when the public endpoint is https.
+    const streamUrl = `${publicBaseUrl.replace(/^https?/i, 'wss')}/stream`;
 
     const streamQuery = [
         `callUuid=${encodeURIComponent(String(callUuid))}`,
