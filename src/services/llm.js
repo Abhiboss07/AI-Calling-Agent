@@ -165,34 +165,34 @@ function classifyAvailability(text = '') {
 // ── Response variation pools (3–5 per key) ────────────────────────────────
 const PHRASE_POOLS = {
   'en-IN': {
-    availabilityReask: ['Is this a good time to talk for one minute?', 'Do you have a quick minute to chat?', 'Can I take just 60 seconds of your time?', 'Is now a convenient time for a brief conversation?'],
-    availabilityYes: ['Great, thank you. Are you looking to buy, rent, or invest in property?', 'Wonderful! Are you interested in buying, renting, or investing?', 'Perfect. Are you looking to buy, rent, or invest?', 'Excellent! Buying, renting, or investing — what brings you here?'],
-    availabilityNo: ['No problem at all. What time works better for a quick callback?', 'Of course. When would be a good time to call you back?', 'Absolutely, no worries. What is a convenient callback time?', 'Sure! When can I reach you for a quick chat?'],
-    rescheduleAsk: ['Sure. Please share a convenient time for the callback.', 'Of course. What time works best for you?', 'No problem — when would you like me to call back?', 'Absolutely. What is a good time for you?'],
-    rescheduleThanks: ['Perfect, noted! I will call you at that time. Have a great day!', 'Wonderful — I have noted it. Speak to you then. Goodbye!', 'Great, I will call you back then. Thank you. Bye!', 'Noted! We will connect then. Take care. Goodbye!'],
-    inboundAssist: ['Thank you for calling. How may I help you today?', 'Thanks for reaching out. How can I assist you?', 'Hello, thank you for calling. What can I help you with?', 'Hi there, thanks for calling. How may I be of help?'],
-    audioCheck: ['Yes, I can hear you clearly. Please go ahead.', 'Absolutely, the line is clear. Do continue.', 'Yes, loud and clear! Please go on.', 'Yes, I can hear you well. Please proceed.'],
-    close: ['Thank you for your time. Have a wonderful day. Goodbye!', 'It was a pleasure speaking with you. Take care. Goodbye!', 'Thank you! Hope to connect soon. Have a great day!', 'Thanks for your time. Wishing you a great day. Bye!']
+    availabilityReask: ['Is now a good time to chat for a minute?', 'Do you have a quick moment for a brief update?', 'May I take just sixty seconds of your time?', 'Is this a convenient time for a short conversation?'],
+    availabilityYes: ['Excellent. Are you looking to buy, rent, or invest in property?', 'Great to hear. Are you interested in buying, renting, or perhaps an investment?', 'Perfect. What can I help you with today: buying, renting, or investing?', 'Wonderful! What brings you to us today — are you looking to buy, rent, or invest?'],
+    availabilityNo: ['No problem at all. What is a better time to give you a quick callback?', 'Understood. When would be a more convenient time to reach you?', 'I completely understand. When should I call you back for a quick talk?', 'Of course. What time works best for a follow-up call?'],
+    rescheduleAsk: ['Sure thing. Please let me know a convenient time for the callback.', 'Of course. What time works best for you?', 'No worries at all — when would you like me to call you back?', 'Absolutely. Just let me know a good time for you.'],
+    rescheduleThanks: ['Perfect, I\'ve noted that down! I will call you then. Have a great day!', 'Wonderful — I have scheduled that. Speak to you soon. Goodbye!', 'Great, I will connect with you at that time. Thank you. Bye!', 'Noted! We will talk then. Take care and have a wonderful day!'],
+    inboundAssist: ['Thank you for calling {{company_name}}. How may I assist you today?', 'Thanks for reaching out! How can I help you with your property search?', 'Hello, thank you for calling. What can I do for you today?', 'Hi there! How can I be of help with your real estate needs today?'],
+    audioCheck: ['Yes, I can hear you perfectly. Please go ahead.', 'Absolutely, the line is clear. Do continue.', 'Yes, loud and clear! Please proceed.', 'Yes, I can hear you well. Please go on.'],
+    close: ['Thank you for your time. Have a wonderful day. Goodbye!', 'It was a pleasure speaking with you. Take care and goodbye!', 'Thank you! I look forward to connecting soon. Have a great day!', 'Thanks for your time today. Wishing you a wonderful day. Bye!']
   },
   'hinglish': {
-    availabilityReask: ['Kya abhi 1 minute baat karna convenient hai?', 'Kya aap abhi ek minute de sakte hain?', 'Abhi thoda time hai baat karne ka?', 'Kya abhi baat karna theek rahega?'],
-    availabilityYes: ['Great, thank you. Aap buy, rent, ya invest ke liye dekh rahe hain?', 'Wonderful! Kharidna, rent karna, ya invest karna — kya soch rahe hain?', 'Perfect! Buy, rent, ya invest — kya interest hai?', 'Excellent! Property mein kya plan hai — buy, rent, ya investment?'],
-    availabilityNo: ['No problem. Callback ke liye kaunsa time better rahega?', 'Bilkul theek hai. Kab call karun aapko?', 'Koi baat nahi. Callback ke liye suitable time batayein.', 'Sure ji. Kab available rahenge?'],
-    rescheduleAsk: ['Sure, callback ka suitable time bata dijiye.', 'Theek hai, kab call karun?', 'Ji, kaunsa waqt sahi rahega aapke liye?', 'No problem, convenient time batao please.'],
-    rescheduleThanks: ['Perfect, note kar liya! Ussi time call karenge. Goodbye!', 'Great ji! Aapka time note kar liya. Tab baat karte hain.', 'Bilkul, hum ussi time connect karenge. Dhanyavaad!', 'Noted! Tab baat karte hain. Take care. Bye!'],
-    inboundAssist: ['Thank you for calling. Aaj main aapki kaise help kar sakti hoon?', 'Hello ji, call karne ka shukriya. Kya madad kar sakti hoon?', 'Hi! Aapki kaise help kar sakti hoon?', 'Thanks for calling. Kya main aapki help kar sakti hoon?'],
-    audioCheck: ['Ji, main aapko clear sun pa rahi hoon. Please boliye.', 'Haan ji, aawaz bilkul clear hai. Boliye.', 'Yes, main sun pa rahi hoon. Aage boliye.', 'Ji, sab clear hai. Please continue karein.'],
-    close: ['Thank you ji. Goodbye!', 'Bahut shukriya aapka. Alvida!', 'Thank you for your time ji. Bye!', 'Dhanyavaad! Aapka din achha rahe. Goodbye!']
+    availabilityReask: ['Kya abhi ek minute baat karna convenient rahega?', 'Kya aapke paas abhi ek minute hai?', 'Abhi thoda time hai baat karne ka?', 'Kya abhi baat karna theek rahega?'],
+    availabilityYes: ['Great, thank you. Aap buy, rent, ya invest ke liye dekh rahe hain?', 'Wonderful! Property mein aapka kya plan hai — buy, rent, ya investment?', 'Perfect! Buy, rent, ya invest — kya interest hai aapka?', 'Excellent! Aap property kharidna chahte hain, rent pe lena, ya invest karna?'],
+    availabilityNo: ['Koi baat nahi. Callback ke liye kaunsa waqt better rahega?', 'Bilkul theek hai. Kab call karun aapko?', 'I understand. Callback ke liye suitable time batayein please.', 'Sure ji. Kab available rahenge aap?'],
+    rescheduleAsk: ['Sure, callback ka suitable time bata dijiye.', 'Theek hai, kab call karun?', 'Ji, kaunsa waqt sahi rahega aapke liye?', 'No problem, convenient time bata do please.'],
+    rescheduleThanks: ['Perfect, maine note kar liya! Ussi time call karenge. Goodbye!', 'Great ji! Aapka time note kar liya. Tab baat karte hain. Bye!', 'Bilkul, hum ussi waqt connect karenge. Dhanyavaad!', 'Noted! Tab baat karte hain. Take care. Bye!'],
+    inboundAssist: ['Thank you for calling! Aaj main aapki kaise help kar sakti hoon?', 'Hello ji, call karne ke liye shukriya. Kya madad kar sakti hoon aapki?', 'Hi! Property search mein aapki kaise help kar sakti hoon?', 'Thanks for calling {{company_name}}. Kya main aapki help kar sakti hoon?'],
+    audioCheck: ['Ji, main aapko bilkul clear sun pa rahi hoon. Boliye.', 'Haan ji, aawaz bilkul clear hai. Please continue.', 'Yes, main sun pa rahi hoon. Aage boliye.', 'Ji, sab clear hai. Please procedure karein.'],
+    close: ['Thank you ji. Aapka din shubh ho. Goodbye!', 'Bahut shukriya aapka. Alvida!', 'Thank you for your time ji. Bye!', 'Dhanyavaad! Aapka din achha rahe. Goodbye!']
   },
   'hi-IN': {
-    availabilityReask: ['क्या अभी एक मिनट बात करना ठीक रहेगा?', 'क्या आपके पास अभी एक मिनट का समय है?', 'क्या अभी बात करना सुविधाजनक है?', 'क्या मैं एक मिनट का समय ले सकती हूँ?'],
-    availabilityYes: ['बहुत अच्छा। क्या आप खरीदना, किराए पर लेना, या निवेश करना चाहते हैं?', 'शानदार! खरीदना है, किराया चाहिए, या निवेश करना है?', 'बढ़िया! क्या प्लान है — खरीदना, किराया, या निवेश?', 'परफेक्ट! आपकी क्या जरूरत है — खरीदना, किराया, या निवेश?'],
-    availabilityNo: ['कोई बात नहीं। कृपया बताइए, दोबारा कॉल का सही समय क्या रहेगा?', 'बिल्कुल ठीक है। कब कॉल करूँ आपको?', 'समझ गई। कब वापस कॉल करें?', 'ठीक है। कौन सा समय सही रहेगा?'],
-    rescheduleAsk: ['ठीक है, कृपया कॉल बैक का सही समय बताइए।', 'जी, कब कॉल करूँ आपको?', 'कोई बात नहीं। आपके लिए सुविधाजनक समय बताइए।', 'बताइए, कब बात करना ठीक रहेगा?'],
-    rescheduleThanks: ['बहुत धन्यवाद। हम उसी समय कॉल करेंगे। नमस्ते।', 'बढ़िया! नोट कर लिया। उसी समय बात करते हैं।', 'धन्यवाद! उस समय ज़रूर कॉल करेंगे। अलविदा!', 'परफेक्ट! उस वक्त कनेक्ट करते हैं। शुभ दिन!'],
-    inboundAssist: ['धन्यवाद। मैं आपकी कैसे मदद कर सकती हूँ?', 'नमस्ते! कॉल करने का धन्यवाद। कैसे मदद करूँ?', 'हेलो! मैं आपकी क्या सहायता कर सकती हूँ?', 'जी नमस्ते। आज आपके लिए क्या कर सकती हूँ?'],
-    audioCheck: ['जी, आपकी आवाज साफ आ रही है। बताइए।', 'हाँ, बिल्कुल सुन पा रही हूँ। बोलिए।', 'जी, सब ठीक है। आगे बताइए।', 'हाँ, आवाज़ क्लियर है। जारी रखिए।'],
-    close: ['धन्यवाद। नमस्ते।', 'बहुत धन्यवाद। अलविदा!', 'आपका समय देने का शुक्रिया। शुभ दिन!', 'धन्यवाद जी! नमस्ते।']
+    availabilityReask: ['क्या अभी एक मिनट बात करना सुविधाजनक रहेगा?', 'क्या आपके पास अभी एक मिनट का समय है?', 'क्या अभी बात करना ठीक रहेगा?', 'क्या मैं आपका एक मिनट ले सकती हूँ?'],
+    availabilityYes: ['बहुत अच्छा। क्या आप प्रॉपर्टी खरीदना, किराए पर लेना, या निवेश करना चाहते हैं?', 'शानदार! खरीदना है, किराया चाहिए, या निवेश करना है?', 'बढ़िया! आपकी क्या ज़रूरत है — खरीदना, किराया, या निवेश?', 'परफेक्ट! क्या आप खरीदना, किराए पर लेना, या निवेश करना चाहते हैं?'],
+    availabilityNo: ['कोई बात नहीं। कृपया बताइए, दोबारा कॉल का सही समय क्या रहेगा?', 'बिल्कुल ठीक है। कब कॉल करना सही रहेगा?', 'समझ गई। मुझे कब वापस कॉल करना चाहिए?', 'ठीक है। कौन सा समय आपके लिए सही रहेगा?'],
+    rescheduleAsk: ['ठीक है, कृपया कॉल बैक का सही समय बताइए।', 'जी, कब कॉल करना सही रहेगा?', 'कोई बात नहीं। आपके लिए सुविधाजनक समय क्या है?', 'बताइए, कब बात करना ठीक रहेगा?'],
+    rescheduleThanks: ['बहुत धन्यवाद। हम उसी समय कॉल करेंगे। नमस्ते।', 'बढ़िया! मैंने नोट कर लिया है। उसी समय बात करते हैं।', 'धन्यवाद! उस समय ज़रूर कॉल करेंगे। अलविदा!', 'परफेक्ट! उस वक़्त कनेक्ट करते हैं। आपका दिन शुभ हो!'],
+    inboundAssist: ['धन्यवाद। मैं आपकी कैसे मदद कर सकती हूँ?', 'नमस्ते! {{company_name}} में कॉल करने के लिए धन्यवाद। कैसे मदद करूँ?', 'हेलो! मैं आपकी क्या सहायता कर सकती हूँ?', 'जी नमस्ते। आज आपके लिए क्या मदद कर सकती हूँ?'],
+    audioCheck: ['जी, आपकी आवाज़ साफ़ आ रही है। कृपया बताइए।', 'हाँ, बिल्कुल सुन पा रही हूँ। बोलिए।', 'जी, सब ठीक है। आगे बताइए।', 'हाँ, आवाज़ साफ़ है। जारी रखिए।'],
+    close: ['धन्यवाद। नमस्ते।', 'आपका समय देने के लिए बहुत धन्यवाद। अलविदा!', 'शुक्रिया! उम्मीद है जल्द बात होगी। शुभ दिन!', 'धन्यवाद जी! नमस्ते।']
   }
 };
 
@@ -276,7 +276,7 @@ function deterministicTurnReply(step, languageCode, transcript, callDirection, c
     if (intent === 'buy') {
       return {
         ...FALLBACK_RESPONSE,
-        speak: 'Great. What type of property are you considering: apartment, villa, or plot?',
+        speak: 'Excellent. What type of property are you looking for: an apartment, villa, or perhaps a plot?',
         action: 'collect',
         nextStep: 'property_type',
         data: { intent: 'buy' },
@@ -286,7 +286,7 @@ function deterministicTurnReply(step, languageCode, transcript, callDirection, c
     if (intent === 'rent') {
       return {
         ...FALLBACK_RESPONSE,
-        speak: 'Understood. Which area and budget range are you considering for rent?',
+        speak: 'Understood. What is your preferred location and your monthly budget for rent?',
         action: 'collect',
         nextStep: 'location_budget',
         data: { intent: 'rent' },
@@ -296,7 +296,7 @@ function deterministicTurnReply(step, languageCode, transcript, callDirection, c
     if (intent === 'invest') {
       return {
         ...FALLBACK_RESPONSE,
-        speak: 'Nice. Are you looking for short-term returns or long-term appreciation?',
+        speak: 'Nice. Are you looking for steady rental yields or long-term capital appreciation?',
         action: 'collect',
         nextStep: 'investment_timeline',
         data: { intent: 'invest' },

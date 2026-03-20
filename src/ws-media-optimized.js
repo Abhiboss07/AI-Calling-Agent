@@ -489,22 +489,25 @@ async function prewarmCriticalGreetings() {
   _prewarmInitialized = true;
 
   const greetings = [
-    { lang: 'en-IN', dir: 'outbound', text: `Hello, this is ${config.agentName} from ${config.companyName}. Is this a good time to talk?` },
-    { lang: 'en-IN', dir: 'inbound', text: `Hello, thank you for calling ${config.companyName}. How may I assist you today?` },
-    { lang: 'hinglish', dir: 'outbound', text: `Hello, main ${config.agentName} ${config.companyName} se bol rahi hoon. Kya abhi baat karne ka sahi time hai?` },
-    { lang: 'hinglish', dir: 'inbound', text: `Hello, ${config.companyName} ko call karne ke liye thanks. Main aapki kaise help kar sakti hoon?` },
-    { lang: 'hi-IN', dir: 'outbound', text: `नमस्ते, मैं ${config.companyName} से ${config.agentName} बोल रही हूँ। क्या अभी बात करने का सही समय है?` },
-    { lang: 'hi-IN', dir: 'inbound', text: `नमस्ते, ${config.companyName} में कॉल करने के लिए धन्यवाद। मैं आपकी कैसे मदद कर सकती हूँ?` }
+    { lang: 'en-IN', dir: 'outbound', text: `Hello, I'm {{agent_name}} from {{company_name}}. Am I speaking with the right person? Is this a good time to talk?` },
+    { lang: 'en-IN', dir: 'inbound', text: `Hello, thank you for calling {{company_name}}. How may I assist you today?` },
+    { lang: 'hinglish', dir: 'outbound', text: `Hello, main {{agent_name}} {{company_name}} se bol rahi hoon. Kya abhi baat karne ka sahi time hai?` },
+    { lang: 'hinglish', dir: 'inbound', text: `Hello, {{company_name}} ko call karne ke liye thanks. Main aapki kaise help kar sakti hoon?` },
+    { lang: 'hi-IN', dir: 'outbound', text: `नमस्ते, मैं {{company_name}} से {{agent_name}} बोल रही हूँ। क्या अभी बात करने का सही समय है?` },
+    { lang: 'hi-IN', dir: 'inbound', text: `नमस्ते, {{company_name}} में कॉल करने के लिए धन्यवाद। मैं आपकी कैसे मदद कर सकती हूँ?` }
   ];
 
   // Pre-generate all greetings in parallel
   const greetingPromises = greetings.map(async ({ lang, dir, text }) => {
     try {
       const key = `${lang}:${dir}`;
-      const result = await tts.synthesizeRaw(text, null, lang);
+      const formattedText = text
+        .replace(/\{\{agent_name\}\}/g, config.agentName)
+        .replace(/\{\{company_name\}\}/g, config.companyName);
+      const result = await tts.synthesizeRaw(formattedText, null, lang);
       if (result?.mulawBuffer) {
         greetingCache.set(key, {
-          text,
+          text: formattedText,
           buffer: result.mulawBuffer,
           timestamp: Date.now()
         });
@@ -521,35 +524,35 @@ async function prewarmCriticalGreetings() {
   // These are the fixed phrases returned by deterministicTurnReply() in llm.js
   const replyPhrases = [
     // en-IN phrases
-    { lang: 'en-IN', text: 'Is this a good time to talk for one minute?' },
-    { lang: 'en-IN', text: 'Great, thank you. Are you looking to buy, rent, or invest?' },
-    { lang: 'en-IN', text: 'No problem. What is a better time for a quick callback?' },
-    { lang: 'en-IN', text: 'Sure. Please share a suitable time for callback.' },
-    { lang: 'en-IN', text: 'Perfect, thank you. We will call you at that time. Goodbye.' },
-    { lang: 'en-IN', text: 'Thank you for calling. How may I help you today?' },
-    { lang: 'en-IN', text: 'Yes, I can hear you clearly. Please go ahead.' },
-    { lang: 'en-IN', text: 'Thank you for your time. Goodbye.' },
+    { lang: 'en-IN', text: 'Is now a good time to chat for a minute?' },
+    { lang: 'en-IN', text: 'Excellent. Are you looking to buy, rent, or invest in property?' },
+    { lang: 'en-IN', text: 'No problem at all. What is a better time to give you a quick callback?' },
+    { lang: 'en-IN', text: 'Sure thing. Please let me know a convenient time for the callback.' },
+    { lang: 'en-IN', text: 'Perfect, I\'ve noted that down! I will call you then. Have a great day!' },
+    { lang: 'en-IN', text: 'Thank you for calling {{company_name}}. How may I assist you today?' },
+    { lang: 'en-IN', text: 'Yes, I can hear you perfectly. Please go ahead.' },
+    { lang: 'en-IN', text: 'Thank you for your time. Have a wonderful day. Goodbye!' },
     // Hardcoded purpose-step replies (English only)
     { lang: 'en-IN', text: 'Great. What type of property are you considering: apartment, villa, or plot?' },
     { lang: 'en-IN', text: 'Understood. Which area and budget range are you considering for rent?' },
     { lang: 'en-IN', text: 'Nice. Are you looking for short-term returns or long-term appreciation?' },
     // Hinglish phrases
-    { lang: 'hinglish', text: 'Kya abhi 1 minute baat karna convenient hai?' },
+    { lang: 'hinglish', text: 'Kya abhi ek minute baat karna convenient rahega?' },
     { lang: 'hinglish', text: 'Great, thank you. Aap buy, rent, ya invest ke liye dekh rahe hain?' },
-    { lang: 'hinglish', text: 'No problem. Callback ke liye kaunsa time better rahega?' },
+    { lang: 'hinglish', text: 'Koi baat nahi. Callback ke liye kaunsa waqt better rahega?' },
     { lang: 'hinglish', text: 'Sure, callback ka suitable time bata dijiye.' },
-    { lang: 'hinglish', text: 'Perfect, thank you. Hum ussi time call karenge. Goodbye.' },
-    { lang: 'hinglish', text: 'Thank you for calling. Aaj main aapki kaise help kar sakti hoon?' },
-    { lang: 'hinglish', text: 'Ji, main aapko clear sun pa rahi hoon. Please boliye.' },
-    { lang: 'hinglish', text: 'Thank you ji. Goodbye.' },
+    { lang: 'hinglish', text: 'Perfect, maine note kar liya! Ussi time call karenge. Goodbye!' },
+    { lang: 'hinglish', text: 'Thank you for calling! Aaj main aapki kaise help kar sakti hoon?' },
+    { lang: 'hinglish', text: 'Ji, main aapko bilkul clear sun pa rahi hoon. Boliye.' },
+    { lang: 'hinglish', text: 'Thank you ji. Aapka din shubh ho. Goodbye!' },
     // hi-IN phrases
-    { lang: 'hi-IN', text: 'क्या अभी एक मिनट बात करना ठीक रहेगा?' },
-    { lang: 'hi-IN', text: 'बहुत अच्छा। क्या आप खरीदना, किराए पर लेना, या निवेश करना चाहते हैं?' },
+    { lang: 'hi-IN', text: 'क्या अभी एक मिनट बात करना सुविधाजनक रहेगा?' },
+    { lang: 'hi-IN', text: 'बहुत अच्छा। क्या आप प्रॉपर्टी खरीदना, किराए पर लेना, या निवेश करना चाहते हैं?' },
     { lang: 'hi-IN', text: 'कोई बात नहीं। कृपया बताइए, दोबारा कॉल का सही समय क्या रहेगा?' },
     { lang: 'hi-IN', text: 'ठीक है, कृपया कॉल बैक का सही समय बताइए।' },
     { lang: 'hi-IN', text: 'बहुत धन्यवाद। हम उसी समय कॉल करेंगे। नमस्ते।' },
     { lang: 'hi-IN', text: 'धन्यवाद। मैं आपकी कैसे मदद कर सकती हूँ?' },
-    { lang: 'hi-IN', text: 'जी, आपकी आवाज साफ आ रही है। बताइए।' },
+    { lang: 'hi-IN', text: 'जी, आपकी आवाज़ साफ़ आ रही है। कृपया बताइए।' },
     { lang: 'hi-IN', text: 'धन्यवाद। नमस्ते।' },
     // Fallback response
     { lang: 'en-IN', text: 'I apologize, could you please repeat that?' }
@@ -557,8 +560,11 @@ async function prewarmCriticalGreetings() {
 
   const phrasePromises = replyPhrases.map(async ({ lang, text }) => {
     try {
-      await tts.synthesizeRaw(text, null, lang);
-      logger.debug('Prewarmed reply phrase', { lang, text: text.substring(0, 40) });
+      const formattedText = text
+        .replace(/\{\{agent_name\}\}/g, config.agentName)
+        .replace(/\{\{company_name\}\}/g, config.companyName);
+      await tts.synthesizeRaw(formattedText, null, lang);
+      logger.debug('Prewarmed reply phrase', { lang, text: formattedText.substring(0, 40) });
     } catch (e) {
       logger.warn('Failed to prewarm reply phrase', { lang, error: e.message });
     }

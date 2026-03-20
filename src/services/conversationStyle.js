@@ -60,24 +60,24 @@ function isFastSpeaker(callSid) {
 // ── Interruption recovery ─────────────────────────────────────────────────────
 const INTERRUPT_RECOVERY = {
   'en-IN': [
-    'Okay, go ahead.',
-    'Sure, please continue.',
-    'Sorry about that — please go on.',
-    "Of course, I'm listening.",
-    'Right, please continue.'
+    'My apologies, please go ahead.',
+    'Understood, please continue.',
+    'Sorry for the interruption — do go on.',
+    'Of course, I\'m listening.',
+    'Right, please proceed.'
   ],
   'hinglish': [
-    'Okay, boliye.',
-    'Haan, please continue.',
-    'Sorry, aap boliye.',
-    'Zaroor, main sun raha hoon.',
-    'Bilkul, bolte rahiye.'
+    'Sorry, please boliye.',
+    'Haan, aap continue karein.',
+    'Oh, sorry. Aap boliye please.',
+    'Bilkul, main sun raha hoon. Boliye.',
+    'Ji, aage boliye.'
   ],
   'hi-IN': [
-    'हाँ, बोलिए।',
-    'ज़रूर, जारी रखिए।',
-    'माफ़ कीजिए, आप बोलिए।',
-    'बिल्कुल, सुन रहा हूँ।'
+    'क्षमा करें, आप बोलिए।',
+    'जी, जारी रखिए।',
+    'माफ़ कीजिए, मैं सुन रही हूँ।',
+    'बिल्कुल, बोलिए।'
   ]
 };
 
@@ -97,35 +97,34 @@ function getInterruptRecovery(callSid, language) {
 // 3-5 variants per key; cycling ensures no immediate repetition without randomness
 const VARIANTS = {
   ack_yes: {
-    'en-IN':    ['Great!', 'Perfect.', 'Wonderful!', 'Excellent.', 'Fantastic!'],
-    'hinglish': ['Bahut acha!', 'Perfect!', 'Shandaar!', 'Behtareen!', 'Excellent!'],
-    'hi-IN':    ['बहुत अच्छा!', 'बढ़िया!', 'शानदार!', 'उत्तम!']
+    'en-IN':    ['Excellent.', 'Perfect.', 'Wonderful.', 'That sounds great.', 'Fantastic.'],
+    'hinglish': ['Bahut badhiya.', 'Perfect!', 'Shandaar!', 'Great hai.', 'Excellent.'],
+    'hi-IN':    ['बहुत बढ़िया!', 'बेहतरीन!', 'शानदार!', 'उत्तम!']
   },
   ack_understood: {
-    'en-IN':    ['Got it.', 'Understood.', 'Okay, noted.', 'Right, noted.', 'Alright.'],
-    'hinglish': ['Samajh gaya.', 'Bilkul, noted.', 'Theek hai.', 'Okay, clear hai.', 'Samjha.'],
-    'hi-IN':    ['समझ गया।', 'बिल्कुल।', 'ठीक है।', 'जी, समझा।']
+    'en-IN':    ['Got it.', 'Understood.', 'I see, noted.', 'Right, I\'ve got that.', 'Makes sense.'],
+    'hinglish': ['Samajh gaya.', 'Bilkul, noted.', 'Theek hai, clear hai.', 'Okay, got it.', 'Samajh gaya hoon.'],
+    'hi-IN':    ['जी, समझ गया।', 'बिल्कुल।', 'ठीक है।', 'जी, स्पष्ट है।']
   },
   ack_interesting: {
-    'en-IN':    ["Hmm, that's interesting.", 'Makes sense.', "That's good to know.", 'I see.', 'Fair enough.'],
-    'hinglish': ['Hmm, interesting.', 'Makes sense.', 'Achha, theek hai.', 'Fair point.', 'Samjha.'],
-    'hi-IN':    ['हाँ, समझा।', 'बात सही है।', 'ठीक है।', 'अच्छा।']
+    'en-IN':    ['That\'s interesting.', 'I see your point.', 'That makes sense.', 'I understand where you\'re coming from.', 'Fair enough.'],
+    'hinglish': ['Hmm, interesting choice.', 'Makes sense.', 'Achha, I see.', 'Fair point.', 'Samajh sakta hoon.'],
+    'hi-IN':    ['हाँ, दिलचस्प बात है।', 'आपकी बात सही है।', 'जी, समझ में आ रहा है।', 'अच्छा।']
   },
   ack_thinking: {
-    'en-IN':    ['Let me check…', 'Just a moment…', 'Sure, let me see…', 'One second…', 'Hmm, let me think…'],
-    'hinglish': ['Dekhte hain…', 'Ek second…', 'Sure, check karta hoon…', 'Hmm…', 'Ruko zara…'],
-    'hi-IN':    ['देखते हैं…', 'एक सेकंड…', 'सोच रहा हूँ…', 'हाँ…']
+    'en-IN':    ['Let me quickly check…', 'Just a moment while I look into that…', 'Sure, let me verify…', 'One second, let me check our records…', 'Hmm, interesting, let me see…'],
+    'hinglish': ['Ek minute, main check karta hoon…', 'Sure, let me see…', 'Hmm, dekhna padega…', 'Ruko zara, check karta hoon…', 'Ek second…'],
+    'hi-IN':    ['एक क्षण, मैं देखता हूँ…', 'मैं अभी चेक करता हूँ…', 'ज़रा सोचिए…', 'जी, एक सेकंड…']
   },
   ack_empathy: {
-    'en-IN':    ['I completely understand.', 'That makes total sense.', 'I hear you.', 'Totally fair.'],
-    'hinglish': ['Bilkul samajh sakta hoon.', 'Main samajhta hoon.', 'Theek hai, fair point.'],
-    'hi-IN':    ['मैं समझ सकता हूँ।', 'बिल्कुल ठीक है।', 'जी, समझा।']
+    'en-IN':    ['I completely understand.', 'That makes total sense.', 'I hear you, and I agree.', 'Absolutely fair point.'],
+    'hinglish': ['Bilkul samajh sakta hoon.', 'Sahi baat hai.', 'Main aapki baat se sehmat hoon.', 'Ji, bilkul fair point hai.'],
+    'hi-IN':    ['मैं पूरी तरह से समझ सकता हूँ।', 'आपकी बात बिल्कुल सही है।', 'जी, मैं समझ रहा हूँ।']
   },
-  // Hinglish-specific — used when mixing languages
   hinglish_transition: {
-    'hinglish': ['Toh', 'Aur batao', 'Theek hai toh', 'Achha', 'Acha toh'],
-    'en-IN':    ['So', 'Also', 'And', 'Now'],
-    'hi-IN':    ['तो', 'और', 'अच्छा', 'अब']
+    'hinglish': ['Toh', 'Aur batayein', 'Theek hai toh', 'Achha, toh phir', 'Sahi hai'],
+    'en-IN':    ['So', 'Also', 'Moreover', 'Now'],
+    'hi-IN':    ['तो', 'इसके अलावा', 'अच्छा', 'अब']
   }
 };
 
