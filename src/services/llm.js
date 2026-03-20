@@ -360,7 +360,7 @@ function trimToMaxWords(text, maxWords = 20) {
 }
 
 // ── Hard LLM timeout (Priority 6) ────────────────────────────────────────────
-const LLM_HARD_TIMEOUT_MS = 580; // Hard limit: reject if no response within 580ms
+const LLM_HARD_TIMEOUT_MS = 5000; // Hard limit: reject if no response within 5000ms
 
 function withLlmTimeout(promise, callSid, label = 'LLM') {
   return Promise.race([
@@ -486,7 +486,7 @@ async function generateReply({ callState, script, lastTranscript, customerName, 
       `LATEST: "${lastTranscript || '(silence)'}"`,
       `CALL STATE: ${JSON.stringify(callState || {})}`,
       '',
-      'Generate the next agent response in the required JSON format.'
+      'Generate the next agent response in the required JSON format. IMPORTANT: You MUST put the "speak" field first in the JSON object to minimize latency.'
     ].join('\n');
 
     const systemMsg = { role: 'system', content: systemContent };
@@ -694,7 +694,7 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
       `LATEST: "${lastTranscript || '(silence)'}"`,
       `CALL STATE: ${JSON.stringify(callState || {})}`,
       '',
-      'Generate the next agent response in the required JSON format.'
+      'Generate the next agent response in the required JSON format. IMPORTANT: You MUST put the "speak" field first in the JSON object to minimize latency.'
     ].join('\n');
 
     const systemMsg = { role: 'system', content: systemContent };

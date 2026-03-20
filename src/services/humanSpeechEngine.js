@@ -142,7 +142,7 @@ function qualityCheck(text, { fastMode = false } = {}) {
   if (!result) return { text: result, issues: ['empty'] };
 
   const wordCount = result.split(/\s+/).filter(Boolean).length;
-  const maxWords = fastMode ? 10 : 20;
+  const maxWords = fastMode ? 25 : 35;
 
   if (wordCount > maxWords) {
     issues.push(`too_long:${wordCount}`);

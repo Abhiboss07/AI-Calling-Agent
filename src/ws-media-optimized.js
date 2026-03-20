@@ -2040,10 +2040,10 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
     ? fillerEngine.start(session, ws, sendAudioThroughStream, tts)
     : null;
 
-  // ── P2: Build stream with 700ms first-token timeout ──────────────────────
-  // If LLM is silent for > LLM_HARD_TIMEOUT_MS, the stream iterator returns done
+  // ── P2: Build stream with 5s first-token timeout ──────────────────────
+  // If LLM is silent for > LLM_STREAM_TIMEOUT_MS, the stream iterator returns done
   // and the pipeline falls through to the fallback block below.
-  const LLM_STREAM_TIMEOUT_MS = 700;
+  const LLM_STREAM_TIMEOUT_MS = 5000;
   const rawStream = speculativeReply
     ? _singleReplyToStream(speculativeReply)
     : llm.generateReplyStream({
@@ -2101,9 +2101,12 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
   let _isFirstSentence = true;
   const _step = callState.step || '';
 
-  // Hard latency deadline: if we've used ≥700ms before first TTS chunk, activate
-  // emergency fast mode on remaining sentences (trim to 8 words, skip fillers)
-  const HARD_LATENCY_DEADLINE_MS = 700;
+  // ── Pipelined TTS state: overlap sentence N+1 synthesis with sentence N playback ──
+  let _pendingPlayback = null; // Promise from sendAudioThroughStream for the previous sentence
+
+  // Hard latency deadline: if we've used ≥2000ms before first TTS chunk, activate
+  // emergency fast mode on remaining sentences (trim to 20 words, skip fillers)
+  const HARD_LATENCY_DEADLINE_MS = 2000;
   let _hardLatencyTripped = (Date.now() - llmStart) >= HARD_LATENCY_DEADLINE_MS;
 
   // Process LLM in streaming mode
@@ -2119,7 +2122,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
       let sentence = String(chunk.text || '').trim();
       if (!sentence) continue;
 
-      // ── Check hard latency deadline (>700ms elapsed = emergency trim) ──
+      // ── Check hard latency deadline (emergency trim if exceeded) ──
       if (!_hardLatencyTripped && (Date.now() - llmStart) >= HARD_LATENCY_DEADLINE_MS) {
         _hardLatencyTripped = true;
         logger.warn(`[LATENCY] Hard deadline hit at ${Date.now() - llmStart}ms — emergency fast mode`, { callSid: session.callSid });
@@ -2142,10 +2145,10 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
       if (processed.addedFiller) _fillerUsed = true;
       _isFirstSentence = false;
 
-      // Emergency trim if hard latency tripped and sentence is still long
+      // Emergency trim if hard latency tripped and sentence is still very long
       if (_hardLatencyTripped) {
         const words = sentence.split(/\s+/);
-        if (words.length > 10) sentence = words.slice(0, 10).join(' ') + '.';
+        if (words.length > 25) sentence = words.slice(0, 25).join(' ') + '.';
       }
 
       if (firstChunkMs === 0) {
@@ -2153,9 +2156,9 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
         logger.debug(`Time to first sentence: ${firstChunkMs}ms`);
 
         // ── Cancel filler — real response is arriving ─────────────────────
-        // Pass clearQueue=true only if filler audio is already playing so we
-        // flush the queue before real audio starts (avoids overlap).
-        if (_fillerHandle) _fillerHandle.cancel(session._fillerPlaying === true);
+        // Always clear the playback queue: even if _fillerPlaying is false,
+        // filler audio may still be queued from a just-finished iteration.
+        if (_fillerHandle) _fillerHandle.cancel(true);
 
         // ── P3: In-stream response validation (similarity-based) ────────────
         // Discard if user said something meaningfully different while LLM was thinking.
@@ -2172,13 +2175,14 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
           }
         }
 
-        // ── P1: Micro-pause — skip when latency already > 700ms or speculative ──
+        // ── P1: Micro-pause — skip when latency already > 800ms or speculative ──
         // Only add thinking pause when response is fast enough that the pause
-        // adds realism without pushing total latency over 1s.
+        // adds realism without pushing total latency too high.
         const elapsedBeforeTts = Date.now() - llmStart;
-        const pauseWouldHelp = !speculativeReply && elapsedBeforeTts < HARD_LATENCY_DEADLINE_MS;
+        const MICRO_PAUSE_THRESHOLD_MS = 800;
+        const pauseWouldHelp = !speculativeReply && elapsedBeforeTts < MICRO_PAUSE_THRESHOLD_MS;
         if (pauseWouldHelp) {
-          const remainingBudget = HARD_LATENCY_DEADLINE_MS - elapsedBeforeTts;
+          const remainingBudget = MICRO_PAUSE_THRESHOLD_MS - elapsedBeforeTts;
           const thinkMs = Math.min(MICRO_PAUSE_MIN_MS + Math.floor(Math.random() * (MICRO_PAUSE_MAX_MS - MICRO_PAUSE_MIN_MS)), remainingBudget);
           if (thinkMs > 50) {
             logger.debug(`[PAUSE] Micro-pause ${thinkMs}ms (elapsed=${elapsedBeforeTts}ms, tone=${session._lastUserTone})`, { callSid: session.callSid });
@@ -2202,6 +2206,7 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
         continue;
       }
 
+      // ── Pipelined TTS: synthesize THIS sentence while previous may still be playing ──
       const ttsStart = Date.now();
       const ttsResult = await withRetry(
         () => tts.synthesizeRaw(sentence, session.callSid, session.language),
@@ -2209,13 +2214,20 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
       );
       ttsLatencyTotal += (Date.now() - ttsStart);
 
+      // Wait for previous sentence to finish playing before starting this one
+      if (_pendingPlayback) {
+        await _pendingPlayback;
+        _pendingPlayback = null;
+      }
+
       if (abortSignal.aborted || pipelineId !== session.lastPipelineId) return;
       if (ttsResult?.mulawBuffer && wsOpen && ws.readyState === 1) {
         // Record outbound AI audio
         if (ttsResult.pcmBuffer) {
           callRecorder.addOutbound(session.callSid, ttsResult.pcmBuffer, Date.now() - session.startTime);
         }
-        await sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
+        // Start playback without awaiting — next sentence's TTS can overlap with this playback
+        _pendingPlayback = sendAudioThroughStream(session, ws, ttsResult.mulawBuffer);
       } else {
         logger.warn('Reply TTS synthesis failed, skipping audio', {
           callSid: session.callSid,
@@ -2226,6 +2238,12 @@ async function processUtterance(session, ws, pcmChunks, pipelineId, abortSignal)
       // Must be the final parsed JSON response returned from the stream 
       finalAction = chunk.action;
     }
+  }
+
+  // ── Drain: wait for last pipelined sentence to finish playing ──────────
+  if (_pendingPlayback) {
+    await _pendingPlayback;
+    _pendingPlayback = null;
   }
 
   // ── P2: LLM stream timeout fallback ─────────────────────────────────────
