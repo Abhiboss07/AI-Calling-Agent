@@ -127,10 +127,13 @@ function start(session, ws, sendAudio, tts) {
   let fillerStartMs = null;
   const startMs = Date.now();
 
-  const timer = setTimeout(async () => {
+  let timer;
+  const playLoop = async () => {
     if (cancelled) return;
     if (session._wsClosed || ws.readyState !== 1) return;
-    if (!session.isPlaying === false && session.playbackQueue?.length > 0) return; // already playing LLM audio
+    
+    // Avoid overlapping with real LLM audio that might have just started
+    if (session.isPlaying && !session._fillerPlaying) return;
 
     const phrase = _getNext(session.language || 'en-IN');
     const buf = await _getBuffer(phrase, session.language || 'en-IN', tts);
@@ -138,20 +141,27 @@ function start(session, ws, sendAudio, tts) {
 
     fillerPhrase = phrase;
     fillerUsed = true;
-    fillerStartMs = Date.now();
+    const currentFillerStart = Date.now();
+    if (!fillerStartMs) fillerStartMs = currentFillerStart;
     session._fillerPlaying = true;
 
     logger.debug(`[FILLER] Playing "${phrase}" (${Date.now() - startMs}ms after STT)`, { callSid: session.callSid });
 
     try {
       await sendAudio(session, ws, buf);
+      // Recurse after a short pause if still not cancelled
+      if (!cancelled) {
+        timer = setTimeout(playLoop, 800); 
+      }
     } catch (err) {
       logger.debug(`[FILLER] Playback error: ${err.message}`);
     } finally {
-      if (fillerStartMs) fillerDurationMs = Date.now() - fillerStartMs;
+      if (currentFillerStart) fillerDurationMs += (Date.now() - currentFillerStart);
       session._fillerPlaying = false;
     }
-  }, FILLER_DELAY_MS);
+  };
+
+  timer = setTimeout(playLoop, FILLER_DELAY_MS);
 
   return {
     /**
