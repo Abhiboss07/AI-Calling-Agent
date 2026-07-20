@@ -738,6 +738,7 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
     let fullJson = '';
     let extractedSpeak = '';
     let isParsingSpeak = false;
+    let speakDone = false;   // once the "speak" value is fully consumed, never re-parse it
     let sentenceBuffer = '';
 
     // The stream is Node.js incoming message object, process chunks
@@ -753,8 +754,11 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
               const str = parsed.choices[0].delta.content;
               fullJson += str;
 
-              // We're looking for the "speak": "..." part of the JSON to extract tokens
-              if (!isParsingSpeak) {
+              // We're looking for the "speak": "..." part of the JSON to extract tokens.
+              // Once speakDone is set, the value has been fully emitted — the trailing
+              // JSON ("action", "nextStep", …) must NOT re-trigger speak parsing, or the
+              // whole reply gets re-emitted (and spoken) repeatedly.
+              if (!isParsingSpeak && !speakDone) {
                 const match = fullJson.match(/"speak"\s*:\s*"/i);
                 if (match) {
                   isParsingSpeak = true;
@@ -762,12 +766,13 @@ async function* generateReplyStream({ callState, script, lastTranscript, custome
                   sentenceBuffer += speakSoFar;
                   extractedSpeak += speakSoFar;
                 }
-              } else {
+              } else if (isParsingSpeak) {
                 // Determine if we've hit the end of the "speak" value
                 // In JSON, values are delimited by a trailing quote not preceded by an escape.
                 const unescapedQuoteMatch = str.match(/(?<!\\)"/);
                 if (unescapedQuoteMatch) {
                   isParsingSpeak = false;
+                  speakDone = true;
                   const textContent = str.substring(0, unescapedQuoteMatch.index);
                   sentenceBuffer += textContent;
                   extractedSpeak += textContent;
