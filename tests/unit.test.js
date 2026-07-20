@@ -319,7 +319,9 @@ describe('Cost Control', () => {
 
     test('tracks calls correctly', () => {
         costControl.trackCall('test-1');
-        expect(costControl.getEstimatedCost('test-1')).toBe(0);
+        // Telephony cost accrues by elapsed time, so a freshly-tracked call has a
+        // near-zero (not exactly zero) cost. Assert it's effectively zero.
+        expect(costControl.getEstimatedCost('test-1')).toBeCloseTo(0, 3);
     });
 
     test('tokens increase cost', () => {
@@ -630,5 +632,57 @@ describe('XML Escape', () => {
         const malicious = '<script>alert("xss")</script>';
         const escaped = xmlEscape(malicious);
         expect(escaped).not.toContain('<script>');
+    });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 17. CONVERSATION FSM — entity extraction + progression
+// ══════════════════════════════════════════════════════════════════════════════
+describe('Conversation FSM', () => {
+    const { ConversationFSM, States } = require('../src/services/conversationFSM');
+    const mk = () => new ConversationFSM('t', 'outbound', 'en-IN', {});
+
+    describe('extractEntities', () => {
+        test('property type (BHK beats flat)', () => {
+            expect(mk().extractEntities('I want a 2BHK flat').propertyType).toBe('2BHK');
+            expect(mk().extractEntities('need a villa').propertyType).toBe('Villa');
+        });
+        test('budget with unit + numeric value', () => {
+            expect(mk().extractEntities('around 50 lakhs')).toMatchObject({ budget: '50 lakh', budgetValue: 5000000 });
+            expect(mk().extractEntities('40 to 50 lakh').budget).toBe('40-50 lakh');
+            expect(mk().extractEntities('1.5 crore').budgetValue).toBe(15000000);
+        });
+        test('location: city + locality', () => {
+            expect(mk().extractEntities('looking in Pune, Hinjewadi area').location).toBe('Pune, Hinjewadi');
+            expect(mk().extractEntities('somewhere in Noida').location).toBe('Noida');
+        });
+        test('site-visit timing vs buying timeline', () => {
+            expect(mk().extractEntities('Saturday morning works').siteVisitDate).toBe('Saturday Morning');
+            expect(mk().extractEntities('planning to buy in 3 months').timeline).toBe('3 Months');
+        });
+        test('empty transcript yields no entities', () => {
+            expect(mk().extractEntities('')).toEqual({});
+        });
+    });
+
+    describe('progression (no stuck-in-intro)', () => {
+        test('a user reply advances past the intro states', () => {
+            const f = mk(); // starts in INIT
+            f.processTranscript('yes I can talk');
+            expect(f.getState()).toBe(States.QUALIFYING_LEAD);
+            expect(f.leadData.availabilityConfirmed).toBe(true);
+        });
+        test('engagement without a bare "yes" still qualifies + captures data', () => {
+            const f = mk();
+            f.processTranscript('I want to buy a 2BHK in Pune for 50 lakhs');
+            expect(f.getState()).toBe(States.QUALIFYING_LEAD);
+            expect(f.leadData).toMatchObject({ propertyType: '2BHK', location: 'Pune', budget: '50 lakh' });
+        });
+        test('site-visit request routes to booking', () => {
+            const f = mk();
+            f.processTranscript('yes');
+            f.processTranscript('I would like to book a site visit');
+            expect(f.getState()).toBe(States.BOOKING_SITE_VISIT);
+        });
     });
 });
