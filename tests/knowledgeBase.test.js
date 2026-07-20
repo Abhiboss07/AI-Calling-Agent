@@ -4,14 +4,15 @@ const Campaign = require('../src/models/campaign.model');
 const Call = require('../src/models/call.model');
 const llm = require('../src/services/llm');
 const config = require('../src/config');
-const openai = require('../src/services/aiClient');
+const openai = require('../src/services/openaiClient');
 
 // Mock config to prevent side effects
 config.companyName = 'Default Company';
 config.agentName = 'Default Agent';
 
-// Mock AI client (works for both openai and gemini providers)
-jest.mock('../src/services/aiClient', () => ({
+// Mock the LLM client that llm.js actually calls (openaiClient is primary for
+// the default/no-modelPref path this test exercises).
+jest.mock('../src/services/openaiClient', () => ({
     chatCompletion: jest.fn()
 }));
 

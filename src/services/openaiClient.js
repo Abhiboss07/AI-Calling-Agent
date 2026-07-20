@@ -10,7 +10,11 @@ const sttBreaker = new CircuitBreaker({ failureThreshold: 5, resetTimeout: 60000
 const llmBreaker = new CircuitBreaker({ failureThreshold: 5, resetTimeout: 60000 });
 const ttsBreaker = new CircuitBreaker({ failureThreshold: 5, resetTimeout: 60000 });
 
-const OPENAI_BASE = 'https://api.openai.com';
+// Base URL is configurable so any OpenAI-compatible backend can be used for the
+// LLM (chat) calls — e.g. a local Ollama server (http://localhost:11434) or Groq
+// (https://api.groq.com/openai). Only /v1/chat/completions is exercised by the
+// active pipeline; STT/TTS go through Deepgram/Sarvam, not this client.
+const OPENAI_BASE = process.env.OPENAI_BASE_URL || 'https://api.openai.com';
 
 // Reusable axios instance with connection keep-alive for lower latency
 const apiClient = axios.create({
