@@ -43,6 +43,13 @@ const Transitions = {
       not_interested: States.CLOSING,
       confused: States.INTRODUCING,
       callback_request: States.BOOKING_SITE_VISIT,
+      // Engaging with specifics (asking price, sharing budget/location, etc.)
+      // implies the person is willing to talk → move straight into qualifying.
+      price_inquiry: States.QUALIFYING_LEAD,
+      budget_inquiry: States.QUALIFYING_LEAD,
+      location_inquiry: States.QUALIFYING_LEAD,
+      site_visit_request: States.BOOKING_SITE_VISIT,
+      objection: States.HANDLING_OBJECTION,
       user_speaking: States.LISTENING
     }
   },
@@ -55,6 +62,10 @@ const Transitions = {
       budget_inquiry: States.QUALIFYING_LEAD,
       objection: States.HANDLING_OBJECTION,
       not_interested: States.CLOSING,
+      callback_request: States.BOOKING_SITE_VISIT,
+      yes: States.QUALIFYING_LEAD,
+      // Generic on-topic answers keep qualifying instead of dead-ending in LISTENING.
+      continue_qualification: States.QUALIFYING_LEAD,
       user_speaking: States.LISTENING
     }
   },
@@ -267,9 +278,25 @@ class ConversationFSM {
 
   // Process transcript and determine next action
   processTranscript(transcript) {
+    // A user response means the intro/greeting has been delivered, so leave the
+    // transient INIT/INTRODUCING states before evaluating the intent — otherwise
+    // confirmation/qualification intents have no valid transition and the FSM
+    // gets stuck re-asking for availability. In live calls intro_complete fires
+    // after TTS playback, but on early barge-in (or in text/mock mode) it may
+    // not have, so we advance defensively here.
+    if (this.state === States.INIT) this.transition('call_answered');
+    if (this.state === States.INTRODUCING) this.transition('intro_complete');
+
     const classification = this.classifyIntent(transcript);
     this.lastIntent = classification.intent;
     this.intentConfidence = classification.confidence;
+
+    // Any substantive engagement (anything but an explicit no / not-interested /
+    // empty turn) confirms the person is willing to talk.
+    const engagedIntents = !['no', 'not_interested', 'end_call', 'silence', 'unknown'].includes(classification.intent);
+    if (engagedIntents) {
+      classification.leadData = { ...(classification.leadData || {}), availabilityConfirmed: true };
+    }
 
     // Map intent to event
     const intentToEvent = {
@@ -289,7 +316,7 @@ class ConversationFSM {
       'end_call': 'not_interested',
       'silence': 'user_speaking',
       'unknown': 'user_speaking',
-      'continue_qualification': 'user_speaking'
+      'continue_qualification': 'continue_qualification'
     };
 
     const event = intentToEvent[classification.intent] || 'user_speaking';
@@ -304,7 +331,19 @@ class ConversationFSM {
       });
     }
 
-    // If can't transition, stay in current state
+    // If we can't transition on the mapped event but the user is clearly engaged
+    // while qualifying, stay in QUALIFYING_LEAD rather than dead-ending.
+    if (engagedIntents && this.state === States.QUALIFYING_LEAD && this.canTransition('continue_qualification')) {
+      return this.transition('continue_qualification', {
+        leadData: classification.leadData,
+        transcript,
+        intent: classification.intent,
+        confidence: classification.confidence
+      });
+    }
+
+    // If still can't transition, at least persist any captured lead data.
+    if (classification.leadData) Object.assign(this.leadData, classification.leadData);
     return {
       success: false,
       state: this.state,
