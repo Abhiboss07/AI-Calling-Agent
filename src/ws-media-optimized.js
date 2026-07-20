@@ -577,10 +577,18 @@ async function prewarmCriticalGreetings() {
   logger.log('Prewarming complete', { greetings: greetings.length, replyPhrases: replyPhrases.length });
 }
 
-// Start prewarming immediately on module load
-prewarmCriticalGreetings();
-// Pre-cache filler phrases so Level 2 responses have zero synthesis latency
-fillerEngine.prewarm(tts, ['en-IN', 'hinglish', 'hi-IN', 'ta-IN', 'te-IN']).catch(() => {});
+// Start prewarming immediately on module load.
+// Can be disabled with DISABLE_STARTUP_PREWARM=true — the prewarm fires 100+
+// TTS syntheses at once, which (with a slow/timing-out TTS provider) congests
+// the event loop for ~80s and can starve the initial MongoDB connection. When
+// disabled, greetings/fillers synthesize lazily on first use instead.
+if (String(process.env.DISABLE_STARTUP_PREWARM).toLowerCase() !== 'true') {
+  prewarmCriticalGreetings();
+  // Pre-cache filler phrases so Level 2 responses have zero synthesis latency
+  fillerEngine.prewarm(tts, ['en-IN', 'hinglish', 'hi-IN', 'ta-IN', 'te-IN']).catch(() => {});
+} else {
+  logger.log('Startup TTS prewarm disabled (DISABLE_STARTUP_PREWARM=true) — synthesizing on demand');
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ENHANCED CALL SESSION WITH FSM
