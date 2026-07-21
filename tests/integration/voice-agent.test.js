@@ -19,7 +19,7 @@ describe('LLM voice agent', () => {
     expect(reply).toHaveProperty('speak');
     expect(reply).toHaveProperty('action');
     expect(reply.speak.length).toBeLessThan(200);
-  });
+  }, 20000);
 
   test('returns valid action enum', async () => {
     const reply = await llm.generateReply({
@@ -30,7 +30,7 @@ describe('LLM voice agent', () => {
     });
 
     expect(['continue', 'collect', 'hangup', 'escalate']).toContain(reply.action);
-  });
+  }, 20000);
 
   test('fallback to script on API error', async () => {
     const reply = await llm.generateReply({
@@ -42,7 +42,7 @@ describe('LLM voice agent', () => {
 
     expect(reply.action).toBeDefined();
     expect(reply.speak).toBeDefined();
-  });
+  }, 20000);
 });
 
 // Run live STT integration only with explicit opt-in because it needs external network + OpenAI.

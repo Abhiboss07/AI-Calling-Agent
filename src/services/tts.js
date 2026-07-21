@@ -10,11 +10,23 @@
  */
 
 const axios = require('axios');
+const https = require('https');
 const logger = require('../utils/logger');
 const metrics = require('./metrics');
 const costControl = require('./costControl');
 const config = require('../config');
 const { getLanguage } = require('../config/languages');
+
+// Reusable HTTPS keep-alive agent + axios instance. Without this every TTS call
+// pays a fresh TLS handshake (~3-7s cold), and since conversation turns are
+// seconds apart the socket goes cold between each turn. Keeping the connection
+// warm turns per-turn synthesis from seconds down to a few hundred ms.
+const sarvamAgent = new https.Agent({ keepAlive: true, maxSockets: 10, keepAliveMsecs: 30000 });
+const sarvamClient = axios.create({
+  baseURL: 'https://api.sarvam.ai',
+  httpsAgent: sarvamAgent,
+  headers: { 'Content-Type': 'application/json' }
+});
 
 // ── Sarvam Language & Speaker Mapping ────────────────────────────────────────
 // Valid model: bulbul:v2 (bulbul:v3-beta / bulbul:v3 also available)
@@ -152,8 +164,8 @@ async function callSarvamTTS(text, language) {
   const { code: targetLanguage, speaker } = getSarvamConfig(language);
   const timeout = Math.max(8000, text.length * 80);
 
-  const response = await axios.post(
-    'https://api.sarvam.ai/text-to-speech',
+  const response = await sarvamClient.post(
+    '/text-to-speech',
     {
       inputs: [text],
       target_language_code: targetLanguage,
@@ -166,10 +178,7 @@ async function callSarvamTTS(text, language) {
       model: 'bulbul:v2'
     },
     {
-      headers: {
-        'api-subscription-key': config.sarvamApiKey,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'api-subscription-key': config.sarvamApiKey },
       timeout
     }
   );

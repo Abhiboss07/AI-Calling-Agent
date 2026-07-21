@@ -43,6 +43,13 @@ const Transitions = {
       not_interested: States.CLOSING,
       confused: States.INTRODUCING,
       callback_request: States.BOOKING_SITE_VISIT,
+      // Engaging with specifics (asking price, sharing budget/location, etc.)
+      // implies the person is willing to talk → move straight into qualifying.
+      price_inquiry: States.QUALIFYING_LEAD,
+      budget_inquiry: States.QUALIFYING_LEAD,
+      location_inquiry: States.QUALIFYING_LEAD,
+      site_visit_request: States.BOOKING_SITE_VISIT,
+      objection: States.HANDLING_OBJECTION,
       user_speaking: States.LISTENING
     }
   },
@@ -55,6 +62,10 @@ const Transitions = {
       budget_inquiry: States.QUALIFYING_LEAD,
       objection: States.HANDLING_OBJECTION,
       not_interested: States.CLOSING,
+      callback_request: States.BOOKING_SITE_VISIT,
+      yes: States.QUALIFYING_LEAD,
+      // Generic on-topic answers keep qualifying instead of dead-ending in LISTENING.
+      continue_qualification: States.QUALIFYING_LEAD,
       user_speaking: States.LISTENING
     }
   },
@@ -124,6 +135,7 @@ class ConversationFSM {
       intent: null,
       propertyType: null,
       budget: null,
+      budgetValue: null,
       location: null,
       timeline: null,
       siteVisitDate: null,
@@ -265,11 +277,98 @@ class ConversationFSM {
     return { intent: 'unknown', confidence: 0.3 };
   }
 
+  // ── Entity extraction ───────────────────────────────────────────────────────
+  // Pull structured lead fields (budget / property type / location / timing) out
+  // of a raw transcript. Rule-based: fast, free, and deterministic. Returns a
+  // partial leadData object (only fields it is confident about).
+  extractEntities(transcript) {
+    const text  = String(transcript || '').trim();
+    if (!text) return {};
+    const lower = text.toLowerCase();
+    const out = {};
+
+    // Property type ---------------------------------------------------------
+    const bhk = lower.match(/\b([1-5])\s*[- ]?\s?(?:bhk|bedroom|bed)\b/);
+    if (bhk) out.propertyType = `${bhk[1]}BHK`;
+    else if (/\bstudio\b/.test(lower))                 out.propertyType = 'Studio';
+    else if (/\b(villa|bungalow|row\s?house)\b/.test(lower)) out.propertyType = 'Villa';
+    else if (/\bplot\b/.test(lower))                   out.propertyType = 'Plot';
+    else if (/\bpenthouse\b/.test(lower))              out.propertyType = 'Penthouse';
+    else if (/\b(shop|office|commercial)\b/.test(lower)) out.propertyType = 'Commercial';
+    else if (/\b(apartment|flat)\b/.test(lower))       out.propertyType = 'Apartment';
+
+    // Budget ----------------------------------------------------------------
+    // e.g. "50 lakhs", "40 to 50 lakh", "1.5 crore", "80 lac", "500k"
+    const b = lower.match(/(\d+(?:\.\d+)?)\s*(?:(?:to|-|–|and)\s*(\d+(?:\.\d+)?))?\s*(lakhs?|lacs?|crores?|cr|k|thousand)\b/);
+    if (b) {
+      const unit = b[3];
+      const disp = /cr/.test(unit) ? 'crore' : /lakh|lac/.test(unit) ? 'lakh' : 'k';
+      const mult = disp === 'crore' ? 1e7 : disp === 'lakh' ? 1e5 : 1e3;
+      out.budget = b[2]
+        ? (disp === 'k' ? `${b[1]}-${b[2]}k` : `${b[1]}-${b[2]} ${disp}`)
+        : (disp === 'k' ? `${b[1]}k` : `${b[1]} ${disp}`);
+      out.budgetValue = Math.round(parseFloat(b[2] || b[1]) * mult); // numeric rupees (max of range)
+    }
+
+    // Location --------------------------------------------------------------
+    const cities = ['navi mumbai','greater noida','new delhi','pune','mumbai','bombay','delhi','noida','gurgaon','gurugram','bangalore','bengaluru','hyderabad','chennai','kolkata','ahmedabad','jaipur','lucknow','indore','nagpur','surat','chandigarh','kochi','coimbatore','thane','ghaziabad','faridabad','mohali','goa'];
+    const parts = [];
+    for (const c of cities) {
+      if (new RegExp(`\\b${c}\\b`).test(lower) && !parts.some(p => p.toLowerCase() === c)) {
+        parts.push(c.replace(/\b\w/g, ch => ch.toUpperCase()));
+      }
+    }
+    // Localities: "<Name> area/sector/nagar/vihar/road/..." (preserve original case)
+    const localityRe = /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\s+(?:area|sector|nagar|vihar|enclave|colony|road|marg|puram|halli|extension|phase)\b/g;
+    let lm;
+    while ((lm = localityRe.exec(text)) !== null) {
+      const name = lm[1].trim();
+      if (!parts.some(p => p.toLowerCase() === name.toLowerCase())) parts.push(name);
+    }
+    if (parts.length) out.location = parts.join(', ');
+
+    // Timing: buying timeline vs. site-visit scheduling ---------------------
+    const timeline = lower.match(/\b(?:in\s+)?(\d+\s*(?:months?|weeks?|years?)|immediately|urgent(?:ly)?|asap|next month|next year|this year|within\s+\w+)\b/);
+    if (timeline) out.timeline = timeline[1].replace(/\b\w/g, c => c.toUpperCase());
+
+    const day  = lower.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/);
+    const rel  = lower.match(/\b(today|tomorrow|day after tomorrow|this weekend|next weekend|this week|next week|weekend)\b/);
+    const tod  = lower.match(/\b(morning|afternoon|evening|night)\b/);
+    const when = [rel && rel[1], day && day[1], tod && tod[1]].filter(Boolean);
+    if (when.length) out.siteVisitDate = when.map(p => p.replace(/\b\w/g, c => c.toUpperCase())).join(' ');
+
+    return out;
+  }
+
   // Process transcript and determine next action
   processTranscript(transcript) {
+    // A user response means the intro/greeting has been delivered, so leave the
+    // transient INIT/INTRODUCING states before evaluating the intent — otherwise
+    // confirmation/qualification intents have no valid transition and the FSM
+    // gets stuck re-asking for availability. In live calls intro_complete fires
+    // after TTS playback, but on early barge-in (or in text/mock mode) it may
+    // not have, so we advance defensively here.
+    if (this.state === States.INIT) this.transition('call_answered');
+    if (this.state === States.INTRODUCING) this.transition('intro_complete');
+
     const classification = this.classifyIntent(transcript);
     this.lastIntent = classification.intent;
     this.intentConfidence = classification.confidence;
+
+    // Extract structured entities (budget/property type/location/timing) and
+    // fold them into this turn's lead data so they persist even if the intent
+    // itself doesn't drive a state change.
+    const entities = this.extractEntities(transcript);
+    if (Object.keys(entities).length) {
+      classification.leadData = { ...(classification.leadData || {}), ...entities };
+    }
+
+    // Any substantive engagement (anything but an explicit no / not-interested /
+    // empty turn) confirms the person is willing to talk.
+    const engagedIntents = !['no', 'not_interested', 'end_call', 'silence', 'unknown'].includes(classification.intent);
+    if (engagedIntents) {
+      classification.leadData = { ...(classification.leadData || {}), availabilityConfirmed: true };
+    }
 
     // Map intent to event
     const intentToEvent = {
@@ -289,7 +388,7 @@ class ConversationFSM {
       'end_call': 'not_interested',
       'silence': 'user_speaking',
       'unknown': 'user_speaking',
-      'continue_qualification': 'user_speaking'
+      'continue_qualification': 'continue_qualification'
     };
 
     const event = intentToEvent[classification.intent] || 'user_speaking';
@@ -304,7 +403,19 @@ class ConversationFSM {
       });
     }
 
-    // If can't transition, stay in current state
+    // If we can't transition on the mapped event but the user is clearly engaged
+    // while qualifying, stay in QUALIFYING_LEAD rather than dead-ending.
+    if (engagedIntents && this.state === States.QUALIFYING_LEAD && this.canTransition('continue_qualification')) {
+      return this.transition('continue_qualification', {
+        leadData: classification.leadData,
+        transcript,
+        intent: classification.intent,
+        confidence: classification.confidence
+      });
+    }
+
+    // If still can't transition, at least persist any captured lead data.
+    if (classification.leadData) Object.assign(this.leadData, classification.leadData);
     return {
       success: false,
       state: this.state,
